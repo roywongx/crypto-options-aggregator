@@ -1,3 +1,17 @@
+const STRATEGY_PRESETS = {
+    "PUT": {
+        "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "label": "纯收租"},
+        "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "label": "标准平衡"},
+        "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "label": "折价接货"}
+    },
+    "CALL": {
+        "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "label": "保留上涨"},
+        "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "label": "标准备兑"},
+        "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "label": "强横盘"}
+    }
+};
+let _currentPreset = 'standard';
+
 /**
  * 期权监控面板 - 前端逻辑
  * 包含：实时扫描、倍投修复计算器、风险预警、滚仓建议
@@ -793,6 +807,97 @@ function getFieldName(field) {
 }
 
 // 大单风向标功能
+
+function applyPreset(presetName) {
+    _currentPreset = presetName;
+    const optType = document.getElementById('optionType').value;
+    const preset = STRATEGY_PRESETS[optType]?.[presetName];
+    if (!preset) return;
+    
+    document.getElementById('minDte').value = preset.min_dte;
+    document.getElementById('maxDte').value = preset.max_dte;
+    document.getElementById('maxDelta').value = preset.max_delta;
+    
+    // 更新按钮激活状态
+    ['Con', 'Std', 'Agg'].forEach(id => {
+        const btn = document.getElementById('preset' + id);
+        btn.classList.remove('ring-1', 'bg-blue-500/15', 'text-blue-300', 'ring-blue-500/30',
+            'bg-green-500/15', 'text-green-300', 'ring-green-500/30',
+            'bg-orange-500/15', 'text-orange-300', 'ring-orange-500/30');
+    });
+    
+    const activeBtn = document.getElementById('preset' + 
+        (presetName === 'conservative' ? 'Con' : presetName === 'standard' ? 'Std' : 'Agg'));
+    const colorMap = {conservative: 'green', standard: 'blue', aggressive: 'orange'};
+    const c = colorMap[presetName];
+    activeBtn.classList.add(`bg-${c}-500/15`, `text-${c}-300`, `ring-1`, `ring-${c}-500/30`);
+    
+    updateParamDisplay();
+}
+
+// 策略类型切换时自动应用当前预设的对应版本
+document.getElementById('optionType')?.addEventListener('change', function() {
+    applyPreset(_currentPreset);
+});
+
+// 增强版参数显示（含预设名称）
+function updateParamDisplay() {
+    const currency = document.getElementById('currencySelect')?.value || 'BTC';
+    const minDte = document.getElementById('minDte')?.value || '--';
+    const maxDte = document.getElementById('maxDte')?.value || '--';
+    const maxDelta = document.getElementById('maxDelta')?.value || '--';
+    const optType = document.getElementById('optionType')?.value || 'PUT';
+    const optLabel = optType === 'PUT' ? 'Sell Put' : 'Covered Call';
+    const presetLabel = {'conservative': '保守', 'standard': '标准', 'aggressive': '进取'}[_currentPreset] || '';
+    
+    const el = document.getElementById('currentParams');
+    if (el) {
+        el.textContent = `${currency} | DTE ${minDte}-${maxDte} | Δ≤${maxDelta} | ${optLabel} | ${presetLabel}`;
+    }
+}
+
+// 参数输入变化时更新显示
+['minDte', 'maxDte', 'maxDelta', 'currencySelect', 'optionType'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', updateParamDisplay);
+    document.getElementById(id)?.addEventListener('change', updateParamDisplay);
+});
+
+// DVOL自适应建议展示
+async function showDvolAdvice(currency) {
+    try {
+        const r = await fetch(`/api/dvol-advice?currency=${currency}`);
+        const data = await r.json();
+        if (data.error) return;
+        
+        const bar = document.getElementById('dvolAdviceBar');
+        const text = document.getElementById('dvolAdviceText');
+        const badge = document.getElementById('dvolAdjustBadge');
+        
+        if (!bar || !data.dvol_snapshot?.trend) return;
+        
+        const snap = data.dvol_snapshot;
+        const putAdvice = data.adapted_presets?.PUT_standard?.advice || [];
+        const level = data.adapted_presets?.PUT_standard?.adjustment_level || 'none';
+        
+        if (putAdvice.length > 0 || level !== 'none') {
+            bar.classList.remove('hidden');
+            text.textContent = putAdvice.join(' | ') || `${snap.trend || ''} DVOL ${snap.signal || ''}`;
+            
+            if (level === 'conservative') {
+                badge.textContent = '已收紧参数';
+                badge.className = 'ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300';
+            } else if (level === 'aggressive') {
+                badge.textContent = '已放宽参数';
+                badge.className = 'ml-auto text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-300';
+            } else {
+                badge.textContent = '';
+            }
+        } else {
+            bar.classList.add('hidden');
+        }
+    } catch(e) {}
+}
+
 async function loadStrikeDistribution() {
     try {
         const currency = document.getElementById('tradesCurrency').value;

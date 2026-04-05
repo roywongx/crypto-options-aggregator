@@ -5,6 +5,49 @@ import sys
 import concurrent.futures
 from datetime import datetime
 
+STRATEGY_PRESETS = {
+    "PUT": {
+        "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0, "label": "纯收租(高胜率)"},
+        "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0, "label": "标准平衡"},
+        "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0, "label": "折价接货"}
+    },
+    "CALL": {
+        "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0, "label": "保留上涨空间"},
+        "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0, "label": "标准备兑"},
+        "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0, "label": "强横盘预期"}
+    }
+}
+
+def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
+    """根据DVOL状态自适应调整扫描参数"""
+    pct_7d = (dvol_raw.get('iv_percentile_7d') or 50)
+    trend = dvol_raw.get('trend', '')
+    signal = dvol_raw.get('signal', '')
+    
+    adjusted = dict(params)
+    advice = []
+    
+    if isinstance(pct_7d, (int, float)):
+        if pct_7d >= 80:
+            adjusted['max_delta'] = round(adjusted['max_delta'] * 0.70, 2)
+            adjusted['min_apr'] = adjusted.get('min_apr', 15) + 5
+            advice.append("高波动环境: 自动收紧Delta，提高APR门槛")
+        elif pct_7d <= 20:
+            adjusted['max_delta'] = min(round(adjusted['max_delta'] * 1.20, 2), 0.60)
+            adjusted['min_apr'] = max(adjusted.get('min_apr', 15) - 5, 8)
+            advice.append("低波动环境: 权利金偏薄，适当放宽参数")
+    
+    if trend == '上涨' and params.get('option_type') == 'PUT':
+        advice.append("DVOL上升趋势+反弹阶段，适合Sell Put接货")
+    elif trend == '下跌':
+        if params.get('option_type') == 'CALL':
+            advice.append("市场下跌后反弹，Covered Call可锁定收益")
+        else:
+            advice.append("市场处于下跌阶段，建议降低仓位或观望")
+    
+    adjusted['_dvol_advice'] = advice
+    return adjusted
+
 # Fix Windows Unicode
 if sys.platform == 'win32':
     import io
@@ -74,7 +117,8 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
         'large_trades_count': len(trades_list),
         'large_trades_detail': trades_enriched,
         'contracts': combined[:20],
-        'contracts_count': len(combined)
+        'contracts_count': len(combined),
+        'strategy_presets': STRATEGY_PRESETS
     }
 
 def format_report(currency, dvol_data, trades_data, binance_data, deribit_data, json_output=False):
@@ -122,13 +166,15 @@ def format_report(currency, dvol_data, trades_data, binance_data, deribit_data, 
 def main():
     parser = argparse.ArgumentParser(description="Aggregator v4.0 - JSON Mode Support")
     parser.add_argument('--currency', default='BTC')
-    parser.add_argument('--max-delta', type=float, default=0.5)
-    parser.add_argument('--min-dte', type=int, default=3)
-    parser.add_argument('--max-dte', type=int, default=30)
+    parser.add_argument('--max-delta', type=float, default=0.3)
+    parser.add_argument('--min-dte', type=int, default=7)
+    parser.add_argument('--max-dte', type=int, default=45)
     parser.add_argument('--strike', type=float)
     parser.add_argument('--strike-range')
     parser.add_argument('--margin-ratio', type=float, default=0.2)
     parser.add_argument('--option-type', type=str, default='PUT', choices=['PUT', 'CALL'])
+    parser.add_argument('--preset', type=str, default=None, choices=['conservative', 'standard', 'aggressive'],
+                        help='Strategy preset: conservative/standard/aggressive')
     parser.add_argument('--json', action='store_true', help='Output JSON format for API integration')
     args = parser.parse_args()
 
@@ -172,7 +218,30 @@ def main():
 
         dvol_res, trades_res, bin_res, der_res = f_dvol.result(), f_trades.result(), f_bin.result(), f_der.result()
 
-    format_report(args.currency, dvol_res, trades_res, bin_res, der_res, json_output=args.json)
+    # 应用策略预设
+    preset_name = getattr(args, 'preset', None)
+    opt_type = args.option_type.upper()
+    if preset_name and preset_name in STRATEGY_PRESETS.get(opt_type, {}):
+        preset = STRATEGY_PRESETS[opt_type][preset_name]
+        args.max_delta = preset['max_delta']
+        args.min_dte = preset['min_dte']
+        args.max_dte = preset['max_dte']
+        args.margin_ratio = preset['margin_ratio']
+
+    report_data = format_report(args.currency, dvol_res, trades_res, bin_res, der_res, json_output=args.json)
+
+    # DVOL自适应提示
+    if not args.json and isinstance(dvol_res, dict) and 'dvol' in dvol_res:
+        dvol_raw = dvol_res.get('dvol', {})
+        params_for_adapt = {
+            'max_delta': args.max_delta, 'min_apr': 15,
+            'option_type': args.option_type
+        }
+        adapted = adapt_params_by_dvol(params_for_adapt, dvol_raw)
+        if adapted.get('_dvol_advice'):
+            print(f"\n[DVOL自适应建议] {' | '.join(adapted['_dvol_advice'])}")
+
+    return report_data
 
 if __name__ == "__main__":
     main()

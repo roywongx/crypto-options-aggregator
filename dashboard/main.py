@@ -303,14 +303,36 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     spot_price = get_spot_price_binance(params.currency)
     dvol_data = get_dvol_from_deribit(params.currency)
     
+    # 获取DVOL原始数据用于自适应调整
+    dvol_full = get_dvol_from_deribit(params.currency)
+    dvol_raw_for_adapt = {}
+    if isinstance(dvol_full, dict):
+        dvol_raw_for_adapt = dvol_full
+    
+    # 应用DVOL自适应参数调整
+    scan_params = {
+        "max_delta": params.max_delta,
+        "min_dte": params.min_dte,
+        "max_dte": params.max_dte,
+        "margin_ratio": params.margin_ratio,
+        "option_type": params.option_type,
+        "min_apr": 15.0
+    }
+    adapted = adapt_params_by_dvol(scan_params, dvol_raw_for_adapt)
+    
+    use_delta = adapted.get('max_delta', params.max_delta)
+    use_min_dte = adapted.get('min_dte', params.min_dte)
+    use_max_dte = adapted.get('max_dte', params.max_dte)
+    use_margin = adapted.get('margin_ratio', params.margin_ratio)
+    
     cmd = [
         sys.executable,
         str(base_dir / "options_aggregator.py"),
         "--currency", params.currency,
-        "--min-dte", str(params.min_dte),
-        "--max-dte", str(params.max_dte),
-        "--max-delta", str(params.max_delta),
-        "--margin-ratio", str(params.margin_ratio),
+        "--min-dte", str(use_min_dte),
+        "--max-dte", str(use_max_dte),
+        "--max-delta", str(use_delta),
+        "--margin-ratio", str(use_margin),
         "--option-type", params.option_type,
         "--json"
     ]
@@ -346,6 +368,15 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         
         # 保存到数据库
         save_scan_record(parsed)
+        
+        # 注入DVOL自适应信息
+        parsed['dvol_advice'] = adapted.get('_dvol_advice', [])
+        parsed['dvol_adjustment'] = adapted.get('_adjustment_level', 'none')
+        parsed['adapted_params'] = {
+            'max_delta': use_delta,
+            'min_dte': use_min_dte,
+            'max_dte': use_max_dte
+        }
         
         return parsed
         
@@ -700,6 +731,95 @@ async def get_strike_distribution(
     
     return distribution
 
+
+STRATEGY_PRESETS = {
+    "PUT": {
+        "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0, "label": "纯收租(高胜率)", "desc": "Delta≤0.20, DTE 30-45天, 胜率90%+, 适合纯收租"},
+        "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0, "label": "标准平衡", "desc": "Delta≤0.30, DTE 14-35天, 胜率75%+, 最常用配置"},
+        "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0, "label": "折价接货", "desc": "Delta≤0.40, DTE 7-28天, 愿意被行权接货"}
+    },
+    "CALL": {
+        "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0, "label": "保留上涨空间", "desc": "Delta≤0.30, DTE 30-45天, 低被行权概率"},
+        "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0, "label": "标准备兑", "desc": "Delta≤0.45, DTE 14-35天, 平衡收益与参与"},
+        "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0, "label": "强横盘预期", "desc": "Delta≤0.55, DTE 7-28天, 强横盘/愿被行权"}
+    }
+}
+
+def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
+    """DVOL自适应参数调整"""
+    pct_7d = dvol_raw.get('iv_percentile_7d') if isinstance(dvol_raw.get('iv_percentile_7d'), (int, float)) else 50
+    trend = dvol_raw.get('trend', '')
+    signal = dvol_raw.get('signal', '')
+    
+    adjusted = dict(params)
+    advice = []
+    adjustment_level = "none"
+    
+    if pct_7d >= 80:
+        adjusted['max_delta'] = round(adjusted.get('max_delta', 0.3) * 0.70, 2)
+        adjusted['min_apr'] = (adjusted.get('min_apr') or 15) + 5
+        advice.append("高波动环境: 自动收紧Delta至70%, APR门槛+5%")
+        adjustment_level = "conservative"
+    elif pct_7d <= 20:
+        adjusted['max_delta'] = min(round((adjusted.get('max_delta') or 0.3) * 1.20, 2), 0.60)
+        adj_apr = max((adjusted.get('min_apr') or 15) - 5, 8)
+        adjusted['min_apr'] = adj_apr
+        advice.append("低波动环境: 放宽Delta至120%, APR门槛-5%")
+        adjustment_level = "aggressive"
+    
+    if trend == '上涨':
+        advice.append("DVOL上升+反弹阶段，适合Sell Put接货")
+    elif trend == '下跌':
+        if params.get('option_type') == 'CALL':
+            advice.append("市场下跌后反弹，Covered Call可锁定收益")
+        else:
+            advice.append("市场处于下跌阶段，建议降低仓位或观望")
+    
+    adjusted['_dvol_advice'] = advice
+    adjusted['_adjustment_level'] = adjustment_level
+    return adjusted
+
+@app.get("/api/strategy-presets")
+async def get_strategy_presets():
+    """获取策略预设配置"""
+    return STRATEGY_PRESETS
+
+@app.get("/api/dvol-advice")
+async def get_dvol_advice(currency: str = "BTC"):
+    """获取基于当前DVOL的策略建议"""
+    try:
+        dvol_data = get_dvol_from_deribit(currency)
+        dvol_raw = {}
+        if isinstance(dvol_data, dict):
+            dvol_raw = dvol_data
+        
+        # 对每种预设计算自适应结果
+        result = {
+            "currency": currency,
+            "dvol_snapshot": {
+                "current": dvol_raw.get('current'),
+                "z_score": dvol_raw.get('z_score_7d'),
+                "percentile_7d": dvol_raw.get('iv_percentile_7d'),
+                "trend": dvol_raw.get('trend'),
+                "signal": dvol_raw.get('signal')
+            },
+            "adapted_presets": {}
+        }
+        
+        for opt_type in ["PUT", "CALL"]:
+            for preset_name, preset_vals in STRATEGY_PRESETS.get(opt_type, {}).items():
+                params = {**preset_vals, "option_type": opt_type}
+                adapted = adapt_params_by_dvol(params, dvol_raw)
+                result["adapted_presets"][f"{opt_type}_{preset_name}"] = {
+                    "original": preset_vals,
+                    "adapted": {k: v for k, v in adapted.items() if not k.startswith('_')},
+                    "advice": adapted.get('_dvol_advice', []),
+                    "adjustment_level": adapted.get('_adjustment_level', 'none')
+                }
+        
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/api/health")
 async def health_check():
