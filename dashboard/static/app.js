@@ -559,7 +559,7 @@ function updateLargeTrades(trades, count) {
 }
 
 function updateLastUpdateTime(timestamp) {
-    const parts=timestamp.split(/[- :]/);const date=new Date(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]);
+    const parts=timestamp.split(/[- :]/);const utcDate=new Date(Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]));const date=new Date(utcDate.getTime()+8*60*60*1000);
     const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
 }
