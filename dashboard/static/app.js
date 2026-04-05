@@ -559,7 +559,7 @@ function updateLargeTrades(trades, count) {
 }
 
 function updateLastUpdateTime(timestamp) {
-    const date = new Date(timestamp);
+    const parts=timestamp.split(/[- :]/);const date=new Date(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]);
     const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
 }
@@ -740,33 +740,4 @@ function getFieldName(field) {
         'loss_at_10pct': '-10%亏损'
     };
     return names[field] || field;
-}
-
-// 修复时区问题 - 覆盖原函数
-function updateLastUpdateTime(timestamp) {
-    // 将 '2026-04-05 16:40:18' 转换为 '2026-04-05T16:40:18'
-    const date = new Date(timestamp.replace(' ', 'T'));
-    const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
-}
-
-// 修复图表时区问题
-function parseLocalDate(timestamp) {
-    return new Date(timestamp.replace(' ', 'T'));
-}
-
-// 修复时区问题 - 正确解析为本地时间
-function updateLastUpdateTime(timestamp) {
-    // 手动解析日期字符串 parts = ['2026', '04', '05', '16', '40', '18']
-    const parts = timestamp.split(/[- :]/);
-    // 使用本地时间组件创建Date对象 (月份需要-1)
-    const date = new Date(parts[0], parts[1]-1, parts[2], parts[3], parts[4], parts[5]);
-    const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
-}
-
-// 修复图表时区问题
-function parseLocalDate(timestamp) {
-    const parts = timestamp.split(/[- :]/);
-    return new Date(parts[0], parts[1]-1, parts[2], parts[3], parts[4], parts[5]);
 }
