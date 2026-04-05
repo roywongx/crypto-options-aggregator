@@ -144,6 +144,10 @@ def init_database():
         cursor.execute("ALTER TABLE scan_records ADD COLUMN dvol_signal TEXT")
     if 'large_trades_details' not in columns:
         cursor.execute("ALTER TABLE scan_records ADD COLUMN large_trades_details TEXT")
+    if 'contracts_data' not in columns:
+        cursor.execute("ALTER TABLE scan_records ADD COLUMN contracts_data TEXT")
+    if 'raw_output' not in columns:
+        cursor.execute("ALTER TABLE scan_records ADD COLUMN raw_output TEXT")
     
     conn.commit()
     conn.close()
@@ -420,13 +424,14 @@ async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query
     cursor = conn.cursor()
     
     since = datetime.now() - timedelta(hours=hours)
+    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
     
     cursor.execute("""
         SELECT timestamp, contracts_data 
         FROM scan_records 
         WHERE currency = ? AND timestamp > ?
         ORDER BY timestamp ASC
-    """, (currency, since))
+    """, (currency, since_str))
     
     rows = cursor.fetchall()
     conn.close()
@@ -456,13 +461,14 @@ async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Quer
     cursor = conn.cursor()
     
     since = datetime.now() - timedelta(hours=hours)
+    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
     
     cursor.execute("""
         SELECT timestamp, dvol_current 
         FROM scan_records 
         WHERE currency = ? AND timestamp > ? AND dvol_current > 0
         ORDER BY timestamp ASC
-    """, (currency, since))
+    """, (currency, since_str))
     
     rows = cursor.fetchall()
     conn.close()

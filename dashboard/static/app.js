@@ -377,6 +377,10 @@ function updateOpportunitiesTable(contracts) {
         const deltaAbs = Math.abs(contract.delta);
         const vega = contract.vega || 0;
         
+        // 统一合约名称字段：Deribit使用instrument_name，Binance使用symbol
+        const symbol = contract.symbol || contract.instrument_name || 'N/A';
+        contract.symbol = symbol; // 确保后续使用统一
+        
         let riskClass = '';
         let riskBadge = '';
         let riskLevel = '';
@@ -412,7 +416,7 @@ function updateOpportunitiesTable(contracts) {
         }
         
         if (riskLevel === '极高' || riskLevel === '高') {
-            riskAlerts.push({ symbol: contract.symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
+            riskAlerts.push({ symbol: symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
         }
         
         return `<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition ${riskClass}" onclick="showRollSuggestion(${idx})" style="cursor: pointer;">
