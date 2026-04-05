@@ -1,169 +1,279 @@
-# Crypto Options Aggregator & Stress Tester
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.13+-blue?logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
+  <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
+  <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
+</p>
 
-A professional-grade, dual-platform (Binance + Deribit) crypto options scanner designed for aggressive Sell Put and Covered Call strategies.
+<h1 align="center">Crypto Options Aggregator</h1>
 
-This project was built upon the excellent foundation provided by [lianyanshe-ai/deribit-options-monitor](https://github.com/lianyanshe-ai/deribit-options-monitor). We extended the core logic to support Binance, advanced risk modeling, and a unified cross-platform view.
-
----
-
-## 🌐 Web Dashboard 网页监控面板
-
-除了命令行工具，本项目还提供了一个功能强大的 **Web 监控面板**，基于 FastAPI + 原生 JavaScript 构建，支持实时监控、风险预警和智能修复建议。
-
-### 网页版核心功能
-
-#### 1. 📊 实时监控大屏
-- **双平台数据聚合**：Binance + Deribit 实时合约数据
-- **宏观指标展示**：现货价格、DVOL 波动率指数、大宗交易监控
-- **APR 趋势图表**：支持 24H/7天/30天 历史趋势查看
-- **DVOL 趋势图表**：波动率变化趋势分析
-
-#### 2. 🔥 倍投修复计算器 (Recovery Calculator)
-当你遇到浮亏时，输入亏损金额，系统自动：
-- 扫描当前 IV 最高的远期合约
-- 基于目标年化收益率（默认 200%）计算修复方案
-- 推荐最优合约组合，显示所需保证金和预期净利润
-
-**使用方法**：在面板顶部输入浮亏金额 → 点击"计算修复方案"
-
-#### 3. ⚠️ 智能风险预警系统
-- **自动风险检测**：Delta > 0.45 或 价格接近行权价 2% 时自动标记
-- **闪烁红框提醒**：高风险合约行显示红色闪烁边框
-- **浏览器通知**：发现高风险时自动推送系统通知
-- **风险预警面板**：右侧集中展示所有高风险合约
-
-#### 4. 🔄 滚仓修复建议 (Rolling Alert)
-点击任意高风险合约行，弹出智能建议弹窗：
-- 显示当前持仓风险详情
-- 推荐更低行权价的远期合约作为替代
-- 计算预计亏损和替代方案收益
-- 一键获取"平仓+新开仓"操作建议
-
-#### 5. 📈 完整 Greeks 展示
-合约表格包含完整的 Greeks 数据：
-- **Delta**：方向风险
-- **Gamma**：加速度风险
-- **Vega**：波动率敏感度（高Vega用橙色高亮）
-- **APR**：年化收益率
-- **-10%亏损**：压力测试结果
-
-#### 6. ⚡ 异步后台扫描
-- **非阻塞扫描**：点击扫描后页面不卡顿
-- **自动刷新**：支持 5/10/30 分钟自动扫描
-- **静默守望模式**：后台自动监控，发现风险立即通知
+<p align="center">
+  <b>双平台加密期权扫描器 + 实时监控面板</b><br>
+  Binance (USDT本位) × Deribit (币本位) 联合分析<br>
+  面向 Sell Put / Covered Call 策略的专业工具
+</p>
 
 ---
 
-## 🚀 快速开始
+## ✨ 核心亮点
 
-### 安装
+| 能力 | 说明 |
+|------|------|
+| 🔄 **双平台聚合** | 同时扫描 Binance + Deribit，统一排序对比 |
+| 📊 **Margin-APR** | 基于保证金占用计算真实年化收益率（默认20%） |
+| ⚡ **DVOL 深度分析** | Z-Score、趋势方向、7d/24h分位、置信度、动态阈值 |
+| 🔍 **大宗异动监控** | 机构流向标签（保护性对冲/收权利金/Call追涨等8类） |
+| 💥 **压力测试** | Delta-Gamma 近似公式，估算 -10% 跌幅亏损 |
+| 🛡️ **风险预警** | 自动检测高风险合约，滚仓建议弹窗 |
+| 🧮 **倍投修复计算器** | 输入浮亏金额，自动推荐最优修复方案 |
+| 📈 **趋势图表** | APR/DVOL 历史 24H / 7天 / 30天 可视化 |
+
+---
+
+## 🖥️ Web 监控面板
+
+基于 FastAPI + 原生 JS 构建，开箱即用。
+
+### 启动方式
 
 ```bash
-git clone https://github.com/roywongx/crypto-options-aggregator.git
-cd crypto-options-aggregator
+# 安装依赖
 pip install -r requirements.txt
+pip install -r dashboard/requirements.txt
+
+# 启动面板
+cd dashboard && python main.py
+# 访问 http://localhost:8080
 ```
 
-### 启动 Web 面板
+### 功能全景
 
-```bash
-cd dashboard
-python -c "import main; import uvicorn; uvicorn.run(main.app, host='0.0.0.0', port=8080)"
-```
+#### 📊 实时监控大屏
+- **宏观指标卡片**：现货价格 / DVOL指数+信号 / 大宗交易数(1h) / 最佳APR
+- **合约列表**：14列数据，支持点击表头排序
+  - 平台 | 合约 | DTE | Strike | Delta | Gamma | Vega | **APR**
+  - 流动性评分 | **-10%亏损** | **盈亏平衡** | **OI** | **Spread%** | 风险状态
+- **自动刷新**：5/10/30 分钟可选，后台静默监控
 
-然后访问 http://localhost:8080
+#### 🔥 倍投修复计算器
+输入浮亏金额 → 系统自动筛选高 APR 合约 → 计算所需张数和预期净利润 → 推荐最优方案
+
+#### ⚠️ 三级风险预警系统
+- **Delta > 0.45** → 高风险红框闪烁 + 浏览器通知
+- **价格接近Strike 2%** → 中风险橙色标记
+- **点击合约行** → 弹出滚仓建议（推荐更低行权价远期替代）
+
+#### 🐋 大宗异动面板
+- 近1小时大单实时展示（标题 + 严重程度badge + 方向箭头）
+- **大单风向标**：Strike 分布柱状图（按买/卖方向着色）
+- 支持按币种(BTC/ETH/SOL)和时间范围(7/30/90天)筛选
+
+#### 📉 DVOL 分析面板
+- 当前值 + Z-Score + 信号等级（异常偏高/偏高/正常/偏低/异常偏低）
+- 趋势图表：24H / 7天 / 30天 切换
+
+#### 📊 统计信息
+- 总扫描次数 / 今日扫描数 / 大宗交易总数 / 数据库大小
 
 ---
 
-## 🛠️ 命令行工具使用
+## 🛠️ API 接口
 
-### 1. 统一扫描（默认）
-查找双平台最佳 Sell Put 机会，DTE 3-30天，Max Delta 0.5：
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/scan` | 执行期权扫描（异步非阻塞） |
+| `GET` | `/api/latest?currency=BTC` | 获取最新扫描结果 |
+| `GET` | `/api/stats` | 统计概览 |
+| `GET` | `/api/health` | **健康检查**（DB WAL模式 + 各API可达性） |
+| `POST` | `/api/recovery-calculate` | 倍投修复计算 |
+| `GET` | `/api/charts/apr?hours=168` | APR 趋势数据 |
+| `GET` | `/api/charts/dvol?hours=168` | DVOL 趋势数据 |
+| `GET` | `/api/trades/history?days=7` | 大宗交易历史（支持方向/来源/行权价筛选） |
+| `GET` | `/api/trades/strike-distribution?days=30` | Strike 分布数据 |
+
+### 扫描参数 (POST /api/scan)
+
+```json
+{
+  "currency": "BTC",
+  "min_dte": 14,
+  "max_dte": 25,
+  "max_delta": 0.4,
+  "margin_ratio": 0.2,
+  "option_type": "PUT",
+  "strike": null,
+  "strike_range": null
+}
+```
+
+### 返回数据结构（关键字段）
+
+```json
+{
+  "spot_price": 67327.33,
+  "dvol_current": 58.42,
+  "dvol_z_score": 0.35,
+  "dvol_signal": "正常区间",
+  "dvol_raw": {
+    "current_dvol": 58.42,
+    "z_score_7d": 0.35,
+    "trend": "震荡",
+    "confidence": 53.8,
+    "iv_percentile_24h": 45.2,
+    "iv_percentile_7d": 28.1,
+    "recommendation": "...",
+    "dynamic_thresholds": { ... }
+  },
+  "large_trades_count": 2,
+  "large_trades_details": [{ "type", "severity", "title", "message" }],
+  "large_trades_detail": [{ "instrument_name", "direction", "strike", "delta", "flow_label", "underlying_notional_usd" }],
+  "contracts": [{
+    "platform": "Deribit",
+    "symbol": "BTC-24APR26-65000-P",
+    "strike": 65000, "dte": 19,
+    "delta": -0.3505, "gamma": 0.00005, "vega": 56.37,
+    "mark_iv": 48.23, "apr": 271.81,
+    "breakeven": 63160.66, "open_interest": 2639.1, "spread_pct": 1.82,
+    "liquidity_score": 100, "loss_at_10pct": 3496.35
+  }]
+}
+```
+
+---
+
+## 🚀 CLI 使用
+
 ```bash
+# 默认扫描（DTE 3-30, Max Delta 0.5）
 python options_aggregator.py
-```
 
-### 2. JSON 模式（供 API 调用）
-输出结构化 JSON 数据：
-```bash
+# JSON 模式（供程序调用）
 python options_aggregator.py --json
-```
 
-### 3. 特定行权价压力测试
-卖出指定行权价的 Put 并查看 10% 跌幅压力测试：
-```bash
+# 特定行权价
 python options_aggregator.py --strike 64000
+
+# 行权价范围
+python options_aggregator.py --strike-range 60000-65000
+
+# 备兑看涨
+python options_aggregator.py --option-type CALL
+
+# 自定义参数
+python options_aggregator.py \
+  --currency ETH \
+  --min-dte 7 --max-dte 45 \
+  --max-delta 0.25 \
+  --margin-ratio 0.15 \
+  --option-type PUT \
+  --json
 ```
 
-### 4. 备兑看涨（现货生息）
-持有 BTC 时卖出看涨期权：
-```bash
-python options_aggregator.py --option-type CALL --strike 75000
-```
+### 全部参数
 
-### 高级参数
-- `--currency`: BTC, ETH, SOL, XRP, BNB, DOGE
-- `--min-dte` / `--max-dte`: 到期天数范围
-- `--max-delta`: 最大 Delta 过滤（默认 0.5）
-- `--strike-range`: 行权价范围（如 `60000-65000`）
-- `--margin-ratio`: 保证金比率（默认 0.2 = 20%）
-- `--json`: 输出 JSON 格式
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--currency` | BTC | BTC / ETH / SOL / XRP / BNB / DOGE |
+| `--min-dte` | 3 | 最小到期天数 |
+| `--max-dte` | 30 | 最大到期天数 |
+| `--max-delta` | 0.5 | 最大 Delta 绝对值 |
+| `--strike` | - | 特定行权价 |
+| `--strike-range` | - | 行权价范围（如 60000-65000）|
+| `--margin-ratio` | 0.2 | 保证金比率（SPAN约15-30%）|
+| `--option-type` | PUT | PUT / CALL |
+| `--json` | false | JSON 格式输出 |
 
 ---
 
-## ✨ 核心特性
-
-### 双平台整合
-- 合并 Deribit（币本位）和 Binance（U本位）数据
-- 统一排行榜，便于比较
-
-### 真实资本效率（Margin APR）
-使用保证金计算 APR：`Premium / (Strike * Margin_Ratio)`
-避免深度实值期权的高估问题
-
-### 风险压力测试
-实时计算 Gamma 和 Vega，评估现货价格突然下跌 10% 时的近似浮亏：
-```
-dPrice = Δ·dSpot + 0.5·Γ·dSpot²
-```
-
-### 宏观环境监控
-- Deribit 隐含波动率指数 (DVOL)
-- 近期机构大宗交易数据
-
----
-
-## 🏗️ 项目结构
+## 🏗️ 项目架构
 
 ```
 crypto-options-aggregator/
-├── dashboard/                 # Web 监控面板
-│   ├── main.py               # FastAPI 后端
+├── dashboard/                        # Web 监控面板 (FastAPI)
+│   ├── main.py                      # 后端 API + SQLite(WAL)
 │   ├── static/
-│   │   ├── index.html        # 前端页面
-│   │   └── app.js            # 前端逻辑
+│   │   ├── index.html               # 前端 (TailwindCSS + Chart.js)
+│   │   └── app.js                   # 前端逻辑 (排序/预警/图表)
 │   └── data/
-│       └── monitor.db        # SQLite 数据库
-├── deribit-options-monitor/   # Deribit API 模块
-├── options_aggregator.py      # 主聚合脚本
-├── binance_options.py         # Binance API 模块
-└── requirements.txt
+│       └── monitor.db               # SQLite (WAL模式, 90天自动清理)
+├── deribit-options-monitor/          # Deribit 引擎 (核心)
+│   ├── deribit_options_monitor.py   # DVOL/大宗/SellPut/报告生成
+│   └── SKILL.md                     # Skill 定义文档
+├── options_aggregator.py            # 双平台聚合入口
+├── binance_options.py               # Binance E-API 封装
+├── SKILL.md                         # 项目级 Skill 定义
+├── requirements.txt                 # 核心依赖
+└── dashboard/requirements.txt       # 面板额外依赖
+```
+
+### 数据流
+
+```
+[Deribit Monitor]                    [Binance Options]
+  DVOL 信号 (Z-Score/trend/conf/分位)   合约扫描 (Greeks/APR/OI/Spread)
+  大宗异动 (flow_label/severity/Greeks)
+       │                                      │
+       └──────────┬───────────────────────────┘
+                  ▼
+      [options_aggregator.py]  统一聚合 + 字段映射
+                  │
+                  ▼
+           [main.py] FastAPI 后端
+         ├─ 透传 dvol_raw (完整DVOL分析)
+         ├─ 透传 large_trades_detail (富化交易)
+         ├─ SQLite 存储 (WAL模式, 并发安全)
+         └─ REST API
+                  │
+        ┌─────────┼─────────┐
+        ▼         ▼         ▼
+   [index.html]  [app.js]  [Chart.js]
+   表格/面板     交互/排序   图表渲染
 ```
 
 ---
 
-## 🙏 致谢
+## 🧪 技术栈
 
-感谢原作者 **[lianyanshe-ai](https://github.com/lianyanshe-ai/deribit-options-monitor)** 提供的优秀 Deribit API 封装、Greeks 计算和 DVOL/大宗交易逻辑。坚实的架构基础使这些交易增强功能成为可能。
+| 层级 | 技术 |
+|------|------|
+| **后端** | Python 3.13+ / FastAPI / SQLite (WAL) |
+| **前端** | 原生 JavaScript / TailwindCSS CDN / Chart.js |
+| **数据源** | Deribit Public API / Binance E-API / Binance Spot API |
+| **并发** | ThreadPoolExecutor (4线程并行请求) |
+| **缓存** | Order Book TTL 60s / Instrument 解析缓存 |
+
+---
+
+## 📦 依赖安装
+
+```bash
+pip install -r requirements.txt
+# requests urllib3 pyyaml
+
+pip install -r dashboard/requirements.txt
+# fastapi uvicorn pydantic python-multipart
+```
+
+无需 Node.js / Webpack — 前端全部使用 CDN 引入。
 
 ---
 
 ## ⚠️ 免责声明
 
-期权交易风险极高。本工具仅供信息参考，不构成投资建议。压力测试计算为近似值，实际盈亏可能有所不同。请根据自身风险承受能力谨慎交易。
+> 期权交易有风险，本工具仅供信息参考，不构成投资建议。
+> Margin-APR 基于 20% 保证金估算。压力测试使用 Delta-Gamma 一阶近似，实际盈亏可能因波动率变化而偏离。
+> 请根据自身风险承受能力谨慎操作。
 
 ---
 
-## 📄 许可证
+## 🙏 致谢
 
-MIT License
+- [lianyanshe-ai/deribit-options-monitor](https://github.com/lianyanshe-ai/deribit-options-monitor) — Deribit API 封装、Greeks 计算、DVOL/大宗交易核心引擎
+- [Deribit](https://www.deribit.com/) — 公共 API 数据源
+- [Binance](https://www.binance.com/) — 期权与现货数据源
+
+---
+
+<p align="center">
+  <b>Made with coffee for crypto options traders</b>
+</p>
