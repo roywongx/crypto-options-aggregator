@@ -440,6 +440,11 @@ function updateOpportunitiesTable(contracts) {
             riskAlerts.push({ symbol: symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
         }
         
+        // 展开行变量（在主行模板前定义）
+        const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
+        const lossVal = Math.abs(contract.loss_at_10pct || 0);
+        const detailId = 'detail_' + idx;
+
         // 主行：11列紧凑数据
         let mainRow = `<tr id="row_${idx}" class="hover:bg-white/[0.03] transition ${riskClass}">
             <td class="py-2 px-1.5 text-center"><span class="${platformColor} text-[10px] font-bold">${contract.platform === 'Deribit' ? 'D' : 'B'}</span></td>
@@ -458,10 +463,6 @@ function updateOpportunitiesTable(contracts) {
                 </button>
             </td>
         </tr>`;
-        
-        // 展开行：完整 Greeks + 次要指标
-        const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
-        const lossVal = Math.abs(contract.loss_at_10pct || 0);
         
         let detailRow = `<tr id="${detailId}" class="hidden bg-black/20">
             <td colspan="12" class="px-3 py-2.5">
