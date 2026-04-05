@@ -19,7 +19,6 @@ STRATEGY_PRESETS = {
 }
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
-    """根据DVOL状态自适应调整扫描参数"""
     pct_7d = (dvol_raw.get('iv_percentile_7d') or 50)
     trend = dvol_raw.get('trend', '')
     signal = dvol_raw.get('signal', '')
@@ -48,7 +47,6 @@ def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
     adjusted['_dvol_advice'] = advice
     return adjusted
 
-# Fix Windows Unicode
 if sys.platform == 'win32':
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -63,10 +61,6 @@ def run_command(cmd):
         return {"error": str(e)}
 
 def simulate_loss(item, drop_pct, spot_price):
-    """
-    Stress Test: Approximate loss if Spot drops by drop_pct.
-    Formula: dPrice = (Delta * dSpot) + (0.5 * Gamma * (dSpot)^2)
-    """
     try:
         dSpot = - (spot_price * drop_pct / 100)
         delta = float(item.get('delta', 0))
@@ -76,13 +70,62 @@ def simulate_loss(item, drop_pct, spot_price):
     except:
         return 0
 
+def validate_contract(item):
+    """校验单个合约数据合理性，返回 (is_valid, warnings)"""
+    warnings = []
+    
+    iv = item.get('mark_iv', item.get('iv', 0))
+    if iv == 0:
+        warnings.append("IV=0")
+    elif iv > 2.0:
+        warnings.append(f"IV异常偏高({iv})")
+    elif iv < 0.01 and iv > 0:
+        warnings.append(f"IV异常偏低({iv})")
+    
+    oi = item.get('open_interest', item.get('oi', 0))
+    if oi <= 0:
+        warnings.append(f"OI<=0({oi})")
+    
+    delta = item.get('delta', 0)
+    if abs(delta) > 1.01:
+        warnings.append(f"Delta越界({delta})")
+    
+    premium = item.get('premium_usd', item.get('premium_usdt', 0))
+    if premium <= 0:
+        warnings.append(f"Premium<=0({premium})")
+    
+    is_valid = len(warnings) == 0 or not any(
+        w.startswith(("IV=0", "OI<=0", "Premium<=0", "Delta越界", "IV异常"))
+        for w in warnings
+    )
+    return is_valid, warnings
+
+def extract_spot_price(binance_data, deribit_data):
+    """从数据中动态提取现价，不再硬编码"""
+    # 优先从 Deribit 取（更可靠）
+    if isinstance(deribit_data, dict) and 'contracts' in deribit_data:
+        for c in deribit_data['contracts']:
+            up = c.get('underlying_price', 0)
+            if up > 0:
+                return up
+    
+    # 其次尝试从 Binance 数据推算
+    if isinstance(binance_data, list) and len(binance_data) > 0:
+        for c in binance_data[:5]:
+            premium = c.get('premium_usdt', 0)
+            apr = c.get('apr', 0)
+            strike = c.get('strike', 0)
+            dte = c.get('dte', 1)
+            if premium > 0 and apr > 0 and strike > 0:
+                margin_ratio = 0.2
+                estimated_spot = (premium / (apr / 100)) * (365 / dte) / margin_ratio
+                if estimated_spot > 10000:
+                    return round(estimated_spot, 0)
+    
+    return 0
+
 def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_data):
-    """Build report data structure for JSON output"""
-    spot_price = 0
-    if isinstance(deribit_data, dict) and 'contracts' in deribit_data and len(deribit_data['contracts']) > 0:
-        spot_price = deribit_data['contracts'][0].get('underlying_price', 0)
-    elif isinstance(binance_data, list) and len(binance_data) > 0:
-        spot_price = 67200
+    spot_price = extract_spot_price(binance_data, deribit_data)
 
     dvol_info = dvol_data.get('dvol', {}) if isinstance(dvol_data, dict) else {}
     dvol_raw = dvol_data if isinstance(dvol_data, dict) else {}
@@ -90,6 +133,8 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
     trades_enriched = trades_data.get('trades', []) if isinstance(trades_data, dict) else []
     
     combined = []
+    validation_warnings = []
+
     if isinstance(binance_data, list):
         for item in binance_data:
             item['platform'] = 'Binance'
@@ -98,12 +143,29 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
                 item['open_interest'] = item['oi']
             if 'premium_usd' not in item and 'premium_usdt' in item:
                 item['premium_usd'] = item['premium_usdt']
-            combined.append(item)
+            
+            is_valid, warnings = validate_contract(item)
+            if not is_valid:
+                sym = item.get('symbol', '?')
+                validation_warnings.append(f"Binance {sym}: {', '.join(warnings)}")
+            else:
+                combined.append(item)
+
     if isinstance(deribit_data, dict) and 'contracts' in deribit_data:
         for item in deribit_data['contracts']:
             item['platform'] = 'Deribit'
             item['loss_at_10pct'] = simulate_loss(item, 10.0, spot_price)
-            combined.append(item)
+            if 'open_interest' not in item and 'oi' in item:
+                item['open_interest'] = item['oi']
+            if 'premium_usd' not in item and 'premium_usdt' in item:
+                item['premium_usd'] = item.get('premium_usdt', item.get('premium_usd', 0))
+            
+            is_valid, warnings = validate_contract(item)
+            if not is_valid:
+                sym = item.get('instrument_name', item.get('symbol', '?'))
+                validation_warnings.append(f"Deribit {sym}: {', '.join(warnings)}")
+            else:
+                combined.append(item)
     
     combined.sort(key=lambda x: (x.get('liquidity_score', 0), x.get('apr', 0)), reverse=True)
     
@@ -118,7 +180,8 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
         'large_trades_detail': trades_enriched,
         'contracts': combined[:20],
         'contracts_count': len(combined),
-        'strategy_presets': STRATEGY_PRESETS
+        'strategy_presets': STRATEGY_PRESETS,
+        'validation_warnings': validation_warnings
     }
 
 def format_report(currency, dvol_data, trades_data, binance_data, deribit_data, json_output=False):
@@ -144,6 +207,12 @@ def format_report(currency, dvol_data, trades_data, binance_data, deribit_data, 
         for t in trades_list[:2]:
             print(f"   - {t.get('title')}: {t.get('message')}")
 
+    warnings = report_data.get('validation_warnings', [])
+    if warnings:
+        print(f"\n⚠️ 【数据校验警告】 {len(warnings)} 条:")
+        for w in warnings[:5]:
+            print(f"   - {w}")
+
     print("-" * 145)
     header = f"{'平台':<8} {'合约':<22} {'DTE':<5} {'Strike':<8} {'Delta':<8} {'Gamma':<10} {'Margin-APR':<12} {'Liq分'} | {'-10%亏损(Est)'}"
     print(header)
@@ -159,12 +228,12 @@ def format_report(currency, dvol_data, trades_data, binance_data, deribit_data, 
         print(f"{platform:<8} {name:<22} {dte:<5.1f} {strike:<8.0f} {delta:<8.4f} {gamma:<10.6f} {apr:<11.2f}% {liq:<6.0f} | -${loss_at_10:<12.0f}")
 
     print("="*145)
-    print("注：APR基于20%保证金测算。亏损基于 Delta/Gamma 近似。")
+    print(f"注：APR基于20%保证金测算。亏损基于 Delta/Gamma 近似。现价: ${spot_price:,.0f}")
     print("="*145 + "\n")
     return report_data
 
 def main():
-    parser = argparse.ArgumentParser(description="Aggregator v4.0 - JSON Mode Support")
+    parser = argparse.ArgumentParser(description="Aggregator v4.1 - Dynamic Spot + Data Validation")
     parser.add_argument('--currency', default='BTC')
     parser.add_argument('--max-delta', type=float, default=0.3)
     parser.add_argument('--min-dte', type=int, default=7)
@@ -218,7 +287,6 @@ def main():
 
         dvol_res, trades_res, bin_res, der_res = f_dvol.result(), f_trades.result(), f_bin.result(), f_der.result()
 
-    # 应用策略预设
     preset_name = getattr(args, 'preset', None)
     opt_type = args.option_type.upper()
     if preset_name and preset_name in STRATEGY_PRESETS.get(opt_type, {}):
@@ -230,7 +298,6 @@ def main():
 
     report_data = format_report(args.currency, dvol_res, trades_res, bin_res, der_res, json_output=args.json)
 
-    # DVOL自适应提示
     if not args.json and isinstance(dvol_res, dict) and 'dvol' in dvol_res:
         dvol_raw = dvol_res.get('dvol', {})
         params_for_adapt = {
