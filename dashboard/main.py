@@ -154,10 +154,10 @@ def init_database():
 
 
 def save_scan_record(data: Dict[str, Any]):
-    """保存扫描记录到数据库"""
+    """保存扫描记录到数据库，并清理超过3个月（90天）的旧数据"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     cursor.execute("""
         INSERT INTO scan_records 
         (currency, spot_price, dvol_current, dvol_z_score, dvol_signal, 
@@ -174,10 +174,15 @@ def save_scan_record(data: Dict[str, Any]):
         json.dumps(data.get('contracts', []), ensure_ascii=False),
         data.get('raw_output', '')
     ))
-    
+
+    # 执行清理：删除90天之前的记录
+    cursor.execute("""
+        DELETE FROM scan_records
+        WHERE timestamp < datetime('now', '-90 days')
+    """)
+
     conn.commit()
     conn.close()
-
 
 def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     """执行期权扫描 - 使用JSON模式"""
