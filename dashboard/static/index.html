@@ -148,7 +148,7 @@
                     </div>
                     <div id="recommendedPlan" class="recovery-result bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-xl p-4 mb-4"></div>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
+                        <div class="overflow-x-auto"><table class="w-full text-[13px]">
                             <thead>
                                 <tr class="text-gray-400 border-b border-gray-700/50 text-xs">
                                     <th class="text-left py-2 px-2 font-medium">排名</th>
@@ -165,6 +165,7 @@
                             </thead>
                             <tbody id="recoveryPlansTable" class="text-sm"></tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -261,25 +262,25 @@
                         </div>
                     </div>
                     <div class="overflow-hidden rounded-lg border border-gray-700/50">
-                        <table class="w-full text-sm" style="table-layout: fixed;">
+                        <div class="overflow-x-auto"><table class="w-full text-[13px]">
                             <thead>
                                 <tr class="bg-gray-800/60 text-gray-300 text-[11px] uppercase tracking-wider" id="tableHeaders">
                                     <th class="text-left py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[42px]" onclick="sortContracts('platform')" data-sort="platform">平台</th>
                                     <th class="text-left py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('symbol')" data-sort="symbol">合约</th>
                                     <th class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[38px]" onclick="sortContracts('dte')" data-sort="dte">DTE</th>
                                     <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[62px]" onclick="sortContracts('strike')" data-sort="strike">Strike</th>
-                                    <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[46px]" onclick="sortContracts('delta')" data-sort="delta">Δ</th>
-                                    <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[48px]" onclick="sortContracts('gamma')" data-sort="gamma">Γ</th>
+                                    <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[46px]" onclick="sortContracts('delta')" data-sort="delta">Delta</th>
+                                    <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[48px]" onclick="sortContracts('gamma')" data-sort="gamma">Gamma</th>
                                     <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[44px]" onclick="sortContracts('vega')" data-sort="vega">Vega</th>
                                     <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[52px]" onclick="sortContracts('apr')" data-sort="apr">APR</th>
-                                    <th class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[44px]" onclick="sortContracts('liquidity_score')" data-sort="liquidity_score">Liq</th>
-                                    <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[64px]" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏</th>
+                                    <th class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[44px]" onclick="sortContracts('liquidity_score')" data-sort="liquidity_score">流动性</th>
+                                    <th class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[64px]" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏损</th>
                                     <th class="text-center py-2 px-1 font-semibold w-[28px]"></th>
                                 </tr>
                             </thead>
                             <tbody id="opportunitiesTable" class="text-[13px] divide-y divide-gray-800/40">
                                 <tr>
-                                    <td colspan="12" class="text-center py-12 text-gray-500">
+                                    <td colspan="11" class="text-center py-12 text-gray-500">
                                         <div class="flex flex-col items-center gap-3">
                                             <i class="fas fa-search text-3xl text-gray-600"></i>
                                             <p>点击"立即扫描"获取期权数据</p>
@@ -288,6 +289,7 @@
                                 </tr>
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
             </div>
