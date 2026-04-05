@@ -741,78 +741,16 @@ function getFieldName(field) {
     };
     return names[field] || field;
 }
+
+// 修复时区问题 - 覆盖原函数
 function updateLastUpdateTime(timestamp) {
-    // 将数据库时间字符串解析为本地时间
-    const date = new Date(timestamp.replace(' ', 'T') + ':00');
+    // 将 '2026-04-05 16:40:18' 转换为 '2026-04-05T16:40:18'
+    const date = new Date(timestamp.replace(' ', 'T'));
     const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
 }
-// 修复时区问题的辅助函数
+
+// 修复图表时区问题
 function parseLocalDate(timestamp) {
-    return new Date(timestamp.replace(' ', 'T') + ':00');
-}
-
-// 修复APR图表时区问题
-const originalLoadAprChartData = loadAprChartData;
-loadAprChartData = async function() {
-    try {
-        const currency = document.getElementById('currencySelect').value;
-        const hours = chartPeriods.apr;
-        const response = await fetch(`${API_BASE}/api/charts/apr?currency=${currency}&hours=${hours}`);
-        const data = await response.json();
-        
-        if (!data || data.length === 0) {
-            aprChart.data.labels = [];
-            aprChart.data.datasets[0].data = [];
-            aprChart.data.datasets[1].data = [];
-            aprChart.update();
-            return;
-        }
-        
-        aprChart.data.labels = data.map(d => {
-            const date = parseLocalDate(d.timestamp);
-            return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
-        });
-        aprChart.data.datasets[0].data = data.map(d => d.max_apr);
-        aprChart.data.datasets[1].data = data.map(d => d.avg_apr);
-        aprChart.update();
-    } catch (error) {
-        console.error('加载APR图表失败:', error);
-    }
-};
-
-// 修复DVOL图表时区问题
-const originalLoadDvolChartData = loadDvolChartData;
-loadDvolChartData = async function() {
-    try {
-        const currency = document.getElementById('currencySelect').value;
-        const hours = chartPeriods.dvol;
-        const response = await fetch(`${API_BASE}/api/charts/dvol?currency=${currency}&hours=${hours}`);
-        const data = await response.json();
-        
-        if (!data || data.length === 0) {
-            dvolChart.data.labels = [];
-            dvolChart.data.datasets[0].data = [];
-            dvolChart.update();
-            return;
-        }
-        
-        dvolChart.data.labels = data.map(d => {
-            const date = parseLocalDate(d.timestamp);
-            return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
-        });
-        dvolChart.data.datasets[0].data = data.map(d => d.dvol);
-        dvolChart.update();
-    } catch (error) {
-        console.error('加载DVOL图表失败:', error);
-    }
-};
-
-
-// 修复时区问题 - 重新定义updateLastUpdateTime
-const originalUpdateLastUpdateTime = updateLastUpdateTime;
-function updateLastUpdateTime(timestamp) {
-    const date = new Date(timestamp.replace(' ', 'T') + ':00');
-    const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
+    return new Date(timestamp.replace(' ', 'T'));
 }
