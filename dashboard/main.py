@@ -326,10 +326,12 @@ async def root():
     return HTMLResponse(content=html_path.read_text(encoding='utf-8'))
 
 
+from fastapi.concurrency import run_in_threadpool
+
 @app.post("/api/scan")
 async def scan_options(params: ScanParams):
-    """执行期权扫描"""
-    result = run_options_scan(params)
+    """执行期权扫描 (异步无阻塞)"""
+    result = await run_in_threadpool(run_options_scan, params)
     if not result.get('success'):
         raise HTTPException(status_code=500, detail=result.get('error', '扫描失败'))
     return result
