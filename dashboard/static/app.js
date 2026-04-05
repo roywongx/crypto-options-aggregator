@@ -660,3 +660,83 @@ setTimeout(addDemoAlerts, 1000);
 document.getElementById('rollModal').addEventListener('click', (e) => {
     if (e.target.id === 'rollModal') closeRollModal();
 });
+
+// 排序功能
+let currentSort = { field: null, direction: 'desc' };
+
+function sortContracts(field) {
+    if (!currentData || !currentData.contracts || currentData.contracts.length === 0) return;
+    
+    // 切换排序方向
+    if (currentSort.field === field) {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSort.field = field;
+        currentSort.direction = 'desc'; // 默认降序
+    }
+    
+    // 更新表头图标
+    updateSortIcons(field, currentSort.direction);
+    
+    // 排序数据
+    const sortedContracts = [...currentData.contracts].sort((a, b) => {
+        let valA = a[field];
+        let valB = b[field];
+        
+        // 处理特殊字段
+        if (field === 'delta') {
+            valA = Math.abs(valA);
+            valB = Math.abs(valB);
+        }
+        
+        // 处理字符串排序
+        if (typeof valA === 'string') {
+            valA = valA.toLowerCase();
+            valB = valB.toLowerCase();
+        }
+        
+        if (valA === undefined || valA === null) valA = 0;
+        if (valB === undefined || valB === null) valB = 0;
+        
+        if (currentSort.direction === 'asc') {
+            return valA > valB ? 1 : valA < valB ? -1 : 0;
+        } else {
+            return valA < valB ? 1 : valA > valB ? -1 : 0;
+        }
+    });
+    
+    // 更新表格
+    updateOpportunitiesTable(sortedContracts);
+    
+    showAlert(`已按 ${getFieldName(field)} ${currentSort.direction === 'asc' ? '升序' : '降序'} 排序`, 'info');
+}
+
+function updateSortIcons(activeField, direction) {
+    document.querySelectorAll('#tableHeaders th[data-sort]').forEach(th => {
+        const icon = th.querySelector('.sort-icon');
+        if (!icon) return;
+        
+        const field = th.dataset.sort;
+        if (field === activeField) {
+            icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} text-xs text-orange-400`;
+        } else {
+            icon.className = 'fas fa-sort text-xs opacity-50';
+        }
+    });
+}
+
+function getFieldName(field) {
+    const names = {
+        'platform': '平台',
+        'symbol': '合约',
+        'dte': 'DTE',
+        'strike': 'Strike',
+        'delta': 'Delta',
+        'gamma': 'Gamma',
+        'vega': 'Vega',
+        'apr': 'APR',
+        'liquidity_score': '流动性',
+        'loss_at_10pct': '-10%亏损'
+    };
+    return names[field] || field;
+}
