@@ -992,6 +992,11 @@ class DeribitOptionsMonitor:
             if apr < min_apr:
                 continue
 
+            if option_type.upper() == "PUT":
+                breakeven_calc = item["strike"] - premium_usd
+            else:
+                breakeven_calc = item["strike"] + premium_usd
+
             pick = {
                 "instrument_name": item["instrument_name"],
                 "strike": round(item["strike"], 2),
@@ -1007,7 +1012,7 @@ class DeribitOptionsMonitor:
                 "premium_usd": round(premium_usd, 2),
                 "apr": round(apr, 2),
                 "trad_apr_ref": round(trad_apr, 2),
-                "breakeven": round(item["strike"] - premium_usd, 2),
+                "breakeven": round(breakeven_calc, 2),
                 "risk_emoji": self._risk_emoji(abs(delta)),
                 "open_interest": round(open_interest, 2),
                 "spread_pct": item.get("spread_pct", 0),
