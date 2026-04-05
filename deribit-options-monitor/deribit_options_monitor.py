@@ -784,7 +784,7 @@ class DeribitOptionsMonitor:
             delta = float(greeks.get("delta") or 0.0)
             gamma = float(greeks.get("gamma") or 0.0)
             vega = float(greeks.get("vega") or 0.0)
-            mark_iv = float(book.get("mark_iv") or trade.get("iv") or 0.0)
+            mark_iv = float(book.get("mark_iv") or trade.get("iv") or 0.0) / 100.0
             premium_usd = float(trade["price"]) * float(trade["amount"]) * float(trade["index_price"])
 
             # 改进流向标签逻辑，区分 Put 和 Call
@@ -956,7 +956,7 @@ class DeribitOptionsMonitor:
             delta = float(greeks.get("delta") or 0.0)
             mark_price = float(book.get("mark_price") or 0.0)
             underlying_price = float(book.get("underlying_price") or 0.0)
-            mark_iv = float(book.get("mark_iv") or 0.0)
+            mark_iv = float(book.get("mark_iv") or 0.0) / 100.0
             open_interest = float(book.get("open_interest") or 0.0)
 
             if mark_price <= 0 or underlying_price <= 0 or open_interest <= 0:
