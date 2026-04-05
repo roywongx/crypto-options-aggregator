@@ -374,13 +374,15 @@ function updateMacroIndicators(data) {
     }
 }
 
+let _expandedRow = null;
+
 function updateOpportunitiesTable(contracts) {
     const tbody = document.getElementById('opportunitiesTable');
     const countEl = document.getElementById('contractCount');
     countEl.textContent = `${contracts.length} 个合约`;
     
     if (contracts.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
         updateRiskAlerts([]);
         return;
     }
@@ -438,22 +440,47 @@ function updateOpportunitiesTable(contracts) {
             riskAlerts.push({ symbol: symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
         }
         
-        return `<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition ${riskClass}" onclick="showRollSuggestion(${idx})" style="cursor: pointer;">
-            <td class="py-3 px-2"><span class="${platformColor} ${platformBg} px-2 py-1 rounded text-xs font-medium">${contract.platform}</span></td>
-            <td class="py-3 px-2 font-mono text-xs">${contract.symbol}</td>
-            <td class="py-3 px-2 text-center">${contract.dte.toFixed(1)}</td>
-            <td class="py-3 px-2 text-right font-mono">${Math.round(contract.strike).toLocaleString()}</td>
-            <td class="py-3 px-2 text-right font-mono ${deltaAbs > 0.35 ? 'text-red-400 font-semibold' : ''}">${contract.delta.toFixed(3)}</td>
-            <td class="py-3 px-2 text-right font-mono">${contract.gamma ? contract.gamma.toFixed(6) : '-'}</td>
-            <td class="py-3 px-2 text-right font-mono ${vega > 50 ? 'vega-high' : ''}">${vega > 0 ? vega.toFixed(2) : '-'}</td>
-            <td class="py-3 px-2 text-right font-mono"><span class="text-green-400 font-semibold">${contract.apr.toFixed(1)}%</span></td>
-            <td class="py-3 px-2 text-center"><span class="${liqColor} ${liqBg} px-2 py-1 rounded text-xs font-medium">${contract.liquidity_score}</span></td>
-            <td class="py-3 px-2 text-right font-mono text-red-400/80">-$${Math.abs(contract.loss_at_10pct || 0).toLocaleString()}</td>
-            <td class="py-3 px-2 text-right font-mono text-blue-300/80">$${(contract.breakeven || 0).toLocaleString()}</td>
-            <td class="py-3 px-2 text-right font-mono text-gray-300">${(contract.open_interest || 0).toLocaleString()}</td>
-            <td class="py-3 px-2 text-right font-mono ${contract.spread_pct > 5 ? 'text-orange-400' : 'text-gray-400'}">${(contract.spread_pct || 0).toFixed(1)}%</td>
-            <td class="py-3 px-2 text-center">${riskBadge}</td>
+        const rowId = `row_${idx}`;
+        const detailId = `detail_${idx}`;
+        
+        // 主行：8列核心数据
+        let mainRow = `<tr class="hover:bg-white/[0.03] transition ${riskClass}" data-idx="${idx}">
+            <td class="py-2.5 px-3"><span class="${platformColor} ${platformBg} px-1.5 py-0.5 rounded-[4px] text-[11px] font-semibold tracking-wide">${contract.platform}</span></td>
+            <td class="py-2.5 px-3">
+                <div class="font-mono text-xs truncate max-w-[140px]" title="${symbol}">${symbol.replace('BTC-', '').replace('USDT', '')}</div>
+                <div class="text-[10px] text-gray-500 mt-0.5">${Math.round(contract.strike).toLocaleString()} strike</div>
+            </td>
+            <td class="py-2.5 px-2 text-center"><span class="text-xs tabular-nums">${contract.dte.toFixed(0)}d</span></td>
+            <td class="py-2.5 px-2 text-right"><span class="font-mono text-sm tabular-nums">${Math.round(contract.strike).toLocaleString()}</span></td>
+            <td class="py-2.5 px-2 text-right"><span class="font-mono text-sm tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${contract.delta >= 0 ? '' : ''}${deltaAbs.toFixed(2)}</span></td>
+            <td class="py-2.5 px-2 text-right"><span class="font-mono text-sm font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}<span class="text-[10px] text-green-500/60">%</span></span></td>
+            <td class="py-2.5 px-2 text-center">${riskBadge}</td>
+            <td class="py-2.5 px-1 text-center">
+                <button onclick="event.stopPropagation();toggleDetail('${rowId}','${detailId}')" class="w-6 h-6 rounded-full hover:bg-gray-700 inline-flex items-center justify-center transition text-gray-500 hover:text-white" title="展开详情">
+                    <i class="fas fa-chevron-down text-[10px] transition-transform duration-200" id="icon_${idx}"></i>
+                </button>
+            </td>
         </tr>`;
+        
+        // 展开行：完整 Greeks + 次要指标
+        const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
+        const lossVal = Math.abs(contract.loss_at_10pct || 0);
+        
+        let detailRow = `<tr id="${detailId}" class="hidden bg-gray-900/40">
+            <td colspan="8" class="px-4 py-3">
+                <div class="grid grid-cols-4 sm:grid-cols-7 gap-x-6 gap-y-2 text-xs pl-4 border-l-2 ${isHighDelta ? 'border-red-500/40' : isNearStrike ? 'border-orange-500/30' : 'border-blue-500/20'}">
+                    <div><span class="text-gray-500 block mb-0.5">Gamma</span><span class="font-mono text-gray-300">${contract.gamma ? contract.gamma.toExponential(2) : '-'}</span></div>
+                    <div><span class="text-gray-500 block mb-0.5">Vega</span><span class="font-mono text-gray-300">${vega > 0 ? vega.toFixed(1) : '-'}</span></div>
+                    <div><span class="text-gray-500 block mb-0.5">IV</span><span class="font-mono text-gray-300">${contract.mark_iv ? contract.mark_iv.toFixed(1) + '%' : '-'}</span></div>
+                    <div><span class="text-gray-500 block mb-0.5">流动性</span><span class="${liqColor} font-medium">${contract.liquidity_score}</span></div>
+                    <div><span class="text-gray-500 block mb-0.5">-10%亏损</span><span class="font-mono text-red-400/80">-$${lossVal.toLocaleString()}</span></div>
+                    <div><span class="text-gray-500 block mb-0.5">盈亏平衡</span><span class="font-mono text-blue-300/80">$${(contract.breakeven || 0).toLocaleString()}</span></div>
+                    <div><span class="text-gray-500 block mb-0.5">OI / Spread</span><span class="font-mono">${(contract.open_interest || 0).toLocaleString()} / <span class="${spreadColor}">${(contract.spread_pct || 0).toFixed(1)}%</span></span></div>
+                </div>
+            </td>
+        </tr>`;
+        
+        return mainRow + detailRow;
     }).join('');
     
     updateRiskAlerts(riskAlerts);
@@ -863,6 +890,29 @@ function updateParamDisplay() {
 });
 
 // DVOL自适应建议展示
+
+function toggleDetail(rowId, detailId) {
+    const detail = document.getElementById(detailId);
+    const row = document.getElementById(rowId);
+    const idx = detailId.replace('detail_', '');
+    const icon = document.getElementById(`icon_${idx}`);
+    
+    if (!detail || !row) return;
+    
+    if (_expandedRow && _expandedRow !== detailId) {
+        // 关闭之前展开的
+        const prevDetail = document.getElementById(_expandedRow);
+        if (prevDetail) prevDetail.classList.add('hidden');
+        const prevIdx = _expandedRow.replace('detail_', '');
+        const prevIcon = document.getElementById(`icon_${prevIdx}`);
+        if (prevIcon) prevIcon.style.transform = '';
+    }
+    
+    const isHidden = detail.classList.toggle('hidden');
+    icon.style.transform = isHidden ? '' : 'rotate(180deg)';
+    _expandedRow = isHidden ? null : detailId;
+}
+
 async function showDvolAdvice(currency) {
     try {
         const r = await fetch(`/api/dvol-advice?currency=${currency}`);

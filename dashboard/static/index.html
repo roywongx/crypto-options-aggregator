@@ -32,6 +32,14 @@
         .modal.active { display: flex; }
         .modal-content { background: linear-gradient(135deg, #1e3a5f 0%, #0d1f33 100%); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
         .vega-high { color: #f59e0b; font-weight: bold; }
+        .tabular-nums { font-variant-numeric: tabular-nums; }
+        #opportunitiesTable tr:hover td { background: rgba(255,255,255,0.02); }
+        #opportunitiesTable tr td { transition: background 0.15s ease; vertical-align: middle; }
+        #opportunitiesTable thead th { position: sticky; top: 0; z-index: 10; background: rgba(30,41,55,0.95); backdrop-filter: blur(8px); }
+        @media (max-width: 1024px) {
+            #opportunitiesTable { font-size: 12px; }
+            #opportunitiesTable th, #opportunitiesTable td { padding: 8px 6px !important; }
+        }
     </style>
 </head>
 <body class="gradient-bg min-h-screen text-white">
@@ -252,29 +260,23 @@
                             <span id="contractCount" class="bg-gray-700 px-2 py-0.5 rounded text-xs">0 个合约</span>
                         </div>
                     </div>
-                    <div class="overflow-x-auto -mx-2">
+                    <div class="overflow-hidden rounded-lg border border-gray-700/50">
                         <table class="w-full text-sm">
                             <thead>
-                                <tr class="text-gray-400 border-b border-gray-700/50 text-xs" id="tableHeaders">
-                                    <th class="text-left py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('platform')" data-sort="platform">平台 <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-left py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('symbol')" data-sort="symbol">合约 <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-center py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('dte')" data-sort="dte">DTE <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('strike')" data-sort="strike">Strike <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('delta')" data-sort="delta">Delta <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('gamma')" data-sort="gamma">Gamma <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('vega')" data-sort="vega">Vega <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('apr')" data-sort="apr">APR <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-center py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('liquidity_score')" data-sort="liquidity_score">流动性 <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏损 <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('breakeven')" data-sort="breakeven">盈亏平衡 <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('open_interest')" data-sort="open_interest">OI <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-right py-3 px-2 font-medium cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('spread_pct')" data-sort="spread_pct">Spread% <i class="fas fa-sort text-xs opacity-50 sort-icon"></i></th>
-                                    <th class="text-center py-3 px-2 font-medium">风险状态</th>
+                                <tr class="bg-gray-800/60 text-gray-300 text-xs" id="tableHeaders">
+                                    <th class="text-left py-2.5 px-3 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('platform')" data-sort="platform">平台</th>
+                                    <th class="text-left py-2.5 px-3 font-semibold cursor-pointer hover:text-orange-400 transition select-none min-w-[140px]" onclick="sortContracts('symbol')" data-sort="symbol">合约</th>
+                                    <th class="text-center py-2.5 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[48px]" onclick="sortContracts('dte')" data-sort="dte">DTE</th>
+                                    <th class="text-right py-2.5 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[72px]" onclick="sortContracts('strike')" data-sort="strike">Strike</th>
+                                    <th class="text-right py-2.5 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[56px]" onclick="sortContracts('delta')" data-sort="delta">Delta</th>
+                                    <th class="text-right py-2.5 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[58px]" onclick="sortContracts('apr')" data-sort="apr">APR</th>
+                                    <th class="text-center py-2.5 px-2 font-semibold w-[70px]">风险</th>
+                                    <th class="w-[32px]"></th>
                                 </tr>
                             </thead>
-                            <tbody id="opportunitiesTable" class="text-sm">
+                            <tbody id="opportunitiesTable" class="text-sm divide-y divide-gray-800/40">
                                 <tr>
-                                    <td colspan="14" class="text-center py-12 text-gray-500">
+                                    <td colspan="8" class="text-center py-12 text-gray-500">
                                         <div class="flex flex-col items-center gap-3">
                                             <i class="fas fa-search text-3xl text-gray-600"></i>
                                             <p>点击"立即扫描"获取期权数据</p>
