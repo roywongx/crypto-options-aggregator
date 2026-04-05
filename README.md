@@ -27,6 +27,7 @@
 | 🛡️ **风险预警** | 自动检测高风险合约，滚仓建议弹窗 |
 | 🧮 **倍投修复计算器** | 输入浮亏金额，自动推荐最优修复方案 |
 | 📈 **趋势图表** | APR/DVOL 历史 24H / 7天 / 30天 可视化 |
+| ✅ **数据校验** | 自动检测异常字段（IV/OI/Delta），输出校验警告 |
 
 ---
 
@@ -49,9 +50,9 @@ cd dashboard && python main.py
 ### 功能全景
 
 #### 📊 实时监控大屏
-- **宏观指标卡片**：现货价格 / DVOL指数+信号 / 大宗交易数(1h) / 最佳APR
+- **宏观指标卡片**：现货价格（动态获取）/ DVOL指数+信号 / 大宗交易数(1h) / 最佳APR
 - **合约列表**：14列数据，支持点击表头排序
-  - 平台 | 合约 | DTE | Strike | Delta | Gamma | Vega | **APR**
+  - 平台 | 合约 | DTE | Strike | Delta | Gamma | Vega | **IV** | **APR**
   - 流动性评分 | **-10%亏损** | **盈亏平衡** | **OI** | **Spread%** | 风险状态
 - **自动刷新**：5/10/30 分钟可选，后台静默监控
 
@@ -108,9 +109,11 @@ cd dashboard && python main.py
 
 ### 返回数据结构（关键字段）
 
+> ⚠️ **重要**: 所有数值字段已过数据校验层过滤。`mark_iv` 统一为**小数格式**（0.xx），前端显示时乘以100转为百分比。
+
 ```json
 {
-  "spot_price": 67327.33,
+  "spot_price": 67670.42,
   "dvol_current": 58.42,
   "dvol_z_score": 0.35,
   "dvol_signal": "正常区间",
@@ -132,12 +135,24 @@ cd dashboard && python main.py
     "symbol": "BTC-24APR26-65000-P",
     "strike": 65000, "dte": 19,
     "delta": -0.3505, "gamma": 0.00005, "vega": 56.37,
-    "mark_iv": 48.23, "apr": 271.81,
+    "mark_iv": 0.4823,
+    "apr": 271.81,
     "breakeven": 63160.66, "open_interest": 2639.1, "spread_pct": 1.82,
     "liquidity_score": 100, "loss_at_10pct": 3496.35
-  }]
+  }],
+  "validation_warnings": []
 }
 ```
+
+**字段格式约定**:
+
+| 字段 | 格式 | 说明 |
+|------|------|------|
+| `mark_iv` | 小数 (0.xx) | Binance: `0.47`, Deribit: `0.48`（已除以100）。前端 `(iv*100)%` 显示 |
+| `open_interest` | 张数 | Binance: 来自 `/eapi/v1/openInterest` 的 `sumOpenInterest`; Deribit: orderbook 的 `open_interest` |
+| `premium_usd` / `premium_usdt` | USDT | 标记价 × 数量（Binance）或 mark_price × underlying_price（Deribit） |
+| `delta` | (-1, 1) | 负值 = Put |
+| `spot_price` | 动态获取 | 从 Deribit underlying_price 或 Binance APR 反推，不再硬编码 |
 
 ---
 
@@ -199,8 +214,9 @@ crypto-options-aggregator/
 ├── deribit-options-monitor/          # Deribit 引擎 (核心)
 │   ├── deribit_options_monitor.py   # DVOL/大宗/SellPut/报告生成
 │   └── SKILL.md                     # Skill 定义文档
-├── options_aggregator.py            # 双平台聚合入口
-├── binance_options.py               # Binance E-API 封装
+├── options_aggregator.py            # 双平台聚合入口 + 数据校验层
+├── binance_options.py               # Binance E-API 封装 (IV/OI/APR)
+├── CHANGELOG.md                     # 变更日志
 ├── SKILL.md                         # 项目级 Skill 定义
 ├── requirements.txt                 # 核心依赖
 └── dashboard/requirements.txt       # 面板额外依赖
@@ -211,11 +227,15 @@ crypto-options-aggregator/
 ```
 [Deribit Monitor]                    [Binance Options]
   DVOL 信号 (Z-Score/trend/conf/分位)   合约扫描 (Greeks/APR/OI/Spread)
-  大宗异动 (flow_label/severity/Greeks)
+  大宗异动 (flow_label/severity/Greeks)  IV: markIV(大写) / OI: openInterest API(YYMMDD)
        │                                      │
        └──────────┬───────────────────────────┘
                   ▼
-      [options_aggregator.py]  统一聚合 + 字段映射
+      [options_aggregator.py]  v4.1
+         ├─ 字段映射 (oi→open_interest, premium_usdt→premium_usd)
+         ├─ 动态 spot_price 提取 (多级回退)
+         ├─ validate_contract() 数据校验层
+         └─ validation_warnings 异常告警
                   │
                   ▼
            [main.py] FastAPI 后端
@@ -228,6 +248,7 @@ crypto-options-aggregator/
         ▼         ▼         ▼
    [index.html]  [app.js]  [Chart.js]
    表格/面板     交互/排序   图表渲染
+   (iv*100)%     mark_iv     渲染
 ```
 
 ---
@@ -258,6 +279,19 @@ pip install -r dashboard/requirements.txt
 
 ---
 
+## ⚠️ 已知注意事项
+
+> 详细踩坑记录见 [CHANGELOG.md](./CHANGELOG.md) 和 [.trae/skills/crypto-options-api](./.trae/skills/crypto-options-api/SKILL.md)
+
+| 项目 | 说明 |
+|------|------|
+| Binance IV 字段名 | 必须用 `markIV`（大写 IV），不是 `markIv` |
+| Binance OI 端点 | `/eapi/v1/openInterest?expiration=YYMMDD`（YYMMDD 格式，非毫秒时间戳） |
+| Deribit IV 单位 | API 返回百分比整数（47.5），代码内需 `/100.0` 转为小数 |
+| Binance ticker | 不含 `openInterest` 字段，`amount` 不是持仓量 |
+
+---
+
 ## ⚠️ 免责声明
 
 > 期权交易有风险，本工具仅供信息参考，不构成投资建议。
@@ -269,6 +303,7 @@ pip install -r dashboard/requirements.txt
 ## 🙏 致谢
 
 - [lianyanshe-ai/deribit-options-monitor](https://github.com/lianyanshe-ai/deribit-options-monitor) — Deribit API 封装、Greeks 计算、DVOL/大宗交易核心引擎
+- [ccxt](https://github.com/ccxt/ccxt) — 统一交易所 API 库（用于交叉验证 Binance/Deribit 字段格式）
 - [Deribit](https://www.deribit.com/) — 公共 API 数据源
 - [Binance](https://www.binance.com/) — 期权与现货数据源
 
