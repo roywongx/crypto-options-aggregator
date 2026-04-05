@@ -153,7 +153,11 @@ function setChartPeriod(chartType, hours) {
     else if (chartType === 'dvol') loadDvolChartData();
 }
 
+let _scanLock = false;
+
 async function triggerScan() {
+    if (_scanLock) return;
+    _scanLock = true;
     const btn = document.getElementById('scanBtn');
     const icon = document.getElementById('scanIcon');
     btn.disabled = true;
@@ -197,6 +201,7 @@ async function triggerScan() {
     } finally {
         btn.disabled = false;
         icon.classList.remove('fa-spin');
+        _scanLock = false;
     }
 }
 
@@ -430,6 +435,9 @@ function updateOpportunitiesTable(contracts) {
             <td class="py-3 px-2 text-right font-mono"><span class="text-green-400 font-semibold">${contract.apr.toFixed(1)}%</span></td>
             <td class="py-3 px-2 text-center"><span class="${liqColor} ${liqBg} px-2 py-1 rounded text-xs font-medium">${contract.liquidity_score}</span></td>
             <td class="py-3 px-2 text-right font-mono text-red-400/80">-$${Math.abs(contract.loss_at_10pct || 0).toLocaleString()}</td>
+            <td class="py-3 px-2 text-right font-mono text-blue-300/80">$${(contract.breakeven || 0).toLocaleString()}</td>
+            <td class="py-3 px-2 text-right font-mono text-gray-300">${(contract.open_interest || 0).toLocaleString()}</td>
+            <td class="py-3 px-2 text-right font-mono ${contract.spread_pct > 5 ? 'text-orange-400' : 'text-gray-400'}">${(contract.spread_pct || 0).toFixed(1)}%</td>
             <td class="py-3 px-2 text-center">${riskBadge}</td>
         </tr>`;
     }).join('');
@@ -547,19 +555,58 @@ function updateLargeTrades(trades, count) {
         container.innerHTML = '<div class="text-gray-500 text-center py-4 text-sm">近1小时无大单成交</div>';
         return;
     }
+
+    const severityConfig = {
+        high: { bg: 'bg-red-500/20', border: 'border-red-500', badge: 'bg-red-500', label: '高' },
+        medium: { bg: 'bg-orange-500/20', border: 'border-orange-500', badge: 'bg-orange-500', label: '中' },
+        info: { bg: 'bg-blue-500/10', border: 'border-blue-400', badge: 'bg-blue-500', label: '低' }
+    };
     
     container.innerHTML = trades.map(trade => {
-        const isBuy = trade.includes('buy') || trade.includes('买入');
-        const isSell = trade.includes('sell') || trade.includes('卖出');
-        const directionIcon = isBuy ? '<i class="fas fa-arrow-up text-red-400"></i>' : isSell ? '<i class="fas fa-arrow-down text-green-400"></i>' : '<i class="fas fa-minus text-gray-400"></i>';
-        const directionClass = isBuy ? 'border-l-red-500' : isSell ? 'border-l-green-500' : 'border-l-gray-500';
+        const isObj = typeof trade === 'object' && trade !== null;
+        const title = isObj ? (trade.title || '') : String(trade);
+        const message = isObj ? (trade.message || '') : '';
+        const severity = isObj ? (trade.severity || 'info') : 'info';
+        const type = isObj ? (trade.type || '') : '';
         
-        return `<div class="bg-gray-800/30 border-l-4 ${directionClass} rounded-lg p-3 text-xs hover:bg-gray-800/50 transition cursor-default"><div class="flex items-start gap-2"><div class="flex-shrink-0 mt-0.5">${directionIcon}</div><div class="flex-1 text-gray-300 leading-relaxed break-words">${trade}</div></div></div>`;
+        let directionIcon, directionClass;
+        const msgLower = (title + ' ' + message).toLowerCase();
+        if (msgLower.includes('buy') || msgLower.includes('买入')) {
+            directionIcon = '<i class="fas fa-arrow-up text-red-400"></i>'; directionClass = 'border-l-red-500';
+        } else if (msgLower.includes('sell') || msgLower.includes('卖出')) {
+            directionIcon = '<i class="fas fa-arrow-down text-green-400"></i>'; directionClass = 'border-l-green-500';
+        } else {
+            directionIcon = '<i class="fas fa-minus text-gray-400"></i>'; directionClass = 'border-l-gray-500';
+        }
+        
+        const sev = severityConfig[severity] || severityConfig.info;
+        
+        return `<div class="${sev.bg} border-l-4 ${directionClass} rounded-lg p-3 text-xs hover:bg-white/5 transition cursor-default">
+            <div class="flex items-start gap-2">
+                <div class="flex-shrink-0 mt-0.5">${directionIcon}</div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="font-medium text-white truncate">${title || '大宗成交'}</span>
+                        <span class="${sev.badge} text-white text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0">${sev.label}</span>
+                    </div>
+                    ${message ? `<div class="text-gray-400 leading-relaxed break-words">${message}</div>` : ''}
+                </div>
+            </div>
+        </div>`;
     }).join('');
 }
 
 function updateLastUpdateTime(timestamp) {
-    const parts=timestamp.split(/[- :]/);const date=new Date(Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]));
+    let date;
+    if (timestamp && timestamp.includes('T')) {
+        date = new Date(timestamp);
+    } else if (timestamp) {
+        const parts=timestamp.split(/[- :]/);
+        date=new Date(Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]));
+    } else {
+        date = new Date();
+    }
+    if (isNaN(date.getTime())) { document.getElementById('lastUpdate').textContent = '更新于 --:--:--'; return; }
     const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
 }
@@ -737,7 +784,10 @@ function getFieldName(field) {
         'vega': 'Vega',
         'apr': 'APR',
         'liquidity_score': '流动性',
-        'loss_at_10pct': '-10%亏损'
+        'loss_at_10pct': '-10%亏损',
+        'breakeven': '盈亏平衡',
+        'open_interest': 'OI',
+        'spread_pct': 'Spread%'
     };
     return names[field] || field;
 }

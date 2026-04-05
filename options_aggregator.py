@@ -42,13 +42,19 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
         spot_price = 67200
 
     dvol_info = dvol_data.get('dvol', {}) if isinstance(dvol_data, dict) else {}
+    dvol_raw = dvol_data if isinstance(dvol_data, dict) else {}
     trades_list = trades_data.get('alerts', []) if isinstance(trades_data, dict) else []
+    trades_enriched = trades_data.get('trades', []) if isinstance(trades_data, dict) else []
     
     combined = []
     if isinstance(binance_data, list):
         for item in binance_data:
             item['platform'] = 'Binance'
             item['loss_at_10pct'] = simulate_loss(item, 10.0, spot_price)
+            if 'open_interest' not in item and 'oi' in item:
+                item['open_interest'] = item['oi']
+            if 'premium_usd' not in item and 'premium_usdt' in item:
+                item['premium_usd'] = item['premium_usdt']
             combined.append(item)
     if isinstance(deribit_data, dict) and 'contracts' in deribit_data:
         for item in deribit_data['contracts']:
@@ -63,8 +69,10 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
         'currency': currency,
         'spot_price': spot_price,
         'dvol': dvol_info,
+        'dvol_raw': dvol_raw,
         'large_trades': trades_list,
         'large_trades_count': len(trades_list),
+        'large_trades_detail': trades_enriched,
         'contracts': combined[:20],
         'contracts_count': len(combined)
     }
