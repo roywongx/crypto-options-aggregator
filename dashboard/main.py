@@ -10,6 +10,7 @@ import sqlite3
 import asyncio
 import subprocess
 import requests
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -114,6 +115,72 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
         return {}
 
 
+def parse_trade_alert(trade: Dict[str, str], currency: str, timestamp: str) -> Dict[str, Any]:
+    """解析大宗交易告警数据为结构化格式"""
+    title = trade.get('title', '')
+    message = trade.get('message', '')
+    
+    # 判断来源平台
+    source = 'Unknown'
+    if 'Deribit' in message or 'deribit' in message.lower():
+        source = 'Deribit'
+    elif 'Binance' in message or 'binance' in message.lower():
+        source = 'Binance'
+    
+    # 判断方向
+    direction = 'unknown'
+    if any(w in message.lower() for w in ['buy', '买入', '购买']):
+        direction = 'buy'
+    elif any(w in message.lower() for w in ['sell', '卖出', '出售']):
+        direction = 'sell'
+    
+    # 提取Strike价格（从消息中提取数字）
+    strike = None
+    strike_match = re.search(r'(?:strike|行权价)?[:\s]*(\d{3,}(?:,\d{3})*)\s*(?:PUT|CALL)', message, re.IGNORECASE)
+    if not strike_match:
+        strike_match = re.search(r'\$(\d{3,}(?:,\d{3})*)', message)
+    if strike_match:
+        try:
+            strike = float(strike_match.group(1).replace(',', ''))
+        except ValueError:
+            pass
+    
+    # 提取成交量/金额
+    volume = 0
+    volume_patterns = [
+        r'(\d+(?:\.\d+)?)\s*(?:BTC|ETH|SOL)\s*(?:worth|价值)',
+        r'\$([\d,]+(?:\.\d+)?)',
+        r'(\d+(?:,\d{3})*)\s*(?:contracts?|张)',
+    ]
+    for pattern in volume_patterns:
+        match = re.search(pattern, message)
+        if match:
+            try:
+                volume = float(match.group(1).replace(',', ''))
+                break
+            except ValueError:
+                continue
+    
+    # 判断期权类型
+    option_type = None
+    if 'PUT' in message.upper() or 'put' in message.lower() or '看跌' in message:
+        option_type = 'PUT'
+    elif 'CALL' in message.upper() or 'call' in message.lower() or '看涨' in message:
+        option_type = 'CALL'
+    
+    return {
+        'timestamp': timestamp,
+        'currency': currency,
+        'source': source,
+        'title': title,
+        'message': message,
+        'direction': direction,
+        'strike': strike,
+        'volume': volume,
+        'option_type': option_type
+    }
+
+
 def init_database():
     """初始化数据库"""
     conn = sqlite3.connect(DB_PATH)
@@ -136,7 +203,28 @@ def init_database():
         )
     """)
     
-    # 检查是否需要添加新列
+    # 大宗交易历史表（结构化存储）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS large_trades_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME NOT NULL,
+            currency TEXT NOT NULL,
+            source TEXT,
+            title TEXT,
+            message TEXT,
+            direction TEXT DEFAULT 'unknown',
+            strike REAL,
+            volume REAL DEFAULT 0,
+            option_type TEXT
+        )
+    """)
+    
+    # 创建索引加速查询
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_currency ON large_trades_history(currency)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON large_trades_history(timestamp)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_strike ON large_trades_history(strike)")
+    
+    # 检查scan_records是否需要添加新列
     cursor.execute("PRAGMA table_info(scan_records)")
     columns = [col[1] for col in cursor.fetchall()]
     
@@ -157,7 +245,10 @@ def save_scan_record(data: Dict[str, Any]):
     """保存扫描记录到数据库，并清理超过3个月（90天）的旧数据"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-
+    
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    large_trades = data.get('large_trades_details', [])
+    
     cursor.execute("""
         INSERT INTO scan_records 
         (currency, spot_price, dvol_current, dvol_z_score, dvol_signal, 
@@ -170,19 +261,36 @@ def save_scan_record(data: Dict[str, Any]):
         data.get('dvol_z_score', 0),
         data.get('dvol_signal', ''),
         data.get('large_trades_count', 0),
-        json.dumps(data.get('large_trades_details', []), ensure_ascii=False),
+        json.dumps(large_trades, ensure_ascii=False),
         json.dumps(data.get('contracts', []), ensure_ascii=False),
         data.get('raw_output', '')
     ))
+    
+    # 同时将大宗交易保存到结构化表
+    if large_trades and isinstance(large_trades, list):
+        for trade in large_trades:
+            parsed = parse_trade_alert(trade, data.get('currency', 'BTC'), now_str)
+            cursor.execute("""
+                INSERT INTO large_trades_history 
+                (timestamp, currency, source, title, message, direction, strike, volume, option_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                parsed['timestamp'], parsed['currency'], parsed['source'],
+                parsed['title'], parsed['message'], parsed['direction'],
+                parsed['strike'], parsed['volume'], parsed['option_type']
+            ))
 
     # 执行清理：删除90天之前的记录
     cursor.execute("""
-        DELETE FROM scan_records
-        WHERE timestamp < datetime('now', '-90 days')
+        DELETE FROM scan_records WHERE timestamp < datetime('now', '-90 days')
+    """)
+    cursor.execute("""
+        DELETE FROM large_trades_history WHERE timestamp < datetime('now', '-90 days')
     """)
 
     conn.commit()
     conn.close()
+
 
 def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     """执行期权扫描 - 使用JSON模式"""
@@ -413,6 +521,10 @@ async def get_stats():
     cursor.execute("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (today,))
     today_scans = cursor.fetchone()[0]
     
+    # 大宗交易统计
+    cursor.execute("SELECT COUNT(*) FROM large_trades_history")
+    total_trades = cursor.fetchone()[0]
+    
     conn.close()
     
     db_size_mb = round(DB_PATH.stat().st_size / (1024 * 1024), 2)
@@ -420,6 +532,7 @@ async def get_stats():
     return {
         "total_scans": total_scans,
         "today_scans": today_scans,
+        "total_trades": total_trades,
         "db_size_mb": db_size_mb
     }
 
@@ -481,6 +594,101 @@ async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Quer
     conn.close()
     
     return [{"timestamp": row[0], "dvol": row[1]} for row in rows]
+
+
+@app.get("/api/trades/history")
+async def get_trades_history(
+    currency: str = Query(default="BTC"),
+    days: int = Query(default=7, ge=1, le=90),
+    direction: Optional[str] = Query(default=None),
+    source: Optional[str] = Query(default=None),
+    min_strike: Optional[float] = Query(default=None),
+    max_strike: Optional[float] = Query(default=None)
+):
+    """
+    获取大宗交易历史（结构化查询）
+    支持按方向、来源、行权价范围筛选
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    since = datetime.now() - timedelta(days=days)
+    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
+    
+    query = """
+        SELECT * FROM large_trades_history 
+        WHERE currency = ? AND timestamp > ?
+    """
+    params = [currency, since_str]
+    
+    if direction:
+        query += " AND direction = ?"
+        params.append(direction.upper())
+    if source:
+        query += " AND source = ?"
+        params.append(source)
+    if min_strike is not None:
+        query += " AND strike >= ?"
+        params.append(min_strike)
+    if max_strike is not None:
+        query += " AND strike <= ?"
+        params.append(max_strike)
+    
+    query += " ORDER BY timestamp DESC LIMIT 200"
+    
+    cursor.execute(query, params)
+    columns = [desc[0] for desc in cursor.description]
+    rows = cursor.fetchall()
+    conn.close()
+    
+    trades = []
+    for row in rows:
+        trade = dict(zip(columns, row))
+        trades.append(trade)
+    
+    return {
+        "total": len(trades),
+        "trades": trades
+    }
+
+
+@app.get("/api/trades/strike-distribution")
+async def get_strike_distribution(
+    currency: str = Query(default="BTC"),
+    days: int = Query(default=30)
+):
+    """
+    获取大单Strike分布（用于风向标图表）
+    返回每个Strike价位的大单数量和总成交量
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    since = datetime.now() - timedelta(days=days)
+    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
+    
+    cursor.execute("""
+        SELECT strike, direction, COUNT(*) as count, SUM(volume) as total_volume
+        FROM large_trades_history 
+        WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
+        GROUP BY strike, direction
+        ORDER BY count DESC
+        LIMIT 50
+    """, (currency, since_str))
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    distribution = []
+    for row in rows:
+        distribution.append({
+            "strike": row[0],
+            "direction": row[1],
+            "count": row[2],
+            "total_volume": row[3] or 0
+        })
+    
+    return distribution
 
 
 if __name__ == "__main__":

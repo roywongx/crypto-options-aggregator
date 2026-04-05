@@ -741,3 +741,49 @@ function getFieldName(field) {
     };
     return names[field] || field;
 }
+
+// 大单风向标功能
+async function loadStrikeDistribution() {
+    try {
+        const currency = document.getElementById('tradesCurrency').value;
+        const days = document.getElementById('tradesDays').value;
+        
+        const response = await fetch(`${API_BASE}/api/trades/strike-distribution?currency=${currency}&days=${days}`);
+        const data = await response.json();
+        
+        const container = document.getElementById('strikeDistribution');
+        const countEl = document.getElementById('tradesStatsCount');
+        countEl.textContent = `${data.length} 个价位`;
+        countEl.classList.remove('hidden');
+        
+        if (!data || data.length === 0) {
+            container.innerHTML = '<div class="text-gray-500 text-center py-4">暂无大宗交易数据</div>';
+            return;
+        }
+        
+        // 按Strike分组显示
+        container.innerHTML = data.map(item => {
+            const strikeColor = item.direction === 'buy' ? 'text-green-400' : item.direction === 'sell' ? 'text-red-400' : 'text-gray-400';
+            const barWidth = Math.min(100, (item.count / Math.max(...data.map(d => d.count)) * 100));
+            
+            return `
+                <div class="flex items-center gap-2 py-1 hover:bg-white/5 rounded px-1">
+                    <span class="font-mono text-xs w-20 text-right">${item.strike ? '$' + Math.round(item.strike).toLocaleString() : 'N/A'}</span>
+                    <div class="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
+                        <div class="h-full rounded-full ${item.direction === 'buy' ? 'bg-gradient-to-r from-green-600 to-green-400' : 'bg-gradient-to-r from-red-600 to-red-400'}" style="width: ${barWidth}%"></div>
+                    </div>
+                    <span class="${strikeColor} text-xs w-8">${item.count}笔</span>
+                    <span class="text-gray-500 text-xs w-16 text-right">${item.total_volume > 0 ? '$' + item.total_volume.toLocaleString() : '-'}</span>
+                    <span class="text-xs ${strikeColor}">${item.direction === 'buy' ? '买' : item.direction === 'sell' ? '卖' : '?'}</span>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('加载大单分布失败:', error);
+    }
+}
+
+// 页面加载时初始化大单风向标
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => loadStrikeDistribution(), 2000);
+});
