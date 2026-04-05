@@ -382,7 +382,7 @@ function updateOpportunitiesTable(contracts) {
     countEl.textContent = `${contracts.length} 个合约`;
     
     if (contracts.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
         updateRiskAlerts([]);
         return;
     }
@@ -440,24 +440,21 @@ function updateOpportunitiesTable(contracts) {
             riskAlerts.push({ symbol: symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
         }
         
-        const rowId = `row_${idx}`;
-        const detailId = `detail_${idx}`;
-        
-        // 主行：8列核心数据
-        let mainRow = `<tr class="hover:bg-white/[0.03] transition ${riskClass}" data-idx="${idx}">
-            <td class="py-2.5 px-3"><span class="${platformColor} ${platformBg} px-1.5 py-0.5 rounded-[4px] text-[11px] font-semibold tracking-wide">${contract.platform}</span></td>
-            <td class="py-2.5 px-3">
-                <div class="font-mono text-xs truncate max-w-[140px]" title="${symbol}">${symbol.replace('BTC-', '').replace('USDT', '')}</div>
-                <div class="text-[10px] text-gray-500 mt-0.5">${Math.round(contract.strike).toLocaleString()} strike</div>
-            </td>
-            <td class="py-2.5 px-2 text-center"><span class="text-xs tabular-nums">${contract.dte.toFixed(0)}d</span></td>
-            <td class="py-2.5 px-2 text-right"><span class="font-mono text-sm tabular-nums">${Math.round(contract.strike).toLocaleString()}</span></td>
-            <td class="py-2.5 px-2 text-right"><span class="font-mono text-sm tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${contract.delta >= 0 ? '' : ''}${deltaAbs.toFixed(2)}</span></td>
-            <td class="py-2.5 px-2 text-right"><span class="font-mono text-sm font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}<span class="text-[10px] text-green-500/60">%</span></span></td>
-            <td class="py-2.5 px-2 text-center">${riskBadge}</td>
-            <td class="py-2.5 px-1 text-center">
-                <button onclick="event.stopPropagation();toggleDetail('${rowId}','${detailId}')" class="w-6 h-6 rounded-full hover:bg-gray-700 inline-flex items-center justify-center transition text-gray-500 hover:text-white" title="展开详情">
-                    <i class="fas fa-chevron-down text-[10px] transition-transform duration-200" id="icon_${idx}"></i>
+        // 主行：11列紧凑数据
+        let mainRow = `<tr id="row_${idx}" class="hover:bg-white/[0.03] transition ${riskClass}">
+            <td class="py-2 px-1.5 text-center"><span class="${platformColor} text-[10px] font-bold">${contract.platform === 'Deribit' ? 'D' : 'B'}</span></td>
+            <td class="py-2 px-1.5" title="${symbol}"><span class="font-mono text-xs truncate block max-w-[120px]">${symbol.replace('BTC-', '').replace('-24APR26', '').replace('USDT', '')}</span></td>
+            <td class="py-2 px-1 text-center text-xs tabular-nums">${contract.dte.toFixed(0)}<span class="text-gray-500 text-[9px]">d</span></td>
+            <td class="py-2 px-1 text-right font-mono text-xs tabular-nums">${(contract.strike / 1000).toFixed(1)}<span class="text-gray-500 text-[9px]">K</span></td>
+            <td class="py-2 px-1 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(2)}</td>
+            <td class="py-2 px-1 text-right font-mono text-[11px] tabular-nums text-gray-300">${contract.gamma ? (contract.gamma * 10000).toFixed(1) : '-'}</td>
+            <td class="py-2 px-1 text-right font-mono text-[11px] tabular-nums text-gray-300">${vega > 0 ? vega.toFixed(0) : '-'}</td>
+            <td class="py-2 px-1 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}<span class="text-[9px]">%</span></td>
+            <td class="py-2 px-1 text-center"><span class="${liqColor} text-[11px] font-medium">${contract.liquidity_score}</span></td>
+            <td class="py-2 px-1 text-right font-mono text-[11px] tabular-nums text-red-400/70">${lossVal > 1000 ? (lossVal / 1000).toFixed(1) + 'K' : lossVal.toLocaleString()}</td>
+            <td class="py-2 px-0.5 text-center">
+                <button onclick="event.stopPropagation();toggleDetail(${idx})" class="w-5 h-5 rounded hover:bg-gray-700 inline-flex items-center justify-center transition text-gray-500 hover:text-white" title="展开详情">
+                    <i class="fas fa-chevron-down text-[9px]" id="icon_${idx}"></i>
                 </button>
             </td>
         </tr>`;
@@ -466,16 +463,16 @@ function updateOpportunitiesTable(contracts) {
         const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
         const lossVal = Math.abs(contract.loss_at_10pct || 0);
         
-        let detailRow = `<tr id="${detailId}" class="hidden bg-gray-900/40">
-            <td colspan="8" class="px-4 py-3">
-                <div class="grid grid-cols-4 sm:grid-cols-7 gap-x-6 gap-y-2 text-xs pl-4 border-l-2 ${isHighDelta ? 'border-red-500/40' : isNearStrike ? 'border-orange-500/30' : 'border-blue-500/20'}">
-                    <div><span class="text-gray-500 block mb-0.5">Gamma</span><span class="font-mono text-gray-300">${contract.gamma ? contract.gamma.toExponential(2) : '-'}</span></div>
-                    <div><span class="text-gray-500 block mb-0.5">Vega</span><span class="font-mono text-gray-300">${vega > 0 ? vega.toFixed(1) : '-'}</span></div>
-                    <div><span class="text-gray-500 block mb-0.5">IV</span><span class="font-mono text-gray-300">${contract.mark_iv ? contract.mark_iv.toFixed(1) + '%' : '-'}</span></div>
-                    <div><span class="text-gray-500 block mb-0.5">流动性</span><span class="${liqColor} font-medium">${contract.liquidity_score}</span></div>
-                    <div><span class="text-gray-500 block mb-0.5">-10%亏损</span><span class="font-mono text-red-400/80">-$${lossVal.toLocaleString()}</span></div>
-                    <div><span class="text-gray-500 block mb-0.5">盈亏平衡</span><span class="font-mono text-blue-300/80">$${(contract.breakeven || 0).toLocaleString()}</span></div>
-                    <div><span class="text-gray-500 block mb-0.5">OI / Spread</span><span class="font-mono">${(contract.open_interest || 0).toLocaleString()} / <span class="${spreadColor}">${(contract.spread_pct || 0).toFixed(1)}%</span></span></div>
+        let detailRow = `<tr id="${detailId}" class="hidden bg-black/20">
+            <td colspan="12" class="px-3 py-2.5">
+                <div class="flex items-start gap-x-6 gap-y-1 text-[11px] pl-3 border-l-2 ${isHighDelta ? 'border-red-500/40' : isNearStrike ? 'border-orange-500/30' : 'border-blue-500/20'} flex-wrap">
+                    <div><span class="text-gray-500">MarkIV</span> <span class="font-mono text-gray-200 ml-1">${contract.mark_iv ? contract.mark_iv.toFixed(1) + '%' : '-'}</span></div>
+                    <div><span class="text-gray-500">盈亏平衡</span> <span class="font-mono text-blue-300/80 ml-1">$${(contract.breakeven || 0).toLocaleString()}</span></div>
+                    <div><span class="text-gray-500">OI</span> <span class="font-mono text-gray-300 ml-1">${(contract.open_interest || 0).toLocaleString()}</span></div>
+                    <div><span class="text-gray-500">Spread</span> <span class="${spreadColor} font-mono ml-1">${(contract.spread_pct || 0).toFixed(1)}%</span></div>
+                    <div><span class="text-gray-500">完整Delta</span> <span class="font-mono text-gray-300 ml-1">${contract.delta.toFixed(4)}</span></div>
+                    <div><span class="text-gray-500">完整Gamma</span> <span class="font-mono text-gray-300 ml-1">${contract.gamma ? contract.gamma.toExponential(2) : '-'}</span></div>
+                    <div><span class="text-gray-500">风险</span> <span class="ml-1">${riskLevel === '极高' ? '<span class="text-red-400">⚠ 极高风险</span>' : riskLevel === '高' ? '<span class="text-red-300">⚠ 高风险</span>' : riskLevel === '中' ? '<span class="text-orange-300">! 接近行权</span>' : riskLevel === '警告' ? '<span class="text-yellow-300">△ 警告</span>' : '<span class="text-green-400">✓ 正常</span>'}</span></div>
                 </div>
             </td>
         </tr>`;
@@ -891,25 +888,27 @@ function updateParamDisplay() {
 
 // DVOL自适应建议展示
 
-function toggleDetail(rowId, detailId) {
+function toggleDetail(idx) {
+    const detailId = 'detail_' + idx;
     const detail = document.getElementById(detailId);
-    const row = document.getElementById(rowId);
-    const idx = detailId.replace('detail_', '');
-    const icon = document.getElementById(`icon_${idx}`);
+    const icon = document.getElementById('icon_' + idx);
     
-    if (!detail || !row) return;
+    if (!detail) return;
     
     if (_expandedRow && _expandedRow !== detailId) {
-        // 关闭之前展开的
         const prevDetail = document.getElementById(_expandedRow);
         if (prevDetail) prevDetail.classList.add('hidden');
         const prevIdx = _expandedRow.replace('detail_', '');
-        const prevIcon = document.getElementById(`icon_${prevIdx}`);
-        if (prevIcon) prevIcon.style.transform = '';
+        const prevIcon = document.getElementById('icon_' + prevIdx);
+        if (prevIcon) { prevIcon.style.transform = ''; prevIcon.parentElement?.classList.remove('bg-gray-600'); }
     }
     
     const isHidden = detail.classList.toggle('hidden');
-    icon.style.transform = isHidden ? '' : 'rotate(180deg)';
+    if (icon) {
+        icon.style.transform = isHidden ? '' : 'rotate(180deg)';
+        if (!isHidden) icon.parentElement?.classList.add('bg-gray-600');
+        else icon.parentElement?.classList.remove('bg-gray-600');
+    }
     _expandedRow = isHidden ? null : detailId;
 }
 
