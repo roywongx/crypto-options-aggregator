@@ -440,45 +440,31 @@ function updateOpportunitiesTable(contracts) {
             riskAlerts.push({ symbol: symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
         }
         
-        // 展开行变量（在主行模板前定义）
+        // 单行全量显示（16列，无展开）
         const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
         const lossVal = Math.abs(contract.loss_at_10pct || 0);
-        const detailId = 'detail_' + idx;
+        const breakeven = contract.breakeven || 0;
+        const oi = contract.open_interest || 0;
+        const spreadPct = contract.spread_pct || 0;
+        const markIv = contract.mark_iv || 0;
 
-        // 主行：11列正常布局
-        let mainRow = `<tr id="row_${idx}" class="hover:bg-white/[0.02] transition ${riskClass}">
-            <td class="py-2 px-2.5 text-center"><span class="${platformColor} text-xs font-semibold">${contract.platform === 'Deribit' ? 'Deribit' : 'Binance'}</span></td>
-            <td class="py-2 px-2.5"><span class="font-mono text-xs" title="${symbol}">${symbol}</span></td>
-            <td class="py-2 px-2 text-center text-xs tabular-nums">${contract.dte.toFixed(0)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums">${Math.round(contract.strike).toLocaleString()}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(3)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-300">${contract.gamma ? contract.gamma.toFixed(6) : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-300">${vega > 0 ? vega.toFixed(1) : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}%</td>
-            <td class="py-2 px-2 text-center"><span class="${liqColor} text-xs font-medium">${contract.liquidity_score}</span></td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-red-400/80">$${lossVal.toLocaleString()}</td>
-            <td class="py-2 px-1 text-center">
-                <button onclick="event.stopPropagation();toggleDetail(${idx})" class="w-6 h-6 rounded hover:bg-gray-700/50 inline-flex items-center justify-center transition text-gray-500 hover:text-orange-400" title="展开详情">
-                    <i class="fas fa-chevron-down text-xs transition-transform duration-200" id="icon_${idx}"></i>
-                </button>
-            </td>
+        return `<tr class="hover:bg-white/[0.02] transition ${riskClass}">
+            <td class="py-1.5 px-2 text-center"><span class="${platformColor} text-[10px] font-bold">${contract.platform === 'Deribit' ? 'D' : 'B'}</span></td>
+            <td class="py-1.5 px-2"><span class="font-mono text-xs truncate block max-w-[130px]" title="${symbol}">${symbol.replace('BTC-', '').replace('USDT', '')}</span></td>
+            <td class="py-1.5 px-1.5 text-center text-xs tabular-nums">${contract.dte.toFixed(0)}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-xs tabular-nums">${Math.round(contract.strike).toLocaleString()}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(3)}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${contract.gamma ? (contract.gamma * 10000).toFixed(1) : '-'}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${vega > 0 ? vega.toFixed(0) : '-'}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${markIv > 0 ? markIv.toFixed(1) + '%' : '-'}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}%</td>
+            <td class="py-1.5 px-1.5 text-center"><span class="${liqColor} text-[11px] font-medium">${contract.liquidity_score}</span></td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-red-400/70">${lossVal >= 1000 ? (lossVal / 1000).toFixed(1) + 'K' : lossVal.toLocaleString()}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-blue-300/70">${breakeven >= 1000 ? (breakeven / 1000).toFixed(1) + 'K' : breakeven.toLocaleString()}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${oi >= 1000 ? (oi / 1000).toFixed(1) + 'K' : oi.toLocaleString()}</td>
+            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums ${spreadColor}">${spreadPct.toFixed(1)}%</td>
+            <td class="py-1.5 px-2 text-center">${riskBadge}</td>
         </tr>`;
-        
-        let detailRow = `<tr id="${detailId}" class="hidden bg-black/20">
-            <td colspan="11" class="px-3 py-2.5">
-                <div class="flex items-start gap-x-6 gap-y-1 text-[11px] pl-3 border-l-2 ${isHighDelta ? 'border-red-500/40' : isNearStrike ? 'border-orange-500/30' : 'border-blue-500/20'} flex-wrap">
-                    <div><span class="text-gray-500">MarkIV</span> <span class="font-mono text-gray-200 ml-1">${contract.mark_iv ? contract.mark_iv.toFixed(1) + '%' : '-'}</span></div>
-                    <div><span class="text-gray-500">盈亏平衡</span> <span class="font-mono text-blue-300/80 ml-1">$${(contract.breakeven || 0).toLocaleString()}</span></div>
-                    <div><span class="text-gray-500">OI</span> <span class="font-mono text-gray-300 ml-1">${(contract.open_interest || 0).toLocaleString()}</span></div>
-                    <div><span class="text-gray-500">Spread</span> <span class="${spreadColor} font-mono ml-1">${(contract.spread_pct || 0).toFixed(1)}%</span></div>
-                    <div><span class="text-gray-500">完整Delta</span> <span class="font-mono text-gray-300 ml-1">${contract.delta.toFixed(4)}</span></div>
-                    <div><span class="text-gray-500">完整Gamma</span> <span class="font-mono text-gray-300 ml-1">${contract.gamma ? contract.gamma.toExponential(2) : '-'}</span></div>
-                    <div><span class="text-gray-500">风险</span> <span class="ml-1">${riskLevel === '极高' ? '<span class="text-red-400">⚠ 极高风险</span>' : riskLevel === '高' ? '<span class="text-red-300">⚠ 高风险</span>' : riskLevel === '中' ? '<span class="text-orange-300">! 接近行权</span>' : riskLevel === '警告' ? '<span class="text-yellow-300">△ 警告</span>' : '<span class="text-green-400">✓ 正常</span>'}</span></div>
-                </div>
-            </td>
-        </tr>`;
-        
-        return mainRow + detailRow;
     }).join('');
     
     updateRiskAlerts(riskAlerts);
@@ -821,12 +807,14 @@ function getFieldName(field) {
         'delta': 'Delta',
         'gamma': 'Gamma',
         'vega': 'Vega',
+        'mark_iv': 'IV',
         'apr': 'APR',
-        'liquidity_score': '流动性',
-        'loss_at_10pct': '-10%亏损',
+        'liquidity_score': 'Liq',
+        'loss_at_10pct': '-10%亏',
         'breakeven': '盈亏平衡',
         'open_interest': 'OI',
-        'spread_pct': 'Spread%'
+        'spread_pct': 'Spread%',
+        'risk': '风险'
     };
     return names[field] || field;
 }
