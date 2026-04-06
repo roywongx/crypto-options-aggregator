@@ -207,6 +207,17 @@ def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
     return "unclassified"
 
 
+def _severity_from_notional(notional: float) -> str:
+    if notional >= 2_000_000: return "high"
+    if notional >= 500_000: return "medium"
+    return "info"
+
+def _risk_emoji(abs_delta: float) -> str:
+    if abs_delta > 0.30: return "\U0001f534"
+    if abs_delta > 0.20: return "\U0001f7e1"
+    return "\U0001f7e2"
+
+
 def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> Dict[str, Any]:
     title = trade.get('title', '')
     message = trade.get('message', '')
@@ -641,6 +652,9 @@ async def quick_scan(params: dict = None):
     dvol_z = dvol_data.get('z_score', 0) or 0
     dvol_signal = dvol_data.get('signal', '正常区间')
     
+    use_min_dte = params.get('min_dte', 14) if params else 14
+    use_max_dte = params.get('max_dte', 35) if params else 35
+    
     import math
     dvol_pct = 50
     if abs(dvol_z) > 0:
@@ -660,7 +674,7 @@ async def quick_scan(params: dict = None):
         for s in summaries:
             meta = _parse_inst_name(s.get("instrument_name", ""))
             if not meta: continue
-            if meta["dte"] < 7 or meta["dte"] > 90: continue
+            if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
             
             # 必须和用户请求的 option_type (PUT/CALL) 匹配
             req_type = params.get("option_type", "PUT").upper() if params else "PUT"
@@ -689,6 +703,7 @@ async def quick_scan(params: dict = None):
                 max_delta = min(max_delta * 1.2, 0.55)
             
             if delta_val > max_delta: continue
+            if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
             prem_usd = prem * underlying
             
             # 使用正确的 Margin APR 公式 (默认 20% 保证金)
@@ -714,6 +729,9 @@ async def quick_scan(params: dict = None):
                 "breakeven": round(strike - prem_usd if meta["option_type"] == "P" else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
                 "spread_pct": 0.1,
+                "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, meta["option_type"]),
+                "pop": _calc_pop(delta_val, meta["option_type"], spot, strike, iv, meta["dte"]),
+                "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                 "liquidity_score": min(100, int((oi / 500) * 100)) # 给 Deribit 一个基于 OI 的动态评分
             })
 
@@ -734,7 +752,7 @@ async def quick_scan(params: dict = None):
                 if s['side'] != req_type: continue
                 
                 dte = (s['expiryDate'] - now_ms) / 86400000
-                if not (7 <= dte <= 90): continue
+                if not (use_min_dte <= dte <= use_max_dte): continue
                 
                 mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
                 if not mark or float(mark['markPrice']) <= 0: continue
@@ -779,16 +797,28 @@ async def quick_scan(params: dict = None):
                     "breakeven": round(breakeven, 0),
                     "distance_spot_pct": round(dist, 1),
                     "spread_pct": round(spread_pct, 2),
+                    "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, opt_type),
+                    "pop": _calc_pop(abs(delta_val or 0), opt_type, spot, strike, float(mark.get("markIV", 47) if mark.get("markIV") else 47) / 100.0, int(dte)),
+                    "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                     "liquidity_score": int(liq_score)
                 })
         except Exception as e:
             print(f"Binance fetch error in quick_scan: {e}")
 
         # 按平台分组排序，确保 Deribit 和 Binance 都有展示
-        deribit_list = sorted([c for c in contracts if c.get("platform") == "Deribit"],
-                              key=lambda x: (x.get("liquidity_score", 0), x["apr"]), reverse=True)
-        binance_list = sorted([c for c in contracts if c.get("platform") == "Binance"],
-                              key=lambda x: (x.get("liquidity_score", 0), x["apr"]), reverse=True)
+        def _weighted_score(ct):
+            a = min((ct.get("apr", 0) or 0) / 200.0, 1.0)
+            p = (ct.get("pop", 50) or 50) / 100.0
+            b = min((ct.get("breakeven_pct", 0) or 0) / 20.0, 1.0)
+            l = min((ct.get("liquidity_score", 0) or 0) / 100.0, 1.0)
+            ir = (ct.get("iv_rank", 50) or 50)
+            iv = 1.0 - abs(ir - 50) / 50.0
+            ct["_score"] = round(a*0.25 + p*0.25 + b*0.20 + l*0.15 + iv*0.15, 4)
+            return ct["_score"]
+
+        all_c = sorted(contracts, key=_weighted_score, reverse=True)
+        deribit_list = [c for c in all_c if c.get("platform") == "Deribit"][:15]
+        binance_list = [c for c in all_c if c.get("platform") == "Binance"][:15]
         # 各取前15个，交替合并
         contracts = []
         for i in range(max(len(deribit_list), len(binance_list))):
@@ -1117,6 +1147,10 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
             print(f"Deribit live trades fallback error: {e}")
 
     # Sort by notional and return top N
+    for t in results:
+        t["severity"] = _severity_from_notional(t.get("notional_usd", 0) or 0)
+        t["risk_level"] = _risk_emoji(abs(t.get("delta", 0) or 0))
+    
     results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
     return results[:limit]
 
@@ -1826,3 +1860,28 @@ def _get_positions_greeks(currency: str) -> dict:
     except:
         pass
     return cache
+
+
+def _calc_iv_rank(current_iv: float, history_ivs: list) -> float:
+    if not history_ivs or current_iv <= 0: return 50.0
+    sorted_ivs = sorted(history_ivs); n = len(sorted_ivs)
+    rank = 1
+    for i, v in enumerate(sorted_ivs):
+        if v >= current_iv: rank = i + 1; break
+    else: rank = n
+    if n == 1: return 50.0
+    return round((rank - 1) / (n - 1) * 100, 1)
+
+def _calc_pop(delta_val, option_type, spot, strike, iv, dte):
+    abs_d = abs(delta_val)
+    pop = 1.0 - abs_d
+    pop = max(5.0, min(95.0, round(pop * 100, 1)))
+    return pop
+
+def _calc_breakeven_pct(spot, strike, premium_usd, option_type):
+    premium_per_unit = premium_usd / spot if spot > 0 else 0
+    if option_type.upper() in ('P', 'PUT'):
+        safety = (spot - (strike - premium_per_unit)) / spot * 100
+    else:
+        safety = ((strike + premium_per_unit) - spot) / spot * 100
+    return round(max(0, safety), 1)
