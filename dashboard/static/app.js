@@ -1056,9 +1056,16 @@ async function loadWindAnalysis() {
                 `${(summary.buy_ratio * 100).toFixed(0)}% / ${(summary.sell_ratio * 100).toFixed(0)}%`;
             document.getElementById('windTotalNotional').textContent =
                 `$${(summary.total_notional / 1000000).toFixed(1)}M`;
-            const flowNames = {'protective_hedge':'保护性对冲','premium_collect':'收权利金',
-                'speculative_put':'看跌投机','speculative_call':'看涨投机','call_momentum':'追涨建仓',
-                'covered_call':'备兑开仓','call_overwrite':'改仓操作'};
+            const flowNames = {
+                'protective_hedge':'保护性对冲',
+                'premium_collect':'收权利金',
+                'speculative_put':'看跌投机',
+                'speculative_call':'看涨投机',
+                'call_momentum':'追涨建仓',
+                'covered_call':'备兑开仓',
+                'call_overwrite':'改仓操作',
+                'unclassified':'未分类'
+            };
             document.getElementById('windDominantFlow').textContent =
                 flowNames[summary.dominant_flow] || summary.dominant_flow || '-';
         } else {

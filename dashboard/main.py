@@ -49,16 +49,21 @@ class RecoveryCalcParams(BaseModel):
 def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
     try:
         symbol = f"{currency}USDT"
-        response = requests.get(
-            "https://api.binance.com/api/v3/ticker/price",
-            params={"symbol": symbol},
-            timeout=10
-        )
-        data = response.json()
-        return float(data.get("price", 0))
+        for host in ["api3.binance.com", "api2.binance.com", "api1.binance.com"]:
+            try:
+                response = requests.get(
+                    f"https://{host}/api/v3/ticker/price",
+                    params={"symbol": symbol},
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    return float(data.get("price", 0))
+            except:
+                continue
     except Exception as e:
         print(f"获取现货价格失败: {e}", file=sys.stderr)
-        return None
+    return None
 
 
 def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
@@ -77,12 +82,28 @@ def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
 
 
 def get_spot_price(currency: str = "BTC") -> float:
+    # 优先使用原生API
     spot = get_spot_price_binance(currency)
-    if spot and spot > 0:
+    if spot and spot > 1000:
         return spot
     spot = get_spot_price_deribit(currency)
-    if spot and spot > 0:
+    if spot and spot > 1000:
         return spot
+    # 备用ccxt
+    try:
+        import ccxt
+        if currency == "BTC":
+            symbol = "BTC/USDT"
+        elif currency == "ETH":
+            symbol = "ETH/USDT"
+        else:
+            symbol = f"{currency}/USDT"
+        deribit = ccxt.deribit()
+        ticker = deribit.fetch_ticker(symbol)
+        if ticker and ticker.get('last') and ticker['last'] > 100:
+            return float(ticker['last'])
+    except Exception as e:
+        print(f"ccxt deribit failed: {e}")
     if currency == "BTC":
         return 100000.0
     elif currency == "ETH":
@@ -357,7 +378,7 @@ def save_scan_record(data: Dict[str, Any]):
 def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     base_dir = Path(__file__).parent.parent
 
-    spot_price = get_spot_price_binance(params.currency)
+    spot_price = get_spot_price(params.currency)
     dvol_data = get_dvol_from_deribit(params.currency)
 
     dvol_full = get_dvol_from_deribit(params.currency)
