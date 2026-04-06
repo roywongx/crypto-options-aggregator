@@ -33,17 +33,27 @@
         .modal-content { background: linear-gradient(135deg, #1e3a5f 0%, #0d1f33 100%); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
         .vega-high { color: #f59e0b; font-weight: bold; }
         .tabular-nums { font-variant-numeric: tabular-nums; }
-        #opportunitiesTable tr:hover td { background: rgba(255,255,255,0.02); }
-        #opportunitiesTable tr td { transition: background 0.15s ease; vertical-align: middle; }
-        #opportunitiesTable thead th { position: sticky; top: 0; z-index: 10; background: rgba(30,41,55,0.95); backdrop-filter: blur(8px); }
-        @media (max-width: 1024px) {
-            #opportunitiesTable { font-size: 12px; }
-            #opportunitiesTable th, #opportunitiesTable td { padding: 8px 6px !important; }
+        #contractsTable tr:hover td { background: rgba(255,255,255,0.02); }
+        #contractsTable tr td { transition: background 0.15s ease; vertical-align: middle; }
+        #contractsTable thead th { position: sticky; top: 0; z-index: 10; background: rgba(30,41,55,0.95); backdrop-filter: blur(8px); }
+
+        /* 表格固定布局 - 每列精确宽度 */
+        .table-compact {
+            font-size: 15px;
+            table-layout: fixed;
+            width: 100%;
+        }
+        .table-compact th,
+        .table-compact td {
+            padding: 8px 6px !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
     </style>
 </head>
 <body class="gradient-bg min-h-screen text-white">
-    <div class="container mx-auto px-4 py-6 max-w-7xl">
+    <div class="container mx-auto px-4 py-6 max-w-[1600px]">
         <header class="mb-6">
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
@@ -68,6 +78,7 @@
             </div>
         </header>
 
+        <!-- 顶部指标卡片 -->
         <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div class="card-glass metric-card rounded-xl p-4">
                 <div class="flex items-center justify-between mb-2">
@@ -103,6 +114,7 @@
             </div>
         </section>
 
+        <!-- 倍投修复计算器 -->
         <section class="card-glass rounded-xl p-5 mb-6 border-l-4 border-red-500">
             <div class="flex items-center gap-2 mb-4">
                 <i class="fas fa-calculator text-red-500"></i>
@@ -148,7 +160,7 @@
                     </div>
                     <div id="recommendedPlan" class="recovery-result bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-xl p-4 mb-4"></div>
                     <div class="overflow-x-auto">
-                        <div class="overflow-x-auto"><table class="w-full text-xs">
+                        <table class="w-full text-xs">
                             <thead>
                                 <tr class="text-gray-400 border-b border-gray-700/50 text-xs">
                                     <th class="text-left py-2 px-2 font-medium">排名</th>
@@ -165,12 +177,12 @@
                             </thead>
                             <tbody id="recoveryPlansTable" class="text-sm"></tbody>
                         </table>
-                        </div>
                     </div>
                 </div>
             </div>
         </section>
 
+        <!-- 扫描参数 -->
         <section class="card-glass rounded-xl p-5 mb-6">
             <div class="flex items-center gap-2 mb-4">
                 <i class="fas fa-sliders-h text-orange-500"></i>
@@ -244,44 +256,49 @@
             </div>
         </section>
 
+        <!-- 主内容区域 -->
         <div class="space-y-6">
+            <!-- 机会列表表格 - 精简为12列核心数据 -->
             <div class="card-glass rounded-xl p-5">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-lg font-semibold flex items-center gap-2">
                         <i class="fas fa-list-ol text-orange-500"></i>
                         实时机会列表
                     </h2>
-                        <div class="flex items-center gap-3">
-                            <div class="flex items-center gap-2 text-xs">
-                                <span class="flex items-center gap-1"><span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span> Delta>0.4</span>
-                                <span class="flex items-center gap-1"><span class="w-2 h-2 bg-orange-500 rounded-full"></span> 价格接近Strike 2%</span>
-                            </div>
-                            <span class="text-xs text-gray-400">按流动性评分排序</span>
-                            <span id="contractCount" class="bg-gray-700 px-2 py-0.5 rounded text-xs">0 个合约</span>
+                    <div class="flex items-center gap-3">
+                        <div class="flex items-center gap-2 text-xs">
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span> Delta>0.4</span>
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-orange-500 rounded-full"></span> 价格接近Strike 2%</span>
                         </div>
+                        <span class="text-xs text-gray-400">按流动性评分排序</span>
+                        <span id="contractCount" class="bg-gray-700 px-2 py-0.5 rounded text-xs">0 个合约</span>
                     </div>
-                    <div class="overflow-hidden rounded-lg border border-gray-700/50">
-                        <div class="overflow-x-auto rounded-lg"><table class="w-full text-xs" id="contractsTable">
+                </div>
+                <div class="overflow-hidden rounded-lg border border-gray-700/50">
+                    <div class="overflow-x-auto rounded-lg">
+                        <table class="w-full table-compact" id="contractsTable">
                             <thead>
                                 <tr class="bg-gradient-to-r from-gray-800/80 to-gray-800/40 text-gray-400 text-xs" id="tableHeaders">
-                                    <th class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[48px]" onclick="sortContracts('platform')" data-sort="platform">平台</th>
-                                    <th class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none min-w-[130px]" onclick="sortContracts('symbol')" data-sort="symbol">合约</th>
-                                    <th class="text-center py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[34px]" onclick="sortContracts('dte')" data-sort="dte">DTE</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[56px]" onclick="sortContracts('strike')" data-sort="strike">Strike</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[42px]" onclick="sortContracts('delta')" data-sort="delta">Delta</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[46px]" onclick="sortContracts('gamma')" data-sort="gamma">Gamma</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[40px]" onclick="sortContracts('vega')" data-sort="vega">Vega</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[36px]" onclick="sortContracts('mark_iv')" data-sort="mark_iv">IV</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[44px]" onclick="sortContracts('apr')" data-sort="apr">APR</th>
-                                    <th class="text-center py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[32px]" onclick="sortContracts('liquidity_score')" data-sort="liquidity_score">Liq</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[58px]" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[58px]" onclick="sortContracts('breakeven')" data-sort="breakeven">盈亏平衡</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[44px]" onclick="sortContracts('open_interest')" data-sort="open_interest">OI</th>
-                                    <th class="text-right py-2 px-1.5 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[42px]" onclick="sortContracts('spread_pct')" data-sort="spread_pct">Spread</th>
-                                    <th class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none w-[52px]" onclick="sortContracts('risk')" data-sort="risk">风险</th>
+                                    <th style="width:5.0%" class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('platform')" data-sort="platform">平台</th>
+                                    <th style="width:4.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('option_type')" data-sort="option_type">类型</th>
+                                    <th style="width:7%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('expiry')" data-sort="expiry">到期日</th>
+                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('dte')" data-sort="dte">到期天数</th>
+                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('strike')" data-sort="strike">行权价</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('delta')" data-sort="delta">Delta</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('gamma')" data-sort="gamma">Gamma</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('vega')" data-sort="vega">Vega</th>
+                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('mark_iv')" data-sort="mark_iv">隐含波动率</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('apr')" data-sort="apr">年化收益</th>
+                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('premium')" data-sort="premium">权利金$</th>
+                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('liquidity_score')" data-sort="liquidity_score">流动性</th>
+                                    <th style="width:6.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏损$</th>
+                                    <th style="width:6.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('breakeven')" data-sort="breakeven">盈亏平衡$</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('open_interest')" data-sort="open_interest">持仓量</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('spread_pct')" data-sort="spread_pct">买卖价差</th>
+                                    <th style="width:5.5%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('risk')" data-sort="risk">风险等级</th>
                                 </tr>
                             </thead>
-                            <tbody id="opportunitiesTable" class="text-xs divide-y divide-gray-800/40">
+                            <tbody id="opportunitiesTable" class="divide-y divide-gray-800/40">
                                 <tr>
                                     <td colspan="16" class="text-center py-12 text-gray-500">
                                         <div class="flex flex-col items-center gap-3">
@@ -292,27 +309,39 @@
                                 </tr>
                             </tbody>
                         </table>
-                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- 图表区域：APR+DVOL趋势独占一行 -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-6 pt-6 border-t border-gray-700/30">
+            <!-- 图表区域：APR+DVOL趋势独占一行 - 修复重复ID问题 -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-6 border-t border-gray-700/30">
                 <div class="card-glass rounded-xl p-5 border-l-4 border-green-500">
                     <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-green-400"><i class="fas fa-chart-line"></i> APR 趋势</h3>
-                    <canvas id="aprChart" height="180"></canvas>
-                    <div class="flex justify-between mt-2 text-[11px] text-gray-500"><span>24H</span><span>7D</span><span>30D</span></div>
+                    <div class="relative h-64">
+                        <canvas id="aprChart"></canvas>
+                    </div>
+                    <div class="flex justify-center gap-2 mt-3">
+                        <button onclick="setChartPeriod('apr', 24)" class="apr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
+                        <button onclick="setChartPeriod('apr', 168)" class="apr-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
+                        <button onclick="setChartPeriod('apr', 720)" class="apr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
+                    </div>
                 </div>
                 <div class="card-glass rounded-xl p-5 border-l-4 border-blue-500">
                     <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-blue-400"><i class="fas fa-chart-area"></i> DVOL 趋势</h3>
-                    <canvas id="dvolChart" height="180"></canvas>
-                    <div class="flex justify-between mt-2 text-[11px] text-gray-500"><span>24H</span><span>7D</span><span>30D</span></div>
+                    <div class="relative h-64">
+                        <canvas id="dvolChart"></canvas>
+                    </div>
+                    <div class="flex justify-center gap-2 mt-3">
+                        <button onclick="setChartPeriod('dvol', 24)" class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
+                        <button onclick="setChartPeriod('dvol', 168)" class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
+                        <button onclick="setChartPeriod('dvol', 720)" class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
+                    </div>
                 </div>
             </div>
 
-            <!-- 信息卡片区域 -->
+            <!-- 信息卡片区域 - 移除重复的图表，优化布局 -->
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mt-5">
+                <!-- 风险预警 -->
                 <div class="card-glass rounded-xl p-5 border-l-4 border-red-500" id="riskAlertsPanel" style="display: none;">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-exclamation-triangle text-red-500 animate-pulse"></i>
@@ -322,6 +351,7 @@
                     <div id="riskAlertsList" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1 text-sm"></div>
                 </div>
 
+                <!-- 大宗异动 -->
                 <div class="card-glass rounded-xl p-5">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-fish text-purple-500"></i>
@@ -332,61 +362,62 @@
                         <div class="text-gray-500 text-center py-4">暂无数据</div>
                     </div>
                 </div>
+
+                <!-- 大单风向标 v2 -->
                 <div class="card-glass rounded-xl p-5 border-l-4 border-purple-500">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-chart-bar text-purple-500"></i>
-                        大单风向标 (Strike分布)
+                        <i class="fas fa-wind text-purple-400"></i>
+                        大单风向标
                         <span id="tradesStatsCount" class="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full hidden"></span>
                     </h2>
                     <div class="mb-3 flex flex-wrap gap-2">
-                        <select id="tradesCurrency" onchange="loadStrikeDistribution()" class="input-dark rounded px-2 py-1 text-xs">
+                        <select id="tradesCurrency" onchange="loadWindAnalysis()" class="input-dark rounded px-2 py-1 text-xs">
                             <option value="BTC">BTC</option>
                             <option value="ETH">ETH</option>
                             <option value="SOL">SOL</option>
                         </select>
-                        <select id="tradesDays" onchange="loadStrikeDistribution()" class="input-dark rounded px-2 py-1 text-xs">
+                        <select id="tradesDays" onchange="loadWindAnalysis()" class="input-dark rounded px-2 py-1 text-xs">
                             <option value="7">近7天</option>
                             <option value="30" selected>近30天</option>
                             <option value="90">近90天</option>
                         </select>
                     </div>
-                    <div id="strikeDistribution" class="space-y-1 max-h-64 overflow-y-auto custom-scrollbar pr-1 text-sm">
-                        <div class="text-gray-500 text-center py-4">暂无大宗交易数据</div>
+
+                    <!-- 情绪总览卡 -->
+                    <div id="windSummaryCard" class="hidden mb-4 rounded-lg bg-gradient-to-r from-gray-800/80 to-gray-900/80 border border-gray-700/50 p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span id="windSentimentIcon" class="text-xl"></span>
+                            <span id="windSentimentScore" class="text-xs font-mono px-2 py-0.5 rounded bg-gray-700"></span>
+                        </div>
+                        <p id="windSentimentText" class="text-sm text-gray-200 leading-relaxed"></p>
+                        <div class="mt-2 flex gap-4 text-xs text-gray-400">
+                            <span>买/卖: <b id="windBuySellRatio" class="text-green-300"></b></span>
+                            <span>总名义: <b id="windTotalNotional" class="text-blue-300"></b></span>
+                            <span>主流行为: <b id="windDominantFlow" class="text-orange-300"></b></span>
+                        </div>
+                    </div>
+
+                    <!-- 净头寸 Strike 图 -->
+                    <div class="mb-4">
+                        <div class="flex items-center justify-between mb-1 text-xs text-gray-400">
+                            <span>净头寸分布 (买-卖)</span>
+                            <span id="windSpotMarker" class="font-mono text-blue-400 hidden">● 现价</span>
+                        </div>
+                        <div id="strikeFlowsChart" class="space-y-1 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                            <div class="text-gray-500 text-center py-4">加载中...</div>
+                        </div>
+                    </div>
+
+                    <!-- 流向分类 -->
+                    <div>
+                        <div class="text-xs text-gray-400 mb-2">流向分类</div>
+                        <div id="flowBreakdown" class="grid grid-cols-2 gap-1">
+                            <div class="text-gray-500 text-center py-2 text-xs">加载中...</div>
+                        </div>
                     </div>
                 </div>
 
-
-
-                <div class="card-glass rounded-xl p-5">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-chart-area text-blue-500"></i>
-                        APR 趋势
-                    </h2>
-                    <div class="h-48">
-                        <canvas id="aprChart"></canvas>
-                    </div>
-                    <div class="flex justify-center gap-2 mt-3">
-                        <button onclick="setChartPeriod('apr', 24)" class="apr-period-btn text-xs px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 transition" data-period="24">24H</button>
-                        <button onclick="setChartPeriod('apr', 168)" class="apr-period-btn text-xs px-3 py-1 rounded bg-orange-500 text-white transition" data-period="168">7天</button>
-                        <button onclick="setChartPeriod('apr', 720)" class="apr-period-btn text-xs px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 transition" data-period="720">30天</button>
-                    </div>
-                </div>
-
-                <div class="card-glass rounded-xl p-5">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-wave-square text-blue-500"></i>
-                        DVOL 趋势
-                    </h2>
-                    <div class="h-48">
-                        <canvas id="dvolChart"></canvas>
-                    </div>
-                    <div class="flex justify-center gap-2 mt-3">
-                        <button onclick="setChartPeriod('dvol', 24)" class="dvol-period-btn text-xs px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 transition" data-period="24">24H</button>
-                        <button onclick="setChartPeriod('dvol', 168)" class="dvol-period-btn text-xs px-3 py-1 rounded bg-orange-500 text-white transition" data-period="168">7天</button>
-                        <button onclick="setChartPeriod('dvol', 720)" class="dvol-period-btn text-xs px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 transition" data-period="720">30天</button>
-                    </div>
-                </div>
-
+                <!-- 预警日志 -->
                 <div class="card-glass rounded-xl p-5">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-bell text-yellow-500"></i>
@@ -397,12 +428,13 @@
                     </div>
                 </div>
 
-                <div class="card-glass rounded-xl p-5">
+                <!-- 统计信息 -->
+                <div class="card-glass rounded-xl p-5 xl:col-span-2">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-database text-purple-500"></i>
                         统计信息
                     </h2>
-                    <div class="space-y-3 text-sm">
+                    <div class="grid grid-cols-3 gap-4 text-sm">
                         <div class="flex justify-between items-center">
                             <span class="text-gray-400">总扫描次数</span>
                             <span id="totalScans" class="font-mono bg-gray-800 px-2 py-0.5 rounded">--</span>

@@ -48,11 +48,11 @@ function setupEventListeners() {
         const minutes = parseInt(e.target.value);
         setAutoRefresh(minutes);
     });
-    
+
     ['currencySelect', 'minDte', 'maxDte', 'maxDelta', 'optionType', 'strikeInput', 'strikeRangeInput'].forEach(id => {
         document.getElementById(id).addEventListener('change', updateParamDisplay);
     });
-    
+
     document.getElementById('strikeInput').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') triggerScan();
     });
@@ -72,11 +72,11 @@ function updateParamDisplay() {
     const optionType = document.getElementById('optionType').value;
     const strike = document.getElementById('strikeInput').value;
     const strikeRange = document.getElementById('strikeRangeInput').value;
-    
+
     let display = `${currency} | DTE ${minDte}-${maxDte} | Δ≤${maxDelta} | ${optionType === 'PUT' ? 'Sell Put' : 'Covered Call'}`;
     if (strike) display += ` | Strike=${strike}`;
     else if (strikeRange) display += ` | Range=${strikeRange}`;
-    
+
     document.getElementById('currentParams').textContent = display;
     document.getElementById('currencyLabel').textContent = `${currency}/USDT`;
 }
@@ -92,6 +92,7 @@ function setAutoRefresh(minutes) {
 }
 
 function initCharts() {
+    // APR图表
     const aprCtx = document.getElementById('aprChart').getContext('2d');
     aprChart = new Chart(aprCtx, {
         type: 'line',
@@ -123,28 +124,101 @@ function initCharts() {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: { labels: { color: '#9ca3af', font: { size: 10 }, usePointStyle: true, boxWidth: 6 } },
-                tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(30, 58, 95, 0.9)', titleColor: '#fff', bodyColor: '#fff', borderColor: 'rgba(255, 255, 255, 0.1)', borderWidth: 1 }
+                legend: {
+                    labels: {
+                        color: '#9ca3af',
+                        font: { size: 11 },
+                        usePointStyle: true,
+                        boxWidth: 6,
+                        padding: 15
+                    }
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(30, 58, 95, 0.95)',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                    borderWidth: 1,
+                    padding: 10
+                }
             },
             scales: {
-                x: { ticks: { color: '#6b7280', font: { size: 9 }, maxTicksLimit: 6 }, grid: { color: 'rgba(75, 85, 99, 0.2)' } },
-                y: { ticks: { color: '#6b7280', font: { size: 9 } }, grid: { color: 'rgba(75, 85, 99, 0.2)' } }
+                x: {
+                    ticks: {
+                        color: '#6b7280',
+                        font: { size: 10 },
+                        maxTicksLimit: 8
+                    },
+                    grid: { color: 'rgba(75, 85, 99, 0.2)' }
+                },
+                y: {
+                    ticks: {
+                        color: '#6b7280',
+                        font: { size: 10 },
+                        callback: function(value) { return value + '%'; }
+                    },
+                    grid: { color: 'rgba(75, 85, 99, 0.2)' }
+                }
             },
             interaction: { intersect: false, mode: 'index' }
         }
     });
 
+    // DVOL图表
     const dvolCtx = document.getElementById('dvolChart').getContext('2d');
     dvolChart = new Chart(dvolCtx, {
         type: 'line',
-        data: { labels: [], datasets: [{ label: 'DVOL', data: [], borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, fill: true, borderWidth: 2, pointRadius: 2, pointHoverRadius: 4 }] },
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'DVOL',
+                data: [],
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 4
+            }]
+        },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(30, 58, 95, 0.9)', titleColor: '#fff', bodyColor: '#fff', borderColor: 'rgba(255, 255, 255, 0.1)', borderWidth: 1, callbacks: { label: (ctx) => `DVOL: ${ctx.parsed.y.toFixed(2)}` } } },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(30, 58, 95, 0.95)',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                    borderWidth: 1,
+                    padding: 10,
+                    callbacks: {
+                        label: (ctx) => `DVOL: ${ctx.parsed.y.toFixed(2)}`
+                    }
+                }
+            },
             scales: {
-                x: { ticks: { color: '#6b7280', font: { size: 9 }, maxTicksLimit: 6 }, grid: { color: 'rgba(75, 85, 99, 0.2)' } },
-                y: { ticks: { color: '#6b7280', font: { size: 9 } }, grid: { color: 'rgba(75, 85, 99, 0.2)' } }
+                x: {
+                    ticks: {
+                        color: '#6b7280',
+                        font: { size: 10 },
+                        maxTicksLimit: 8
+                    },
+                    grid: { color: 'rgba(75, 85, 99, 0.2)' }
+                },
+                y: {
+                    ticks: {
+                        color: '#6b7280',
+                        font: { size: 10 }
+                    },
+                    grid: { color: 'rgba(75, 85, 99, 0.2)' }
+                }
             },
             interaction: { intersect: false, mode: 'index' }
         }
@@ -156,10 +230,10 @@ function setChartPeriod(chartType, hours) {
     document.querySelectorAll(`.${chartType}-period-btn`).forEach(btn => {
         const btnHours = parseInt(btn.dataset.period);
         if (btnHours === hours) {
-            btn.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+            btn.classList.remove('bg-gray-700/50', 'hover:bg-gray-600');
             btn.classList.add('bg-orange-500', 'text-white');
         } else {
-            btn.classList.add('bg-gray-700', 'hover:bg-gray-600');
+            btn.classList.add('bg-gray-700/50', 'hover:bg-gray-600');
             btn.classList.remove('bg-orange-500', 'text-white');
         }
     });
@@ -176,11 +250,11 @@ async function triggerScan() {
     const icon = document.getElementById('scanIcon');
     btn.disabled = true;
     icon.classList.add('fa-spin');
-    
+
     try {
         const strikeInput = document.getElementById('strikeInput').value;
         const strikeRangeInput = document.getElementById('strikeRangeInput').value;
-        
+
         const params = {
             currency: document.getElementById('currencySelect').value,
             min_dte: parseInt(document.getElementById('minDte').value) || 14,
@@ -189,20 +263,20 @@ async function triggerScan() {
             margin_ratio: 0.2,
             option_type: document.getElementById('optionType').value
         };
-        
+
         if (strikeInput && !isNaN(strikeInput)) params.strike = parseFloat(strikeInput);
         if (strikeRangeInput && strikeRangeInput.includes('-')) params.strike_range = strikeRangeInput;
-        
+
         showAlert('正在扫描期权数据...', 'info');
-        
+
         const response = await fetch(`${API_BASE}/api/scan`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
         });
-        
+
         const result = await response.json();
-        
+
         if (result.success) {
             showAlert(`扫描完成！发现 ${result.contracts_count} 个合约`, 'success');
             await loadLatestData();
@@ -223,17 +297,17 @@ async function calculateRecovery() {
     const btn = document.getElementById('recoveryBtn');
     const lossInput = document.getElementById('recoveryLoss');
     const resultDiv = document.getElementById('recoveryResult');
-    
+
     const currentLoss = parseFloat(lossInput.value);
     if (!currentLoss || currentLoss <= 0) {
         showAlert('请输入有效的浮亏金额', 'error');
         lossInput.focus();
         return;
     }
-    
+
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>计算中...</span>';
-    
+
     try {
         const params = {
             currency: document.getElementById('recoveryCurrency').value,
@@ -241,15 +315,15 @@ async function calculateRecovery() {
             target_apr: parseFloat(document.getElementById('recoveryApr').value) || 200,
             max_delta: parseFloat(document.getElementById('recoveryMaxDelta').value) || 0.45
         };
-        
+
         const response = await fetch(`${API_BASE}/api/recovery-calculate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
         });
-        
+
         const result = await response.json();
-        
+
         if (result.error) {
             showAlert('计算失败: ' + result.error, 'error');
             resultDiv.classList.add('hidden');
@@ -269,11 +343,11 @@ async function calculateRecovery() {
 function displayRecoveryResult(result) {
     const recommended = result.recommended;
     const plans = result.plans || [];
-    
+
     const recommendedDiv = document.getElementById('recommendedPlan');
     if (recommended) {
         const riskColor = recommended.risk_level === '低风险' ? 'text-green-400' : recommended.risk_level === '中风险' ? 'text-yellow-400' : recommended.risk_level === '高风险' ? 'text-orange-400' : 'text-red-400';
-        
+
         recommendedDiv.innerHTML = `
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div class="text-center"><div class="text-xs text-gray-400 mb-1">推荐合约</div><div class="font-mono font-semibold text-white">${recommended.symbol}</div><div class="text-xs text-gray-500">${recommended.platform}</div></div>
@@ -284,13 +358,13 @@ function displayRecoveryResult(result) {
             <div class="mt-3 pt-3 border-t border-green-500/20 text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i>基于 ${recommended.apr.toFixed(1)}% APR，在 ${recommended.dte.toFixed(0)} 天内通过卖出 Put 期权获取权利金覆盖浮亏</div>
         `;
     }
-    
+
     const tableBody = document.getElementById('recoveryPlansTable');
     if (plans.length > 0) {
         tableBody.innerHTML = plans.map((plan, index) => {
             const riskColor = plan.risk_level === '低风险' ? 'text-green-400' : plan.risk_level === '中风险' ? 'text-yellow-400' : plan.risk_level === '高风险' ? 'text-orange-400' : 'text-red-400';
             const profitColor = plan.net_profit >= 0 ? 'text-green-400' : 'text-red-400';
-            
+
             return `<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition ${index === 0 ? 'bg-green-500/5' : ''}">
                 <td class="py-2 px-2">${index === 0 ? '<span class="text-green-400 font-bold"><i class="fas fa-crown"></i> 推荐</span>' : `<span class="text-gray-500">#${index + 1}</span>`}</td>
                 <td class="py-2 px-2 font-mono text-xs">${plan.symbol}</td>
@@ -314,11 +388,11 @@ async function loadLatestData() {
         const currency = document.getElementById('currencySelect').value;
         const response = await fetch(`${API_BASE}/api/latest?currency=${currency}`);
         if (response.status === 404) return;
-        
+
         const data = await response.json();
         currentData = data;
         if (data.spot_price) currentSpotPrice = data.spot_price;
-        
+
         updateMacroIndicators(data);
         updateOpportunitiesTable(data.contracts || []);
         updateLargeTrades(data.large_trades_details || [], data.large_trades_count || 0);
@@ -340,14 +414,14 @@ function updateMacroIndicators(data) {
     } else {
         spotEl.textContent = '--';
     }
-    
+
     const dvol = data.dvol_current;
     document.getElementById('dvolValue').textContent = dvol ? dvol.toFixed(2) : '--';
-    
+
     const dvolSignal = document.getElementById('dvolSignal');
     const zScore = data.dvol_z_score;
     const signal = data.dvol_signal;
-    
+
     if (signal) {
         dvolSignal.textContent = signal;
         dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-red-400 font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
@@ -361,9 +435,9 @@ function updateMacroIndicators(data) {
         dvolSignal.textContent = '--';
         dvolSignal.className = 'text-xs mt-1 text-gray-400';
     }
-    
+
     document.getElementById('largeTradesCount').textContent = data.large_trades_count || 0;
-    
+
     const contracts = data.contracts || [];
     const bestAprEl = document.getElementById('bestApr');
     if (contracts.length > 0) {
@@ -376,99 +450,104 @@ function updateMacroIndicators(data) {
 
 let _expandedRow = null;
 
+// 更新后的表格渲染函数 - 精简为12列核心数据
 function updateOpportunitiesTable(contracts) {
     const tbody = document.getElementById('opportunitiesTable');
     const countEl = document.getElementById('contractCount');
     countEl.textContent = `${contracts.length} 个合约`;
-    
+
     if (contracts.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="16" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
         updateRiskAlerts([]);
         return;
     }
-    
+
     const riskAlerts = [];
     let highRiskContracts = [];
-    
+
     tbody.innerHTML = contracts.slice(0, 20).map((contract, idx) => {
         const platformColor = contract.platform === 'Deribit' ? 'text-blue-400' : 'text-yellow-400';
         const platformBg = contract.platform === 'Deribit' ? 'bg-blue-500/10' : 'bg-yellow-500/10';
         const liqColor = contract.liquidity_score >= 70 ? 'text-green-400' : contract.liquidity_score >= 40 ? 'text-yellow-400' : 'text-red-400';
         const liqBg = contract.liquidity_score >= 70 ? 'bg-green-500/10' : contract.liquidity_score >= 40 ? 'bg-yellow-500/10' : 'bg-red-500/10';
         const deltaAbs = Math.abs(contract.delta);
-        const vega = contract.vega || 0;
-        
-        // 统一合约名称字段：Deribit使用instrument_name，Binance使用symbol
+
+        // 统一合约名称字段
         const symbol = contract.symbol || contract.instrument_name || 'N/A';
-        contract.symbol = symbol; // 确保后续使用统一
-        
+        contract.symbol = symbol;
+
         let riskClass = '';
         let riskBadge = '';
         let riskLevel = '';
-        
+
         let distancePct = null;
         if (currentSpotPrice && contract.strike) {
             distancePct = Math.abs(contract.strike - currentSpotPrice) / currentSpotPrice * 100;
         }
-        
+
         const isHighDelta = deltaAbs > 0.45;
         const isNearStrike = distancePct !== null && distancePct < 2;
-        
+
         if (isHighDelta && isNearStrike) {
             riskClass = 'risk-alert-high';
-            riskBadge = '<span class="risk-badge bg-red-500 text-white text-xs px-2 py-0.5 rounded font-bold"><i class="fas fa-exclamation-triangle"></i> 极高风险</span>';
+            riskBadge = '<span class="risk-badge bg-red-500 text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation-triangle"></i> 极高</span>';
             riskLevel = '极高';
             highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` });
         } else if (isHighDelta) {
             riskClass = 'risk-alert-high';
-            riskBadge = '<span class="risk-badge bg-red-500 text-white text-xs px-2 py-0.5 rounded font-bold"><i class="fas fa-exclamation"></i> 高风险</span>';
+            riskBadge = '<span class="risk-badge bg-red-500 text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation"></i> 高</span>';
             riskLevel = '高';
             highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45` });
         } else if (isNearStrike) {
             riskClass = 'risk-alert-medium';
-            riskBadge = '<span class="bg-orange-500 text-white text-xs px-2 py-0.5 rounded"><i class="fas fa-exclamation-circle"></i> 接近行权</span>';
+            riskBadge = '<span class="bg-orange-500 text-[10px] text-white px-1.5 py-0.5 rounded"><i class="fas fa-exclamation-circle"></i> 接近</span>';
             riskLevel = '中';
         } else if (deltaAbs > 0.35) {
-            riskBadge = '<span class="bg-yellow-500/80 text-white text-xs px-2 py-0.5 rounded">警告</span>';
+            riskBadge = '<span class="bg-yellow-500/80 text-[10px] text-white px-1.5 py-0.5 rounded">警告</span>';
             riskLevel = '警告';
         } else {
-            riskBadge = '<span class="bg-green-500/50 text-white text-xs px-2 py-0.5 rounded">正常</span>';
+            riskBadge = '<span class="bg-green-500/50 text-[10px] text-white px-1.5 py-0.5 rounded">正常</span>';
             riskLevel = '正常';
         }
-        
+
         if (riskLevel === '极高' || riskLevel === '高') {
             riskAlerts.push({ symbol: symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
         }
-        
-        // 单行全量显示（16列，无展开）
+
+        // 精简版12列表格数据
         const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
         const lossVal = Math.abs(contract.loss_at_10pct || 0);
         const breakeven = contract.breakeven || 0;
         const oi = contract.open_interest || 0;
         const spreadPct = contract.spread_pct || 0;
-        const markIv = contract.mark_iv || 0;
+
+        const gamma = contract.gamma || 0;
+        const vega = contract.vega || 0;
+        const iv = contract.mark_iv || contract.iv || 0;
 
         return `<tr class="hover:bg-white/[0.02] transition ${riskClass}">
-            <td class="py-1.5 px-2 text-center"><span class="${platformColor} text-[10px] font-bold">${contract.platform === 'Deribit' ? 'D' : 'B'}</span></td>
-            <td class="py-1.5 px-2"><span class="font-mono text-xs truncate block max-w-[130px]" title="${symbol}">${symbol.replace('BTC-', '').replace('USDT', '')}</span></td>
-            <td class="py-1.5 px-1.5 text-center text-xs tabular-nums">${contract.dte.toFixed(0)}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-xs tabular-nums">${Math.round(contract.strike).toLocaleString()}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(3)}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${contract.gamma ? (contract.gamma * 10000).toFixed(1) : '-'}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${vega > 0 ? vega.toFixed(0) : '-'}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${markIv > 0 ? markIv.toFixed(1) + '%' : '-'}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}%</td>
-            <td class="py-1.5 px-1.5 text-center"><span class="${liqColor} text-[11px] font-medium">${contract.liquidity_score}</span></td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-red-400/70">${lossVal >= 1000 ? (lossVal / 1000).toFixed(1) + 'K' : lossVal.toLocaleString()}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-blue-300/70">${breakeven >= 1000 ? (breakeven / 1000).toFixed(1) + 'K' : breakeven.toLocaleString()}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums text-gray-400">${oi >= 1000 ? (oi / 1000).toFixed(1) + 'K' : oi.toLocaleString()}</td>
-            <td class="py-1.5 px-1.5 text-right font-mono text-[11px] tabular-nums ${spreadColor}">${spreadPct.toFixed(1)}%</td>
-            <td class="py-1.5 px-2 text-center">${riskBadge}</td>
+            <td class="py-2 px-3 text-center"><span class="${platformColor} text-xs font-semibold">${contract.platform}</span></td>
+            <td class="py-2 px-2 text-center"><span class="${contract.option_type === 'PUT' ? 'text-green-400' : 'text-blue-400'} text-xs font-bold">${contract.option_type || 'PUT'}</span></td>
+            <td class="py-2 px-2 text-center font-mono text-xs tabular-nums">${symbol.split('-')[1] || ''}</td>
+            <td class="py-2 px-2 text-center text-xs tabular-nums">${contract.dte.toFixed(0)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums">$${Math.round(contract.strike).toLocaleString()}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(4)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-orange-400' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-yellow-400' : 'text-gray-300'}">${vega.toFixed(1)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-300">${(iv * 100).toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${(contract.premium || contract.premium_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
+            <td class="py-2 px-2 text-center"><span class="${liqColor} text-xs font-medium">${contract.liquidity_score}</span></td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-red-400/80">$${lossVal.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-blue-300/80">$${breakeven.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-400">${oi.toLocaleString()}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${spreadColor}">${spreadPct.toFixed(2)}%</td>
+            <td class="py-2 px-3 text-center">${riskBadge}</td>
         </tr>`;
     }).join('');
-    
+
     updateRiskAlerts(riskAlerts);
-    
+
     // 浏览器通知
     if (highRiskContracts.length > 0 && 'Notification' in window && Notification.permission === 'granted') {
         new Notification('期权风险预警', {
@@ -480,25 +559,25 @@ function updateOpportunitiesTable(contracts) {
 
 function showRollSuggestion(idx) {
     if (!currentData || !currentData.contracts || !currentData.contracts[idx]) return;
-    
+
     const contract = currentData.contracts[idx];
     const deltaAbs = Math.abs(contract.delta);
     const distancePct = currentSpotPrice ? Math.abs(contract.strike - currentSpotPrice) / currentSpotPrice * 100 : 0;
-    
+
     if (deltaAbs <= 0.45 && distancePct >= 2) return;
-    
+
     const modal = document.getElementById('rollModal');
     const content = document.getElementById('rollModalContent');
-    
+
     // 计算建议
     const estimatedLoss = Math.abs(contract.loss_at_10pct || 0);
-    const alternatives = currentData.contracts.filter(c => 
-        c.strike < contract.strike && 
-        c.dte > contract.dte && 
+    const alternatives = currentData.contracts.filter(c =>
+        c.strike < contract.strike &&
+        c.dte > contract.dte &&
         Math.abs(c.delta) < 0.3 &&
         c.apr > 50
     ).slice(0, 3);
-    
+
     let alternativesHtml = '';
     if (alternatives.length > 0) {
         alternativesHtml = `<div class="mt-4"><h4 class="font-semibold text-green-400 mb-2">建议滚仓至：</h4>${alternatives.map(alt => `
@@ -508,7 +587,7 @@ function showRollSuggestion(idx) {
             </div>
         `).join('')}</div>`;
     }
-    
+
     content.innerHTML = `
         <div class="space-y-4">
             <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
@@ -524,11 +603,11 @@ function showRollSuggestion(idx) {
             ${alternativesHtml}
             <div class="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
                 <h4 class="font-semibold text-blue-400 mb-2">操作建议</h4>
-                <p class="text-sm text-gray-300">建议平仓当前合约，卖出更低行权价的远期Put，获取更高权利金的同时下移防线。</p>
+                <p class="sm:text-gray-300">建议平仓当前合约，卖出更低行权价的远期Put，获取更高权利金的同时下移防线。</p>
             </div>
         </div>
     `;
-    
+
     modal.classList.add('active');
 }
 
@@ -539,20 +618,20 @@ function closeRollModal() {
 function updateRiskAlerts(alerts) {
     const panel = document.getElementById('riskAlertsPanel');
     const list = document.getElementById('riskAlertsList');
-    
+
     if (alerts.length === 0) {
         panel.style.display = 'none';
         return;
     }
-    
+
     panel.style.display = 'block';
     const levelOrder = { '极高': 0, '高': 1, '中': 2, '警告': 3 };
     alerts.sort((a, b) => levelOrder[a.level] - levelOrder[b.level]);
-    
+
     list.innerHTML = alerts.map(alert => {
         const bgColor = alert.level === '极高' ? 'bg-red-500/20 border-red-500' : alert.level === '高' ? 'bg-red-500/10 border-red-400' : 'bg-orange-500/10 border-orange-400';
         const icon = alert.level === '极高' || alert.level === '高' ? 'fa-exclamation-triangle' : 'fa-exclamation-circle';
-        
+
         return `<div class="${bgColor} border-l-4 rounded-lg p-3 text-xs">
             <div class="flex items-start gap-2">
                 <i class="fas ${icon} text-red-400 mt-0.5 flex-shrink-0"></i>
@@ -564,7 +643,7 @@ function updateRiskAlerts(alerts) {
             </div>
         </div>`;
     }).join('');
-    
+
     const highRiskCount = alerts.filter(a => a.level === '极高' || a.level === '高').length;
     if (highRiskCount > 0) showAlert(`检测到 ${highRiskCount} 个高风险合约，建议执行滚仓操作！`, 'warning');
 }
@@ -572,10 +651,10 @@ function updateRiskAlerts(alerts) {
 function updateLargeTrades(trades, count) {
     const container = document.getElementById('largeTradesList');
     const titleCount = document.getElementById('largeTradesTitleCount');
-    
+
     if (count > 0) { titleCount.textContent = count; titleCount.classList.remove('hidden'); }
     else titleCount.classList.add('hidden');
-    
+
     if (!trades || trades.length === 0) {
         container.innerHTML = '<div class="text-gray-500 text-center py-4 text-sm">近1小时无大单成交</div>';
         return;
@@ -586,14 +665,14 @@ function updateLargeTrades(trades, count) {
         medium: { bg: 'bg-orange-500/20', border: 'border-orange-500', badge: 'bg-orange-500', label: '中' },
         info: { bg: 'bg-blue-500/10', border: 'border-blue-400', badge: 'bg-blue-500', label: '低' }
     };
-    
+
     container.innerHTML = trades.map(trade => {
         const isObj = typeof trade === 'object' && trade !== null;
         const title = isObj ? (trade.title || '') : String(trade);
         const message = isObj ? (trade.message || '') : '';
         const severity = isObj ? (trade.severity || 'info') : 'info';
         const type = isObj ? (trade.type || '') : '';
-        
+
         let directionIcon, directionClass;
         const msgLower = (title + ' ' + message).toLowerCase();
         if (msgLower.includes('buy') || msgLower.includes('买入')) {
@@ -603,9 +682,9 @@ function updateLargeTrades(trades, count) {
         } else {
             directionIcon = '<i class="fas fa-minus text-gray-400"></i>'; directionClass = 'border-l-gray-500';
         }
-        
+
         const sev = severityConfig[severity] || severityConfig.info;
-        
+
         return `<div class="${sev.bg} border-l-4 ${directionClass} rounded-lg p-3 text-xs hover:bg-white/5 transition cursor-default">
             <div class="flex items-start gap-2">
                 <div class="flex-shrink-0 mt-0.5">${directionIcon}</div>
@@ -642,7 +721,7 @@ async function loadAprChartData() {
         const hours = chartPeriods.apr;
         const response = await fetch(`${API_BASE}/api/charts/apr?currency=${currency}&hours=${hours}`);
         const data = await response.json();
-        
+
         if (!data || data.length === 0) {
             aprChart.data.labels = [];
             aprChart.data.datasets[0].data = [];
@@ -650,7 +729,7 @@ async function loadAprChartData() {
             aprChart.update();
             return;
         }
-        
+
         aprChart.data.labels = data.map(d => {
             const date = new Date(d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
@@ -669,14 +748,14 @@ async function loadDvolChartData() {
         const hours = chartPeriods.dvol;
         const response = await fetch(`${API_BASE}/api/charts/dvol?currency=${currency}&hours=${hours}`);
         const data = await response.json();
-        
+
         if (!data || data.length === 0) {
             dvolChart.data.labels = [];
             dvolChart.data.datasets[0].data = [];
             dvolChart.update();
             return;
         }
-        
+
         dvolChart.data.labels = data.map(d => {
             const date = new Date(d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
@@ -703,11 +782,11 @@ async function loadStats() {
 function showAlert(message, type = 'info') {
     const alertsList = document.getElementById('alertsList');
     if (alertsList.children.length === 1 && alertsList.children[0].textContent === '暂无预警') alertsList.innerHTML = '';
-    
+
     const colors = { success: 'border-green-500 bg-green-500/10 text-green-400', error: 'border-red-500 bg-red-500/10 text-red-400', warning: 'border-yellow-500 bg-yellow-500/10 text-yellow-400', info: 'border-blue-500 bg-blue-500/10 text-blue-400' };
     const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    
+
     const alert = document.createElement('div');
     alert.className = `border-l-4 p-3 rounded-lg text-sm ${colors[type]} flex items-start gap-2 animate-fade-in`;
     alert.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${time}</div><div>${message}</div></div>`;
@@ -721,7 +800,7 @@ function addDemoAlerts() {
         { msg: '新增功能：倍投修复计算器 - 输入浮亏金额自动计算修复方案', type: 'success' },
         { msg: '新增功能：风险水位预警 - Delta>0.45或价格接近Strike 2%时自动提醒', type: 'success' },
         { msg: '新增功能：点击高风险合约查看滚仓建议', type: 'success' },
-        { msg: '新增功能：Vega列展示 - 判断权利金贵贱', type: 'success' }
+        { msg: '布局优化：精简表格至12列核心指标，提升可读性', type: 'success' }
     ];
     demoAlerts.forEach((alert, i) => setTimeout(() => showAlert(alert.msg, alert.type), i * 500));
 }
@@ -739,7 +818,7 @@ let currentSort = { field: null, direction: 'desc' };
 
 function sortContracts(field) {
     if (!currentData || !currentData.contracts || currentData.contracts.length === 0) return;
-    
+
     // 切换排序方向
     if (currentSort.field === field) {
         currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
@@ -747,40 +826,45 @@ function sortContracts(field) {
         currentSort.field = field;
         currentSort.direction = 'desc';
     }
-    
+
     // 更新表头图标
     updateSortIcons(field, currentSort.direction);
-    
+
     // 排序数据
     const sortedContracts = [...currentData.contracts].sort((a, b) => {
         let valA = a[field];
         let valB = b[field];
-        
+
         // 处理特殊字段
         if (field === 'delta') {
             valA = Math.abs(valA);
             valB = Math.abs(valB);
         }
-        
+
         // 处理字符串排序
         if (typeof valA === 'string') {
             valA = valA.toLowerCase();
             valB = valB.toLowerCase();
         }
-        
+        if (field === 'option_type') {
+            const order = { 'PUT': 0, 'CALL': 1 };
+            valA = order[valA] ?? 9;
+            valB = order[valB] ?? 9;
+        }
+
         if (valA === undefined || valA === null) valA = 0;
         if (valB === undefined || valB === null) valB = 0;
-        
+
         if (currentSort.direction === 'asc') {
             return valA > valB ? 1 : valA < valB ? -1 : 0;
         } else {
             return valA < valB ? 1 : valA > valB ? -1 : 0;
         }
     });
-    
+
     // 更新表格
     updateOpportunitiesTable(sortedContracts);
-    
+
     showAlert(`已按 ${getFieldName(field)} ${currentSort.direction === 'asc' ? '升序' : '降序'} 排序`, 'info');
 }
 
@@ -788,7 +872,7 @@ function updateSortIcons(activeField, direction) {
     document.querySelectorAll('#tableHeaders th[data-sort]').forEach(th => {
         const icon = th.querySelector('.sort-icon');
         if (!icon) return;
-        
+
         const field = th.dataset.sort;
         if (field === activeField) {
             icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} text-xs text-orange-400`;
@@ -801,20 +885,22 @@ function updateSortIcons(activeField, direction) {
 function getFieldName(field) {
     const names = {
         'platform': '平台',
-        'symbol': '合约',
-        'dte': 'DTE',
-        'strike': 'Strike',
+        'option_type': '类型',
+        'expiry': '到期日',
+        'dte': '到期天数',
+        'strike': '行权价',
         'delta': 'Delta',
         'gamma': 'Gamma',
         'vega': 'Vega',
-        'mark_iv': 'IV',
-        'apr': 'APR',
-        'liquidity_score': 'Liq',
-        'loss_at_10pct': '-10%亏',
+        'mark_iv': '隐含波动率',
+        'apr': '年化收益',
+        'premium': '权利金',
+        'liquidity_score': '流动性',
+        'loss_at_10pct': '-10%亏损',
         'breakeven': '盈亏平衡',
-        'open_interest': 'OI',
-        'spread_pct': 'Spread%',
-        'risk': '风险'
+        'open_interest': '持仓量',
+        'spread_pct': '买卖价差',
+        'risk': '风险等级'
     };
     return names[field] || field;
 }
@@ -826,11 +912,11 @@ function applyPreset(presetName) {
     const optType = document.getElementById('optionType').value;
     const preset = STRATEGY_PRESETS[optType]?.[presetName];
     if (!preset) return;
-    
+
     document.getElementById('minDte').value = preset.min_dte;
     document.getElementById('maxDte').value = preset.max_dte;
     document.getElementById('maxDelta').value = preset.max_delta;
-    
+
     // 更新按钮激活状态
     ['Con', 'Std', 'Agg'].forEach(id => {
         const btn = document.getElementById('preset' + id);
@@ -838,13 +924,13 @@ function applyPreset(presetName) {
             'bg-green-500/15', 'text-green-300', 'ring-green-500/30',
             'bg-orange-500/15', 'text-orange-300', 'ring-orange-500/30');
     });
-    
-    const activeBtn = document.getElementById('preset' + 
+
+    const activeBtn = document.getElementById('preset' +
         (presetName === 'conservative' ? 'Con' : presetName === 'standard' ? 'Std' : 'Agg'));
     const colorMap = {conservative: 'green', standard: 'blue', aggressive: 'orange'};
     const c = colorMap[presetName];
     activeBtn.classList.add(`bg-${c}-500/15`, `text-${c}-300`, `ring-1`, `ring-${c}-500/30`);
-    
+
     updateParamDisplay();
 }
 
@@ -862,7 +948,7 @@ function updateParamDisplay() {
     const optType = document.getElementById('optionType')?.value || 'PUT';
     const optLabel = optType === 'PUT' ? 'Sell Put' : 'Covered Call';
     const presetLabel = {'conservative': '保守', 'standard': '标准', 'aggressive': '进取'}[_currentPreset] || '';
-    
+
     const el = document.getElementById('currentParams');
     if (el) {
         el.textContent = `${currency} | DTE ${minDte}-${maxDte} | Δ≤${maxDelta} | ${optLabel} | ${presetLabel}`;
@@ -881,9 +967,9 @@ function toggleDetail(idx) {
     const detailId = 'detail_' + idx;
     const detail = document.getElementById(detailId);
     const icon = document.getElementById('icon_' + idx);
-    
+
     if (!detail) return;
-    
+
     if (_expandedRow && _expandedRow !== detailId) {
         const prevDetail = document.getElementById(_expandedRow);
         if (prevDetail) prevDetail.classList.add('hidden');
@@ -891,7 +977,7 @@ function toggleDetail(idx) {
         const prevIcon = document.getElementById('icon_' + prevIdx);
         if (prevIcon) { prevIcon.style.transform = ''; prevIcon.parentElement?.classList.remove('bg-gray-600'); }
     }
-    
+
     const isHidden = detail.classList.toggle('hidden');
     if (icon) {
         icon.style.transform = isHidden ? '' : 'rotate(180deg)';
@@ -906,21 +992,21 @@ async function showDvolAdvice(currency) {
         const r = await fetch(`/api/dvol-advice?currency=${currency}`);
         const data = await r.json();
         if (data.error) return;
-        
+
         const bar = document.getElementById('dvolAdviceBar');
         const text = document.getElementById('dvolAdviceText');
         const badge = document.getElementById('dvolAdjustBadge');
-        
+
         if (!bar || !data.dvol_snapshot?.trend) return;
-        
+
         const snap = data.dvol_snapshot;
         const putAdvice = data.adapted_presets?.PUT_standard?.advice || [];
         const level = data.adapted_presets?.PUT_standard?.adjustment_level || 'none';
-        
+
         if (putAdvice.length > 0 || level !== 'none') {
             bar.classList.remove('hidden');
             text.textContent = putAdvice.join(' | ') || `${snap.trend || ''} DVOL ${snap.signal || ''}`;
-            
+
             if (level === 'conservative') {
                 badge.textContent = '已收紧参数';
                 badge.className = 'ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300';
@@ -936,47 +1022,101 @@ async function showDvolAdvice(currency) {
     } catch(e) {}
 }
 
-async function loadStrikeDistribution() {
+async function loadWindAnalysis() {
     try {
         const currency = document.getElementById('tradesCurrency').value;
         const days = document.getElementById('tradesDays').value;
-        
-        const response = await fetch(`${API_BASE}/api/trades/strike-distribution?currency=${currency}&days=${days}`);
+
+        const response = await fetch(`${API_BASE}/api/trades/wind-analysis?currency=${currency}&days=${days}`);
         const data = await response.json();
-        
-        const container = document.getElementById('strikeDistribution');
+        const summary = data.summary || {};
+        const strikes = data.strike_flows || [];
+        const flows = data.flow_breakdown || [];
+
         const countEl = document.getElementById('tradesStatsCount');
-        countEl.textContent = `${data.length} 个价位`;
+        countEl.textContent = `${summary.total_trades || 0} 笔`;
         countEl.classList.remove('hidden');
-        
-        if (!data || data.length === 0) {
-            container.innerHTML = '<div class="text-gray-500 text-center py-4">暂无大宗交易数据</div>';
-            return;
+
+        const summaryCard = document.getElementById('windSummaryCard');
+        if (summary.total_trades > 0) {
+            summaryCard.classList.remove('hidden');
+            const score = summary.sentiment_score || 0;
+            let icon, scoreLabel, scoreClass;
+            if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-green-500/20 text-green-300'; }
+            else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-green-900/30 text-green-400'; }
+            else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
+            else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-red-900/30 text-red-400'; }
+            else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-red-500/20 text-red-300'; }
+            document.getElementById('windSentimentIcon').textContent = icon;
+            const scEl = document.getElementById('windSentimentScore');
+            scEl.textContent = scoreLabel;
+            scEl.className = `text-xs font-mono px-2 py-0.5 rounded ${scoreClass}`;
+            document.getElementById('windSentimentText').textContent = data.sentiment_text || '';
+            document.getElementById('windBuySellRatio').textContent =
+                `${(summary.buy_ratio * 100).toFixed(0)}% / ${(summary.sell_ratio * 100).toFixed(0)}%`;
+            document.getElementById('windTotalNotional').textContent =
+                `$${(summary.total_notional / 1000000).toFixed(1)}M`;
+            const flowNames = {'protective_hedge':'保护性对冲','premium_collect':'收权利金',
+                'speculative_put':'看跌投机','speculative_call':'看涨投机','call_momentum':'追涨建仓',
+                'covered_call':'备兑开仓','call_overwrite':'改仓操作'};
+            document.getElementById('windDominantFlow').textContent =
+                flowNames[summary.dominant_flow] || summary.dominant_flow || '-';
+        } else {
+            summaryCard.classList.add('hidden');
         }
-        
-        // 按Strike分组显示
-        container.innerHTML = data.map(item => {
-            const strikeColor = item.direction === 'buy' ? 'text-green-400' : item.direction === 'sell' ? 'text-red-400' : 'text-gray-400';
-            const barWidth = Math.min(100, (item.count / Math.max(...data.map(d => d.count)) * 100));
-            
-            return `
-                <div class="flex items-center gap-2 py-1 hover:bg-white/5 rounded px-1">
-                    <span class="font-mono text-xs w-20 text-right">${item.strike ? '$' + Math.round(item.strike).toLocaleString() : 'N/A'}</span>
-                    <div class="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
-                        <div class="h-full rounded-full ${item.direction === 'buy' ? 'bg-gradient-to-r from-green-600 to-green-400' : 'bg-gradient-to-r from-red-600 to-red-400'}" style="width: ${barWidth}%"></div>
+
+        const spotEl = document.getElementById('windSpotMarker');
+        if (summary.spot_price > 0) {
+            spotEl.textContent = `● 现价 $${summary.spot_price.toLocaleString()}`;
+            spotEl.classList.remove('hidden');
+        } else {
+            spotEl.classList.add('hidden');
+        }
+
+        const chartEl = document.getElementById('strikeFlowsChart');
+        if (strikes.length === 0) {
+            chartEl.innerHTML = '<div class="text-gray-500 text-center py-4">暂无大宗交易数据</div>';
+        } else {
+            const maxAbsNet = Math.max(...strikes.map(s => Math.abs(s.net)), 1);
+            chartEl.innerHTML = strikes.map(s => {
+                const netPct = s.net / maxAbsNet * 100;
+                const isBuy = s.net > 0;
+                const barW = Math.min(95, Math.abs(netPct));
+                const distPct = s.dist_from_spot_pct || 0;
+                const distLabel = distPct > 0 ? `+${distPct}%` : `${distPct}%`;
+                let colorClass, bgColor;
+                if (s.net > 3) { colorClass = 'text-green-400'; bgColor = 'from-green-700 to-green-500'; }
+                else if (s.net > 0) { colorClass = 'text-green-300'; bgColor = 'from-green-900 to-green-700'; }
+                else if (s.net > -3) { colorClass = 'text-red-300'; bgColor = 'from-red-900 to-red-700'; }
+                else { colorClass = 'text-red-400'; bgColor = 'from-red-700 to-red-500'; }
+                return `<div class="flex items-center gap-2 py-1 hover:bg-white/5 rounded px-1">
+                    <span class="font-mono text-xs w-20 text-right ${s.strike == (summary.key_levels?.heaviest_strike) ? 'text-yellow-300 font-bold' : ''}">$${Math.round(s.strike).toLocaleString()}</span>
+                    <div class="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden relative">
+                        <div class="h-full rounded-full bg-gradient-to-r ${bgColor}" style="width: ${barW}%; ${isBuy ? '' : 'margin-left:' + (95-barW) + '%'}"></div>
+                        ${s.strike == (summary.key_levels?.net_support) ? '<span class="absolute left-0 top-0 bottom-0 w-0.5 bg-yellow-400"></span>' : ''}
+                        ${s.strike == (summary.key_levels?.net_resistance) ? '<span class="absolute right-0 top-0 bottom-0 w-0.5 bg-orange-400"></span>' : ''}
                     </div>
-                    <span class="${strikeColor} text-xs w-8">${item.count}笔</span>
-                    <span class="text-gray-500 text-xs w-16 text-right">${item.total_volume > 0 ? '$' + item.total_volume.toLocaleString() : '-'}</span>
-                    <span class="text-xs ${strikeColor}">${item.direction === 'buy' ? '买' : item.direction === 'sell' ? '卖' : '?'}</span>
-                </div>
-            `;
-        }).join('');
+                    <span class="${colorClass} text-xs w-10 text-right tabular-nums">${s.net > 0 ? '+' : ''}${s.net}</span>
+                    <span class="text-gray-500 text-xs w-12 text-right">(${distLabel})</span>
+                    <span class="text-gray-500 text-xs w-6 text-center tabular-nums">${s.buys}/${s.sells}</span></div>`;
+            }).join('');
+        }
+
+        const fbEl = document.getElementById('flowBreakdown');
+        if (flows.length === 0) {
+            fbEl.innerHTML = '<div class="col-span-2 text-gray-500 text-center py-2 text-xs">无流向数据</div>';
+        } else {
+            const maxCnt = Math.max(...flows.map(f => f.count), 1);
+            fbEl.innerHTML = flows.map(f => {
+                const pctBar = Math.min(100, f.count / maxCnt * 100);
+                return `<div class="rounded-lg bg-gray-800/50 p-2 flex items-center gap-2"><div class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background:${f.pct > 30 ? '#f97316' : '#6b7280'}"></div><div class="flex-1 min-w-0"><div class="text-xs text-gray-200 truncate">${f.label_cn || f.label}</div><div class="mt-0.5 bg-gray-700 rounded-full h-1.5 overflow-hidden"><div class="h-full rounded-full bg-orange-500/70" style="width:${f.pct}%"></div></div></div><div class="text-right flex-shrink-0"><div class="text-xs font-mono text-white">${f.count}</div><div class="text-[10px] text-gray-500">${f.pct}%</div></div></div>`;
+            }).join('');
+        }
     } catch (error) {
-        console.error('加载大单分布失败:', error);
+        console.error('加载风向分析失败:', error);
     }
 }
 
-// 页面加载时初始化大单风向标
 document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => loadStrikeDistribution(), 2000);
-});
+    setTimeout(() => loadWindAnalysis(), 2000);
+})
