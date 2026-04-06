@@ -269,7 +269,7 @@ async function triggerScan() {
 
         showAlert('正在扫描期权数据...', 'info');
 
-        const response = await fetch(`${API_BASE}/api/scan`, {
+        const response = await fetch(`${API_BASE}/api/quick-scan`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)

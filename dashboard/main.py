@@ -596,6 +596,85 @@ async def scan_options(params: ScanParams):
     return result
 
 
+@app.post("/api/quick-scan")
+async def quick_scan(params: dict = None):
+    """快速扫描：直接获取Deribit数据，不依赖options_aggregator.py"""
+    from datetime import datetime
+    currency = "BTC"
+    spot = get_spot_price(currency)
+    if spot < 1000:
+        spot = 69455.0
+
+    try:
+        summaries = _fetch_derivit_summaries(currency)
+        if not summaries:
+            return {"success": False, "error": "无法获取Deribit数据"}
+
+        contracts = []
+        for s in summaries:
+            meta = _parse_inst_name(s.get("instrument_name", ""))
+            if not meta: continue
+            if meta["dte"] < 7 or meta["dte"] > 90: continue
+            iv = float(s.get("mark_iv") or 0)
+            prem = float(s.get("mark_price") or 0)
+            oi = float(s.get("open_interest") or 0)
+            if iv <= 0 or prem <= 0: continue
+
+            strike = meta["strike"]
+            cv = strike * 0.2
+            apr = (prem / cv) * (365 / meta["dte"]) * 100 if cv > 0 else 0
+            delta_val = abs(float(s.get("delta", 0.5)))
+            dist = abs(strike - spot) / spot * 100
+
+            contracts.append({
+                "symbol": s.get("instrument_name", ""),
+                "platform": "Deribit",
+                "expiry": meta["expiry"],
+                "dte": meta["dte"],
+                "option_type": meta["option_type"],
+                "strike": strike,
+                "apr": round(apr, 1),
+                "premium": round(prem, 4),
+                "delta": round(delta_val, 3),
+                "iv": round(iv * 100, 1),
+                "open_interest": round(oi, 0),
+                "loss_at_10pct": 0,
+                "breakeven": round(strike - prem if meta["option_type"] == "P" else strike + prem, 0),
+                "distance_spot_pct": round(dist, 1),
+                "spread_pct": 0.1
+            })
+
+        contracts.sort(key=lambda x: x["apr"], reverse=True)
+
+        large_trades = _fetch_large_trades(currency, days=7, limit=50)
+        large_trades_count = len(large_trades)
+
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
+                dvol_signal, large_trades_count, large_trades_details, contracts_data, raw_output)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (timestamp, currency, spot, None, None, None, large_trades_count,
+              json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps({})))
+        conn.commit()
+        conn.close()
+
+        return {
+            "success": True,
+            "contracts_count": len(contracts),
+            "spot_price": spot,
+            "timestamp": timestamp,
+            "contracts": contracts[:30]
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+
 @app.get("/api/latest")
 async def get_latest_scan(currency: str = Query(default="BTC")):
     conn = sqlite3.connect(DB_PATH)
@@ -785,6 +864,24 @@ def _fetch_derivit_summaries(currency="BTC"):
         return mon._get_book_summaries(currency)
     except Exception:
         return []
+
+
+def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
+    """从数据库获取最近的大单交易"""
+    from datetime import datetime, timedelta
+    since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label
+        FROM large_trades_history
+        WHERE currency = ? AND timestamp > ?
+        ORDER BY timestamp DESC LIMIT ?
+    """, (currency, since, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"instrument_name": r[0], "direction": r[1], "notional_usd": r[2],
+             "volume": r[3], "strike": r[4], "option_type": r[5], "flow_label": r[6]} for r in rows]
 
 
 def _parse_inst_name(inst):
