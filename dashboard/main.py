@@ -605,6 +605,12 @@ async def quick_scan(params: dict = None):
     if spot < 1000:
         spot = 69455.0
 
+    # 获取DVOL数据
+    dvol_data = get_dvol_from_deribit(currency)
+    dvol_current = dvol_data.get('current', 0) or 0
+    dvol_z = dvol_data.get('z_score', 0) or 0
+    dvol_signal = dvol_data.get('signal', '正常区间')
+
     try:
         summaries = _fetch_derivit_summaries(currency)
         if not summaries:
@@ -615,15 +621,31 @@ async def quick_scan(params: dict = None):
             meta = _parse_inst_name(s.get("instrument_name", ""))
             if not meta: continue
             if meta["dte"] < 7 or meta["dte"] > 90: continue
+            
+            # 必须和用户请求的 option_type (PUT/CALL) 匹配
+            req_type = params.get("option_type", "PUT").upper() if params else "PUT"
+            req_type_short = "P" if req_type == "PUT" else "C"
+            if meta["option_type"] != req_type_short: continue
+                
             iv = float(s.get("mark_iv") or 0)
             prem = float(s.get("mark_price") or 0)
             oi = float(s.get("open_interest") or 0)
-            if iv <= 0 or prem <= 0: continue
+            if iv <= 0 or prem <= 0 or oi < 10: continue
+
+            # Delta 过滤 (防止 Deep ITM 污染)
+            delta_val = abs(float(s.get("delta", 0.5)))
+            max_delta = params.get("max_delta", 0.4) if params else 0.4
+            if delta_val > max_delta: continue
 
             strike = meta["strike"]
-            cv = strike * 0.2
-            apr = (prem / cv) * (365 / meta["dte"]) * 100 if cv > 0 else 0
-            delta_val = abs(float(s.get("delta", 0.5)))
+            underlying = float(s.get("underlying_price", spot)) or spot
+            prem_usd = prem * underlying
+            
+            # 使用正确的 Margin APR 公式 (默认 20% 保证金)
+            margin_ratio = params.get("margin_ratio", 0.2) if params else 0.2
+            cv = strike * margin_ratio
+            apr = (prem_usd / cv) * (365 / meta["dte"]) * 100 if cv > 0 else 0
+            
             dist = abs(strike - spot) / spot * 100
 
             contracts.append({
@@ -634,17 +656,86 @@ async def quick_scan(params: dict = None):
                 "option_type": meta["option_type"],
                 "strike": strike,
                 "apr": round(apr, 1),
-                "premium": round(prem, 4),
+                "premium_usd": round(prem_usd, 2),
                 "delta": round(delta_val, 3),
                 "iv": round(iv * 100, 1),
                 "open_interest": round(oi, 0),
-                "loss_at_10pct": 0,
-                "breakeven": round(strike - prem if meta["option_type"] == "P" else strike + prem, 0),
+                "loss_at_10pct": round(cv * 0.1, 2),
+                "breakeven": round(strike - prem_usd if meta["option_type"] == "P" else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
-                "spread_pct": 0.1
+                "spread_pct": 0.1,
+                "liquidity_score": min(100, int((oi / 500) * 100)) # 给 Deribit 一个基于 OI 的动态评分
             })
 
-        contracts.sort(key=lambda x: x["apr"], reverse=True)
+        # 抓取 Binance 数据
+        try:
+            import requests, time
+            r_mark = requests.get('https://eapi2.binance.com/eapi/v1/mark', timeout=3).json()
+            r_info = requests.get('https://eapi2.binance.com/eapi/v1/exchangeInfo', timeout=3).json()
+            r_ticker = requests.get('https://eapi2.binance.com/eapi/v1/ticker', timeout=3).json()
+            
+            now_ms = time.time() * 1000
+            req_type = params.get("option_type", "PUT").upper() if params else "PUT"
+            max_delta = params.get("max_delta", 0.4) if params else 0.4
+            margin_ratio = params.get("margin_ratio", 0.2) if params else 0.2
+
+            for s in r_info.get('optionSymbols', []):
+                if s['underlying'] != f"{currency}USDT": continue
+                if s['side'] != req_type: continue
+                
+                dte = (s['expiryDate'] - now_ms) / 86400000
+                if not (7 <= dte <= 90): continue
+                
+                mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
+                if not mark or float(mark['markPrice']) <= 0: continue
+                
+                delta_val = abs(float(mark['delta']))
+                if delta_val > max_delta: continue
+                
+                ticker = next((t for t in r_ticker if t['symbol'] == s['symbol']), None)
+                volume = float(ticker['volume']) if ticker else 0
+                bid = float(ticker['bidPrice']) if ticker else 0
+                ask = float(ticker['askPrice']) if ticker else 0
+                
+                if volume < 5: continue # Binance 流动性极差的过滤
+                
+                strike = float(s['strikePrice'])
+                prem_usd = float(mark['markPrice'])
+                cv = strike * margin_ratio
+                apr = (prem_usd / cv) * (365 / dte) * 100 if cv > 0 else 0
+                iv = float(mark['markIV']) * 100
+                opt_type = 'P' if s['side'] == 'PUT' else 'C'
+                
+                spread_pct = 0.0
+                if bid > 0: spread_pct = ((ask - bid) / bid) * 100
+                liq_score = min(50, (volume / 100) * 50) + max(0, 50 - (spread_pct * 5))
+
+                dist = abs(strike - spot) / spot * 100
+                breakeven = strike - prem_usd if opt_type == 'P' else strike + prem_usd
+                
+                contracts.append({
+                    "symbol": s['symbol'],
+                    "platform": "Binance",
+                    "expiry": s['symbol'].split('-')[1],
+                    "dte": round(dte, 1),
+                    "option_type": opt_type,
+                    "strike": strike,
+                    "apr": round(apr, 1),
+                    "premium_usd": round(prem_usd, 2),
+                    "delta": round(delta_val, 3),
+                    "iv": round(iv, 1),
+                    "open_interest": volume,
+                    "loss_at_10pct": round(cv * 0.1, 2),
+                    "breakeven": round(breakeven, 0),
+                    "distance_spot_pct": round(dist, 1),
+                    "spread_pct": round(spread_pct, 2),
+                    "liquidity_score": int(liq_score)
+                })
+        except Exception as e:
+            print(f"Binance fetch error in quick_scan: {e}")
+
+        # 使用复合排序：先按流动性，再按 APR
+        contracts.sort(key=lambda x: (x.get("liquidity_score", 0), x["apr"]), reverse=True)
 
         large_trades = _fetch_large_trades(currency, days=7, limit=50)
         large_trades_count = len(large_trades)
@@ -657,7 +748,7 @@ async def quick_scan(params: dict = None):
             INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
                 dvol_signal, large_trades_count, large_trades_details, contracts_data, raw_output)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (timestamp, currency, spot, None, None, None, large_trades_count,
+        """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
               json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps({})))
         conn.commit()
         conn.close()
@@ -667,7 +758,10 @@ async def quick_scan(params: dict = None):
             "contracts_count": len(contracts),
             "spot_price": spot,
             "timestamp": timestamp,
-            "contracts": contracts[:30]
+            "contracts": contracts[:30],
+            "dvol_current": dvol_current,
+            "dvol_z_score": dvol_z,
+            "dvol_signal": dvol_signal
         }
     except Exception as e:
         import traceback

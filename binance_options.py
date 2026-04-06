@@ -14,7 +14,7 @@ if sys.platform == 'win32':
 
 def get_session():
     session = requests.Session()
-    retry = Retry(connect=3, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504])
+    retry = Retry(connect=1, read=1, backoff_factor=0.1, status_forcelist=[ 500, 502, 503, 504 ])
     adapter = HTTPAdapter(max_retries=retry)
     session.mount('http://', adapter)
     session.mount('https://', adapter)
@@ -50,7 +50,7 @@ def ms_to_yymmdd(ms_timestamp):
 def fetch_binance_options(currency, min_dte, max_dte, max_delta, strike=None, strike_range=None, min_vol=0, max_spread=20.0, margin_ratio=0.2, option_type='PUT'):
     try:
         session = get_session()
-        timeout = 10
+        timeout = 3
         r_mark = session.get('https://eapi.binance.com/eapi/v1/mark', timeout=timeout).json()
         r_info = session.get('https://eapi.binance.com/eapi/v1/exchangeInfo', timeout=timeout).json()
         r_ticker = session.get('https://eapi.binance.com/eapi/v1/ticker', timeout=timeout).json()
