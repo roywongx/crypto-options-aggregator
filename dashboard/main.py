@@ -659,19 +659,20 @@ async def get_apr_chart(hours: int = Query(default=168)):
     since = datetime.now() - timedelta(hours=hours)
 
     cursor.execute("""
-        SELECT timestamp, 
+        SELECT 
+               MAX(timestamp) as ts,
                AVG(CAST(json_extract(contracts_data, '$[0].apr') AS REAL)) as avg_apr,
                MAX(CAST(json_extract(contracts_data, '$[0].apr') AS REAL)) as max_apr
         FROM scan_records 
         WHERE timestamp > ?
-        GROUP BY DATE(timestamp), HOUR(timestamp)
-        ORDER BY timestamp ASC
+        GROUP BY strftime('%Y-%m-%d %H:00', timestamp)
+        ORDER BY ts ASC
     """, (since.strftime('%Y-%m-%d %H:%M:%S'),))
 
     rows = cursor.fetchall()
     conn.close()
 
-    return [{"time": r[0], "avg_apr": r[1] or 0, "max_apr": r[2] or 0} for r in rows]
+    return [{"time": r[0], "avg_apr": round(r[1] or 0, 1), "max_apr": round(r[2] or 0, 1)} for r in rows]
 
 
 @app.get("/api/charts/dvol")
@@ -680,17 +681,28 @@ async def get_dvol_chart(hours: int = Query(default=168)):
     cursor = conn.cursor()
     since = datetime.now() - timedelta(hours=hours)
 
-    cursor.execute("""
-        SELECT timestamp, dvol_current, dvol_z_score, dvol_signal
+    if hours <= 24:
+        grp = "strftime('%Y-%m-%d %H:00', timestamp)"
+    elif hours <= 168:
+        grp = "strftime('%Y-%m-%d %H:00', timestamp)"
+    else:
+        grp = "strftime('%Y-%m-%d', timestamp)"
+
+    cursor.execute(f"""
+        SELECT {grp} as ts,
+               AVG(dvol_current) as dvol,
+               AVG(dvol_z_score) as z_score,
+               MAX(dvol_signal) as signal
         FROM scan_records 
         WHERE timestamp > ? AND dvol_current IS NOT NULL
-        ORDER BY timestamp ASC
+        GROUP BY ts
+        ORDER BY ts ASC
     """, (since.strftime('%Y-%m-%d %H:%M:%S'),))
 
     rows = cursor.fetchall()
     conn.close()
 
-    return [{"time": r[0], "dvol": r[1], "z_score": r[2], "signal": r[3]} for r in rows]
+    return [{"time": r[0], "dvol": round(r[1], 2) if r[1] else 0, "z_score": round(r[2], 2) if r[2] else 0, "signal": r[3]} for r in rows]
 
 
 @app.get("/api/trades/history")
