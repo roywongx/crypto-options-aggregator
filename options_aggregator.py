@@ -143,6 +143,9 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
                 item['open_interest'] = item['oi']
             if 'premium_usd' not in item and 'premium_usdt' in item:
                 item['premium_usd'] = item['premium_usdt']
+            if 'option_type' not in item:
+                sym = item.get('symbol', '')
+                item['option_type'] = 'PUT' if sym.endswith('-P') else 'CALL' if sym.endswith('-C') else ''
             
             is_valid, warnings = validate_contract(item)
             if not is_valid:
@@ -159,6 +162,9 @@ def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_da
                 item['open_interest'] = item['oi']
             if 'premium_usd' not in item and 'premium_usdt' in item:
                 item['premium_usd'] = item.get('premium_usdt', item.get('premium_usd', 0))
+            if 'option_type' not in item:
+                ins = item.get('instrument_name', item.get('symbol', ''))
+                item['option_type'] = 'PUT' if ins.endswith('-P') else 'CALL' if ins.endswith('-C') else ''
             
             is_valid, warnings = validate_contract(item)
             if not is_valid:
