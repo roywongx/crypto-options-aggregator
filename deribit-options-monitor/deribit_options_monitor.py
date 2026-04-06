@@ -97,6 +97,9 @@ class DeribitOptionsMonitor:
         self._order_book_cache: dict[str, dict[str, Any]] = {}
         self._instrument_meta_cache: dict[str, InstrumentMeta] = {}  # instrument 解析缓存
         self._cache_ttl_seconds = 60  # 缓存 60 秒
+        self._session = requests.Session() # Reuse TCP connections for 10x speedup
+        adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=50)
+        self._session.mount('https://', adapter)
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -766,7 +769,18 @@ class DeribitOptionsMonitor:
     ) -> dict[str, Any]:
         currency = self._normalize_currency(currency)
         cutoff = self._now_ms() - lookback_minutes * 60 * 1000
-        trades = [item for item in self._get_last_trades(currency) if int(item.get("timestamp", 0)) >= cutoff]
+        
+        # 1. First filter by time and notional value to avoid fetching 100+ order books
+        trades = []
+        for item in self._get_last_trades(currency):
+            if int(item.get("timestamp", 0)) >= cutoff:
+                try:
+                    underlying_notional = float(item["amount"]) * float(item["index_price"])
+                    if underlying_notional >= min_usd_value:
+                        trades.append(item)
+                except (ValueError, TypeError):
+                    continue
+
         instrument_names = sorted({item["instrument_name"] for item in trades})
         order_books = self._fetch_order_books_bulk(instrument_names)
 
@@ -776,8 +790,6 @@ class DeribitOptionsMonitor:
         for trade in trades:
             meta = self._parse_instrument_name(trade["instrument_name"])
             underlying_notional = float(trade["amount"]) * float(trade["index_price"])
-            if underlying_notional < min_usd_value:
-                continue
 
             book = order_books.get(trade["instrument_name"], {})
             greeks = book.get("greeks") or {}

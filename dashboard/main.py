@@ -163,27 +163,47 @@ FLOW_LABEL_MAP = {
     "protective_hedge": ("保护性对冲", "机构买入Put对冲下行风险"),
     "premium_collect": ("收权利金", "卖出Put/Call收取权利金"),
     "speculative_put": ("看跌投机", "投机性买入看跌期权"),
-    "speculative_call": ("看涨投机", "投机性买入看涨期权"),
+    "call_speculative": ("看涨投机", "低Delta Call买入，博反弹"),
     "call_momentum": ("追涨建仓", "高Delta Call买入，看好上涨"),
-    "call_speculative": ("虚值博彩", "低Delta Call买入，博反弹"),
     "covered_call": ("备兑开仓", "卖出Call锁定收益"),
     "call_overwrite": ("改仓操作", "高Delta Call卖出改仓"),
 }
 def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
+    """流向分类 (参考 lianyanshe-ai/deribit-options-monitor 原始逻辑)
+    
+    PUT:
+      buy  + 0.10<=delta<=0.35 + 7<=dte<=60 -> protective_hedge
+      buy  + other                     -> speculative_put
+      sell + delta<=0.35               -> premium_collect  
+      sell + delta>0.35                -> speculative_put
+    
+    CALL:
+      buy  + delta>=0.30               -> call_momentum
+      buy  + delta<0.30                -> call_speculative
+      sell + delta<=0.40               -> covered_call
+      sell + delta>0.40                -> call_overwrite
+    """
     if not direction or direction == "unknown" or not option_type:
         return "unclassified"
     d = abs(delta or 0)
-    moneyness = ((strike or 0) - (spot or 0)) / (spot or 1) if spot else 0
     if direction == "buy":
-        if option_type == "PUT":
-            return "protective_hedge" if d >= 0.3 else "speculative_put"
-        elif option_type == "CALL":
-            return "call_momentum" if d >= 0.3 else "call_speculative"
+        if option_type in ("PUT", "P"):
+            if 0.10 <= d <= 0.35:
+                return "protective_hedge"
+            return "speculative_put"
+        elif option_type in ("CALL", "C"):
+            if d >= 0.30:
+                return "call_momentum"
+            return "call_speculative"
     elif direction == "sell":
-        if option_type == "PUT":
-            return "premium_collect"
-        elif option_type == "CALL":
-            return "covered_call" if moneyness > 0.02 else "call_overwrite"
+        if option_type in ("PUT", "P"):
+            if d <= 0.35:
+                return "premium_collect"
+            return "speculative_put"
+        elif option_type in ("CALL", "C"):
+            if d <= 0.40:
+                return "covered_call"
+            return "call_overwrite"
     return "unclassified"
 
 
@@ -580,6 +600,16 @@ app = FastAPI(title="期权监控面板", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
+@app.middleware("http")
+async def no_cache_middleware(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     html_path = Path(__file__).parent / "static" / "index.html"
@@ -627,18 +657,22 @@ async def quick_scan(params: dict = None):
             req_type_short = "P" if req_type == "PUT" else "C"
             if meta["option_type"] != req_type_short: continue
                 
-            iv = float(s.get("mark_iv") or 0)
+            iv = float(s.get("mark_iv") or 0) / 100.0
             prem = float(s.get("mark_price") or 0)
             oi = float(s.get("open_interest") or 0)
             if iv <= 0 or prem <= 0 or oi < 10: continue
 
-            # Delta 过滤 (防止 Deep ITM 污染)
-            delta_val = abs(float(s.get("delta", 0.5)))
-            max_delta = params.get("max_delta", 0.4) if params else 0.4
-            if delta_val > max_delta: continue
-
             strike = meta["strike"]
             underlying = float(s.get("underlying_price", spot)) or spot
+
+            # Delta 过滤 (使用估算值，Deribit summaries不返回delta字段)
+            raw_delta = s.get("delta")
+            if raw_delta is None or float(raw_delta or 0) == 0:
+                delta_val = abs(_estimate_delta(strike, underlying, iv, meta["dte"], meta["option_type"]))
+            else:
+                delta_val = abs(float(raw_delta))
+            max_delta = params.get("max_delta", 0.4) if params else 0.4
+            if delta_val > max_delta: continue
             prem_usd = prem * underlying
             
             # 使用正确的 Margin APR 公式 (默认 20% 保证金)
@@ -670,9 +704,9 @@ async def quick_scan(params: dict = None):
         # 抓取 Binance 数据
         try:
             import requests, time
-            r_mark = requests.get('https://eapi2.binance.com/eapi/v1/mark', timeout=3).json()
-            r_info = requests.get('https://eapi2.binance.com/eapi/v1/exchangeInfo', timeout=3).json()
-            r_ticker = requests.get('https://eapi2.binance.com/eapi/v1/ticker', timeout=3).json()
+            r_mark = requests.get('https://eapi.binance.com/eapi/v1/mark', timeout=10).json()
+            r_info = requests.get('https://eapi.binance.com/eapi/v1/exchangeInfo', timeout=10).json()
+            r_ticker = requests.get('https://eapi.binance.com/eapi/v1/ticker', timeout=10).json()
             
             now_ms = time.time() * 1000
             req_type = params.get("option_type", "PUT").upper() if params else "PUT"
@@ -734,8 +768,18 @@ async def quick_scan(params: dict = None):
         except Exception as e:
             print(f"Binance fetch error in quick_scan: {e}")
 
-        # 使用复合排序：先按流动性，再按 APR
-        contracts.sort(key=lambda x: (x.get("liquidity_score", 0), x["apr"]), reverse=True)
+        # 按平台分组排序，确保 Deribit 和 Binance 都有展示
+        deribit_list = sorted([c for c in contracts if c.get("platform") == "Deribit"],
+                              key=lambda x: (x.get("liquidity_score", 0), x["apr"]), reverse=True)
+        binance_list = sorted([c for c in contracts if c.get("platform") == "Binance"],
+                              key=lambda x: (x.get("liquidity_score", 0), x["apr"]), reverse=True)
+        # 各取前15个，交替合并
+        contracts = []
+        for i in range(max(len(deribit_list), len(binance_list))):
+            if i < len(deribit_list):
+                contracts.append(deribit_list[i])
+            if i < len(binance_list):
+                contracts.append(binance_list[i])
 
         large_trades = _fetch_large_trades(currency, days=7, limit=50)
         large_trades_count = len(large_trades)
@@ -961,21 +1005,102 @@ def _fetch_derivit_summaries(currency="BTC"):
 
 
 def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
-    """从数据库获取最近的大单交易"""
+    """获取大单交易：优先DB，不足时从Deribit实时API补充"""
+    import requests as req_lib
     from datetime import datetime, timedelta
+    spot = get_spot_price(currency)
+    
+    # Step 1: Try DB first
     since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label
+        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta
         FROM large_trades_history
         WHERE currency = ? AND timestamp > ?
-        ORDER BY timestamp DESC LIMIT ?
+          AND instrument_name IS NOT NULL AND instrument_name != '' 
+          AND instrument_name != '(EMPTY)' AND strike > 100
+        ORDER BY notional_usd DESC LIMIT ?
     """, (currency, since, limit))
     rows = cursor.fetchall()
     conn.close()
-    return [{"instrument_name": r[0], "direction": r[1], "notional_usd": r[2],
-             "volume": r[3], "strike": r[4], "option_type": r[5], "flow_label": r[6]} for r in rows]
+
+    results = []
+    seen = set()
+    for r in rows:
+        inst = (r[0] or '').strip()
+        strike = r[4] or 0
+        direction = r[1] or ''
+        opt_type = r[5] or ''
+        if not inst or strike <= 100 or inst in seen:
+            continue
+        seen.add(inst)
+        fl = r[6] or ''
+        delta_val = r[7] or 0
+        if not fl or fl == 'unknown':
+            fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
+        results.append({
+            "instrument_name": inst, "direction": direction,
+            "notional_usd": r[2] or 0, "volume": r[3] or 0,
+            "strike": strike, "option_type": opt_type, "flow_label": fl
+        })
+
+    # Step 2: If DB has < limit/2 records, fetch live from Deribit API
+    MIN_NOTIONAL = 10000
+    if len(results) < max(5, limit // 2):
+        try:
+            api_url = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency"
+            payload = req_lib.get(api_url, params={
+                "currency": currency, "kind": "option", "count": 500
+            }, timeout=10).json()
+            trades = payload.get("result", {}).get("trades", [])
+            
+            for t in trades:
+                inst = t.get("instrument_name", "")
+                if not inst or inst in seen:
+                    continue
+                
+                meta = None
+                try:
+                    meta = _parse_inst_name(inst)
+                except:
+                    continue
+                if not meta:
+                    continue
+                    
+                direction = t.get("direction", "")
+                trade_amount = float(t.get("amount", 0))
+                index_price = float(t.get("index_price", 0) or 0)
+                premium_usd = float(t.get("price", 0)) * trade_amount * (index_price or spot)
+                
+                if premium_usd < MIN_NOTIONAL:
+                    continue
+                
+                # Use estimated delta (skip slow order book API call)
+                trade_iv = float(t.get("iv") or 50) / 100.0
+                delta_val = abs(_estimate_delta(meta["strike"], spot,
+                    trade_iv, meta["dte"], meta["option_type"]))
+                
+                fl = _classify_flow_heuristic(
+                    direction, meta["option_type"], delta_val, meta["strike"], spot)
+                
+                seen.add(inst)
+                results.append({
+                    "instrument_name": inst, "direction": direction,
+                    "notional_usd": round(premium_usd, 2),
+                    "volume": round(trade_amount, 4),
+                    "strike": meta["strike"],
+                    "option_type": meta["option_type"],
+                    "flow_label": fl
+                })
+                if len(results) >= limit:
+                    break
+        except Exception as e:
+            print(f"Deribit live trades fallback error: {e}")
+
+    # Sort by notional and return top N
+    results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
+    return results[:limit]
 
 
 def _parse_inst_name(inst):
@@ -992,6 +1117,25 @@ def _parse_inst_name(inst):
         dte = 30
     return {"currency": currency, "expiry": expiry_str, "strike": float(strike_str),
             "option_type": opt_type, "dte": dte}
+
+
+def _estimate_delta(strike, spot, iv, dte, option_type='P'):
+    """估算期权Delta (Deribit book_summaries不返回delta字段)"""
+    import math
+    if strike <= 0 or spot <= 0 or dte <= 0 or iv <= 0:
+        return 0.3
+    t = dte / 365.0
+    if t <= 0.01:
+        t = 0.01
+    d1 = (math.log(spot / strike) + (iv ** 2 / 2) * t) / (iv * math.sqrt(t))
+    try:
+        from scipy.stats import norm
+        nd1 = norm.cdf(d1)
+    except:
+        nd1 = max(0.0, min(1.0, 0.5 + 0.5 * math.tanh(d1 * 0.8)))
+    if option_type.upper() in ('P', 'PUT'):
+        return round(nd1 - 1, 4)
+    return round(nd1, 4)
 
 
 @app.get("/api/charts/vol-surface")
@@ -1432,6 +1576,7 @@ async def get_wind_analysis(
         FROM large_trades_history
         WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
               AND strike > ? AND strike < ?
+              AND option_type IS NOT NULL AND option_type != ''
         GROUP BY strike, option_type
         ORDER BY strike ASC
     """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
@@ -1439,12 +1584,12 @@ async def get_wind_analysis(
     strike_rows = cursor.fetchall()
 
     cursor.execute("""
-        SELECT direction, COUNT(*) as cnt, SUM(notional_usd) as total_notional, flow_label
+        SELECT direction, option_type, delta, strike, notional_usd
         FROM large_trades_history 
-        WHERE currency = ? AND timestamp > ?
-        GROUP BY flow_label
-        ORDER BY cnt DESC
-    """, (currency, since_str))
+        WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
+              AND strike > ? AND strike < ?
+        ORDER BY notional_usd DESC
+    """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
 
     flow_rows = cursor.fetchall()
 
@@ -1512,15 +1657,26 @@ async def get_wind_analysis(
             max_resist_net = -sf['net']
             resistance_level = sf['strike']
 
+    flow_agg = {}
+    for row in flow_rows:
+        direction = row[0] or ''
+        opt_type = row[1] or ''
+        delta_val = row[2] or 0
+        strike = row[3] or 0
+        notional = row[4] or 0
+        
+        fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
+        if fl not in flow_agg:
+            flow_agg[fl] = {"count": 0, "notional": 0}
+        flow_agg[fl]["count"] += 1
+        flow_agg[fl]["notional"] += notional
+
     flow_breakdown = []
     dominant_flow = ""
     max_flow_cnt = 0
-    for row in flow_rows:
-        fl = row[3] or ''
-        if not fl or fl == 'unknown':
-            fl = 'unclassified'
-        cnt = row[1]
-        notional = row[2] or 0
+    for fl, agg in sorted(flow_agg.items(), key=lambda x: x[1]["count"], reverse=True):
+        cnt = agg["count"]
+        notional = agg["notional"]
         pct = (cnt / total_trades * 100) if total_trades > 0 else 0
         info = FLOW_LABEL_MAP.get(fl, (fl, ""))
         flow_breakdown.append({

@@ -660,40 +660,58 @@ function updateLargeTrades(trades, count) {
         return;
     }
 
-    const severityConfig = {
-        high: { bg: 'bg-red-500/20', border: 'border-red-500', badge: 'bg-red-500', label: '高' },
-        medium: { bg: 'bg-orange-500/20', border: 'border-orange-500', badge: 'bg-orange-500', label: '中' },
-        info: { bg: 'bg-blue-500/10', border: 'border-blue-400', badge: 'bg-blue-500', label: '低' }
+    const flowNames = {
+        protective_hedge: '保护性对冲', premium_collect: '收权利金',
+        speculative_put: '看跌投机', call_speculative: '看涨投机',
+        call_momentum: '追涨建仓', covered_call: '备兑开仓',
+        call_overwrite: '改仓操作', unclassified: '未分类'
     };
 
     container.innerHTML = trades.map(trade => {
-        const isObj = typeof trade === 'object' && trade !== null;
-        const title = isObj ? (trade.title || '') : String(trade);
-        const message = isObj ? (trade.message || '') : '';
-        const severity = isObj ? (trade.severity || 'info') : 'info';
-        const type = isObj ? (trade.type || '') : '';
+        const inst = trade.instrument_name || trade.symbol || '';
+        const dir = (trade.direction || '').toLowerCase();
+        const flow = trade.flow_label || '';
+        const notional = trade.notional_usd || 0;
+        const strike = trade.strike || 0;
+        const optType = trade.option_type || '';
 
-        let directionIcon, directionClass;
-        const msgLower = (title + ' ' + message).toLowerCase();
-        if (msgLower.includes('buy') || msgLower.includes('买入')) {
-            directionIcon = '<i class="fas fa-arrow-up text-red-400"></i>'; directionClass = 'border-l-red-500';
-        } else if (msgLower.includes('sell') || msgLower.includes('卖出')) {
-            directionIcon = '<i class="fas fa-arrow-down text-green-400"></i>'; directionClass = 'border-l-green-500';
+        let directionIcon, directionClass, dirLabel;
+        if (dir === 'buy') {
+            directionIcon = '<i class="fas fa-arrow-up text-red-400"></i>'; directionClass = 'border-l-red-500'; dirLabel = '买入';
+        } else if (dir === 'sell') {
+            directionIcon = '<i class="fas fa-arrow-down text-green-400"></i>'; directionClass = 'border-l-green-500'; dirLabel = '卖出';
         } else {
-            directionIcon = '<i class="fas fa-minus text-gray-400"></i>'; directionClass = 'border-l-gray-500';
+            directionIcon = '<i class="fas fa-minus text-gray-400"></i>'; directionClass = 'border-l-gray-500'; dirLabel = '';
         }
 
-        const sev = severityConfig[severity] || severityConfig.info;
+        const severity = notional >= 2000000 ? 'high' : notional >= 500000 ? 'medium' : 'info';
+        const sevConfig = {
+            high: { bg: 'bg-red-500/20', badge: 'bg-red-500', label: '高' },
+            medium: { bg: 'bg-orange-500/20', badge: 'bg-orange-500', label: '中' },
+            info: { bg: 'bg-blue-500/10', badge: 'bg-blue-500', label: '低' }
+        };
+        const sev = sevConfig[severity] || sevConfig.info;
+
+        const flowCN = flowNames[flow] || flow || '';
+        const notionalStr = notional >= 1000000 ? '$' + (notional / 1000000).toFixed(2) + 'M' : '$' + Math.round(notional).toLocaleString();
+        const strikeStr = strike ? '@ $' + strike.toLocaleString() : '';
+        const optTypeTag = optType ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ' + (optType === 'P' ? 'bg-purple-500/30 text-purple-300' : 'bg-green-500/30 text-green-300') + '">' + (optType === 'P' ? 'PUT' : 'CALL') + '</span>' : '';
 
         return `<div class="${sev.bg} border-l-4 ${directionClass} rounded-lg p-3 text-xs hover:bg-white/5 transition cursor-default">
             <div class="flex items-start gap-2">
                 <div class="flex-shrink-0 mt-0.5">${directionIcon}</div>
                 <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="font-medium text-white truncate">${title || '大宗成交'}</span>
-                        <span class="${sev.badge} text-white text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0">${sev.label}</span>
+                    <div class="flex items-center gap-1.5 mb-1 flex-wrap">
+                        <span class="font-medium text-white truncate">${inst || '大宗成交'}</span>
+                        ${optTypeTag}
+                        ${dirLabel ? '<span class="text-gray-400">·</span><span class="' + (dir === 'buy' ? 'text-red-400' : 'text-green-400') + '">' + dirLabel + '</span>' : ''}
+                        ${strikeStr ? '<span class="text-gray-500">' + strikeStr + '</span>' : ''}
+                        <span class="${sev.badge} text-white text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ml-auto">${sev.label}</span>
                     </div>
-                    ${message ? `<div class="text-gray-400 leading-relaxed break-words">${message}</div>` : ''}
+                    <div class="flex items-center gap-2 flex-wrap">
+                        ${flowCN ? '<span class="text-cyan-300">' + flowCN + '</span>' : ''}
+                        <span class="text-yellow-300 font-medium">${notionalStr}</span>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -1091,6 +1109,9 @@ async function loadWindAnalysis() {
                 const barW = Math.min(95, Math.abs(netPct));
                 const distPct = s.dist_from_spot_pct || 0;
                 const distLabel = distPct > 0 ? `+${distPct}%` : `${distPct}%`;
+                const optType = (s.option_type || '').toUpperCase();
+                const isPut = optType === 'PUT' || optType[0] === 'P';
+                const optTag = optType ? `<span class="px-1 py-0.5 rounded text-[9px] font-bold ${isPut ? 'bg-purple-500/30 text-purple-300' : 'bg-green-500/30 text-green-300'}">${isPut ? 'PUT' : 'CALL'}</span>` : '';
                 let colorClass, bgColor;
                 if (s.net > 3) { colorClass = 'text-green-400'; bgColor = 'from-green-700 to-green-500'; }
                 else if (s.net > 0) { colorClass = 'text-green-300'; bgColor = 'from-green-900 to-green-700'; }
@@ -1098,6 +1119,7 @@ async function loadWindAnalysis() {
                 else { colorClass = 'text-red-400'; bgColor = 'from-red-700 to-red-500'; }
                 return `<div class="flex items-center gap-2 py-1 hover:bg-white/5 rounded px-1">
                     <span class="font-mono text-xs w-20 text-right ${s.strike == (summary.key_levels?.heaviest_strike) ? 'text-yellow-300 font-bold' : ''}">$${Math.round(s.strike).toLocaleString()}</span>
+                    ${optTag}
                     <div class="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden relative">
                         <div class="h-full rounded-full bg-gradient-to-r ${bgColor}" style="width: ${barW}%; ${isBuy ? '' : 'margin-left:' + (95-barW) + '%'}"></div>
                         ${s.strike == (summary.key_levels?.net_support) ? '<span class="absolute left-0 top-0 bottom-0 w-0.5 bg-yellow-400"></span>' : ''}

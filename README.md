@@ -315,16 +315,17 @@ pip install -r dashboard/requirements.txt
 
 ---
 
-## ⚠️ 已知注意事项
+## 📋 更新日志
 
-> 详细踩坑记录见 [CHANGELOG.md](./CHANGELOG.md) 和 [.trae/skills/crypto-options-api](./.trae/skills/crypto-options-api/SKILL.md)
+> 详细变更记录见 [CHANGELOG.md](./CHANGELOG.md)
 
-| 项目 | 说明 |
-|------|------|
-| Binance IV 字段名 | 必须用 `markIV`（大写 IV），不是 `markIv` |
-| Binance OI 端点 | `/eapi/v1/openInterest?expiration=YYMMDD`（YYMMDD 格式，非毫秒时间戳） |
-| Deribit IV 单位 | API 返回百分比整数（47.5），代码内需 `/100.0` 转为小数 |
-| Binance ticker | 不含 `openInterest` 字段，`amount` 不是持仓量 |
+### v5.1 (2026-04-07) — 全面审计修复版
+- **fix**: 大宗异动金额门槛：Deribit fallback 添加 `$10,000` 最小名义值过滤
+- **fix**: Wind Analysis PUT/CALL 标签判定 Bug（`optType==='P'` → 完整匹配 `'PUT'`）
+- **fix**: Wind Analysis SQL 过滤 option_type=NULL 垃圾记录
+- **fix**: 数据库清理：删除 7,879 条垃圾数据（60%），保留 5,150 条有效记录
+- **fix**: 大宗交易前端渲染重写，使用实际 API 字段
+- **fix**: Flow 分类算法重写，匹配原始项目逻辑
 
 ---
 
