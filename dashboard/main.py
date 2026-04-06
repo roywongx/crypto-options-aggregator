@@ -562,14 +562,14 @@ def generate_wind_sentiment(summary: Dict, spot: float) -> str:
     parts = []
     kr = summary.get('key_levels', {})
 
-    net_buy = summary.get('net_buy_count', 0)
-    net_sell = summary.get('net_sell_count', 0)
-    total = net_buy + net_sell
-    if total > 0:
-        buy_pct = net_buy / total * 100
-        if buy_pct > 60:
+    buy_ratio = summary.get('buy_ratio', 0.5)
+    sell_ratio = summary.get('sell_ratio', 0.5)
+    total_trades = summary.get('total_trades', 0)
+    if total_trades > 0:
+        buy_pct = buy_ratio * 100
+        if buy_pct > 55:
             parts.append(f"买盘主导({buy_pct:.0f}%)")
-        elif buy_pct < 40:
+        elif buy_pct < 45:
             parts.append(f"卖盘主导({100-buy_pct:.0f}%)")
 
 
@@ -633,13 +633,23 @@ async def quick_scan(params: dict = None):
     currency = "BTC"
     spot = get_spot_price(currency)
     if spot < 1000:
-        spot = 69455.0
+        spot = get_spot_price_deribit(currency) or 100000.0
 
     # 获取DVOL数据
     dvol_data = get_dvol_from_deribit(currency)
     dvol_current = dvol_data.get('current', 0) or 0
     dvol_z = dvol_data.get('z_score', 0) or 0
     dvol_signal = dvol_data.get('signal', '正常区间')
+    
+    import math
+    dvol_pct = 50
+    if abs(dvol_z) > 0:
+        try:
+            from scipy.stats import norm
+            dvol_pct = round(norm.cdf(dvol_z) * 100, 1)
+        except:
+            dvol_pct = round(50 + dvol_z * 20, 1)
+            dvol_pct = max(1, min(99, dvol_pct))
 
     try:
         summaries = _fetch_derivit_summaries(currency)
@@ -672,6 +682,12 @@ async def quick_scan(params: dict = None):
             else:
                 delta_val = abs(float(raw_delta))
             max_delta = params.get("max_delta", 0.4) if params else 0.4
+            
+            if isinstance(dvol_pct, (int, float)) and dvol_pct >= 80:
+                max_delta = max_delta * 0.7
+            elif isinstance(dvol_pct, (int, float)) and dvol_pct <= 20:
+                max_delta = min(max_delta * 1.2, 0.55)
+            
             if delta_val > max_delta: continue
             prem_usd = prem * underlying
             
@@ -694,7 +710,7 @@ async def quick_scan(params: dict = None):
                 "delta": round(delta_val, 3),
                 "iv": round(iv * 100, 1),
                 "open_interest": round(oi, 0),
-                "loss_at_10pct": round(cv * 0.1, 2),
+                "loss_at_10pct": round(max(0, (strike - spot * 0.9) if meta["option_type"] == "P" else (spot * 1.1 - strike)), 2),
                 "breakeven": round(strike - prem_usd if meta["option_type"] == "P" else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
                 "spread_pct": 0.1,
@@ -759,7 +775,7 @@ async def quick_scan(params: dict = None):
                     "delta": round(delta_val, 3),
                     "iv": round(iv, 1),
                     "open_interest": volume,
-                    "loss_at_10pct": round(cv * 0.1, 2),
+                    "loss_at_10pct": round(max(0, (strike - spot * 0.9) if opt_type == "P" else (spot * 1.1 - strike)), 2),
                     "breakeven": round(breakeven, 0),
                     "distance_spot_pct": round(dist, 1),
                     "spread_pct": round(spread_pct, 2),
@@ -805,7 +821,9 @@ async def quick_scan(params: dict = None):
             "contracts": contracts[:30],
             "dvol_current": dvol_current,
             "dvol_z_score": dvol_z,
-            "dvol_signal": dvol_signal
+            "dvol_signal": dvol_signal,
+            "large_trades_count": large_trades_count,
+            "large_trades_details": large_trades[:20]
         }
     except Exception as e:
         import traceback
@@ -1521,6 +1539,8 @@ async def get_strike_distribution(
     cursor = conn.cursor()
     since = datetime.now() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
+    
+    spot = get_spot_price(currency)
 
     cursor.execute("""
         SELECT strike, direction, COUNT(*) as count, SUM(volume) as total_volume,
