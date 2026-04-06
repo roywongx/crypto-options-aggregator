@@ -61,6 +61,35 @@ def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
         return None
 
 
+def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
+    try:
+        response = requests.get(
+            "https://www.deribit.com/api/v2/public/get_index_price",
+            params={"currency": currency, "index_name": f"{currency}_usd"},
+            timeout=10
+        )
+        data = response.json()
+        if data.get("result"):
+            return float(data["result"]["index_price"])
+    except Exception as e:
+        print(f"获取Deribit现货价格失败: {e}", file=sys.stderr)
+    return None
+
+
+def get_spot_price(currency: str = "BTC") -> float:
+    spot = get_spot_price_binance(currency)
+    if spot and spot > 0:
+        return spot
+    spot = get_spot_price_deribit(currency)
+    if spot and spot > 0:
+        return spot
+    if currency == "BTC":
+        return 100000.0
+    elif currency == "ETH":
+        return 5000.0
+    return 100000.0
+
+
 def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
     try:
         response = requests.get(
@@ -119,6 +148,23 @@ FLOW_LABEL_MAP = {
     "covered_call": ("备兑开仓", "卖出Call锁定收益"),
     "call_overwrite": ("改仓操作", "高Delta Call卖出改仓"),
 }
+def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
+    if not direction or direction == "unknown" or not option_type:
+        return "unclassified"
+    d = abs(delta or 0)
+    moneyness = ((strike or 0) - (spot or 0)) / (spot or 1) if spot else 0
+    if direction == "buy":
+        if option_type == "PUT":
+            return "protective_hedge" if d >= 0.3 else "speculative_put"
+        elif option_type == "CALL":
+            return "call_momentum" if d >= 0.3 else "call_speculative"
+    elif direction == "sell":
+        if option_type == "PUT":
+            return "premium_collect"
+        elif option_type == "CALL":
+            return "covered_call" if moneyness > 0.02 else "call_overwrite"
+    return "unclassified"
+
 
 def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> Dict[str, Any]:
     title = trade.get('title', '')
@@ -748,7 +794,8 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
     surface = []
     term_data = {d: [] for d in dte_buckets}
 
-    spot = _get_spot_from_scan() or float(summaries[0].get('underlying_price', 0) or 70000) if summaries else (_get_spot_from_scan() or 70000)
+    deribit_sp = float(summaries[0].get('underlying_price', 0)) if summaries else 0
+    spot = deribit_sp if deribit_sp > 1000 else (_get_spot_from_scan() or 70000)
 
     for s in summaries:
         meta = _parse_inst_name(s.get("instrument_name", ""))
@@ -778,9 +825,13 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
             "bucket": bucket, "oi": round(oi, 1), "moneyness": round(moneyness, 3)})
 
         for db in dte_buckets:
-            if abs(meta["dte"] - db) <= 10:
+            window = max(5, int(db * 0.6))
+            if abs(meta["dte"] - db) <= window:
                 term_data[db].append(iv_pct)
                 break
+        else:
+            nearest = min(dte_buckets, key=lambda x: abs(meta["dte"] - x))
+            term_data[nearest].append(iv_pct)
 
     term_structure = []
     for d in dte_buckets:
@@ -789,6 +840,23 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
         term_structure.append({"dte": d, "avg_iv": round(avg_iv, 1) if avg_iv else None,
             "count": len(ivs), "min_iv": round(min(ivs), 1) if ivs else None,
             "max_iv": round(max(ivs), 1) if ivs else None})
+
+    for i, ts in enumerate(term_structure):
+        if ts["avg_iv"] is None:
+            left = right = None
+            for j in range(i-1, -1, -1):
+                if term_structure[j]["avg_iv"] is not None: left = j; break
+            for j in range(i+1, len(term_structure)):
+                if term_structure[j]["avg_iv"] is not None: right = j; break
+            if left is not None and right is not None:
+                t_l, t_r, t_c = term_structure[left]["dte"], term_structure[right]["dte"], ts["dte"]
+                v_l, v_r = term_structure[left]["avg_iv"], term_structure[right]["avg_iv"]
+                ts["avg_iv"] = round(v_l + (v_r - v_l) * (t_c - t_l) / (t_r - t_l), 1)
+                ts["interpolated"] = True
+            elif left is not None:
+                ts["avg_iv"] = term_structure[left]["avg_iv"]; ts["interpolated"] = True
+            elif right is not None:
+                ts["avg_iv"] = term_structure[right]["avg_iv"]; ts["interpolated"] = True
 
     backwardation = False
     alert_msg = ""
@@ -824,6 +892,13 @@ def _get_spot_from_scan():
                     return sp
     except:
         pass
+    try:
+        import urllib.request
+        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        resp = urllib.request.urlopen(url, timeout=5)
+        return float(json.loads(resp.read())["price"])
+    except:
+        pass
     return 0
 
 
@@ -853,7 +928,9 @@ async def get_max_pain(currency: str = Query(default="BTC")):
 
     strikes = sorted(set(p["strike"] for p in parsed))
     expiries = sorted(set((p["expiry"], p["dte"]) for p in parsed))
-    spot = _get_spot_from_scan() or strikes[len(strikes)//2]
+    deribit_spot = float(summaries[0].get('underlying_price', 0)) if summaries else 0
+    db_spot = _get_spot_from_scan()
+    spot = deribit_spot if deribit_spot > 1000 else (db_spot if db_spot > 1000 else strikes[len(strikes)//2])
 
     results = []
     for exp_name, exp_dte in expiries[:4]:
@@ -885,9 +962,17 @@ async def get_max_pain(currency: str = Query(default="BTC")):
             if int(round(ts)) == int(round(spot)):
                 pain_at_s = tp
             ng = sum(g for k, g in cg_map.items() if k >= ts) + sum(-g for k, g in pg_map.items() if k <= ts)
-            ngex = ng * spot * spot / 100
-            gc.append({"strike": ts, "gex": round(ngex, 0), "net_gamma": round(ng, 2)})
-            cs = 1 if ngex >= 0 else -1
+            call_oi_above = sum(v for k, v in co_map.items() if k >= ts)
+            put_oi_below = sum(v for k, v in po_map.items() if k <= ts)
+            net_oi_exposure = call_oi_above - put_oi_below
+            if ng != 0:
+                ngex = ng * spot * spot / 100
+            else:
+                ngex = net_oi_exposure * 100
+            gc.append({"strike": ts, "gex": round(ngex, 0), "net_gamma": round(ng, 2),
+                       "net_oi_exposure": round(net_oi_exposure, 0),
+                       "call_oi_above": round(call_oi_above, 0), "put_oi_below": round(put_oi_below, 0)})
+            cs = 1 if net_oi_exposure >= 0 else -1
             if prev_sign is not None and cs != prev_sign:
                 flip = ts
             prev_sign = cs
@@ -896,17 +981,17 @@ async def get_max_pain(currency: str = Query(default="BTC")):
         tco = sum(co_map.values())
         tpo = sum(po_map.values())
         pcr = tpo / tco if tco > 0 else 0
-        sig = "Neutral"
+        sig = "中性"
         if dist > 3:
-            sig = "Bullish: below Max Pain"
+            sig = "偏多: 价格在最大痛点下方"
         elif dist < -3:
-            sig = "Bearish: above Max Pain"
+            sig = "偏空: 价格在最大痛点上方"
         mm = ""
         if flip:
             if spot < flip:
-                mm = f"DANGER: Spot ${spot:,.0f} < Flip ${flip:,.0f} | Neg Gamma = Squeeze risk"
+                mm = f"⚠️ 危险: 现货 ${spot:,.0f} < Flip点 ${flip:,.0f} | 空头Gamma区，波动放大风险"
             else:
-                mm = f"SAFE: Spot ${spot:,.0f} > Flip ${flip:,.0f} | Pos Gamma = vol suppression"
+                mm = f"✅ 安全: 现货 ${spot:,.0f} > Flip点 ${flip:,.0f} | 多头Gamma区，波动受抑"
 
         results.append({"expiry": exp_name, "dte": exp_dte, "max_pain": round(mp_strike, 0),
             "dist_pct": round(dist, 2), "pain_at_spot": round(pain_at_s, 0),
@@ -1087,11 +1172,12 @@ async def get_strike_distribution(
                SUM(CASE WHEN direction='buy' THEN 1 ELSE 0 END) as buys,
                SUM(CASE WHEN direction='sell' THEN 1 ELSE 0 END) as sells
         FROM large_trades_history 
-        WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
+        WHERE currency = ? AND timestamp > ?
+              AND strike IS NOT NULL AND strike > ? AND strike < ?
         GROUP BY strike, direction
         ORDER BY count DESC
         LIMIT 50
-    """, (currency, since_str))
+    """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
 
     rows = cursor.fetchall()
     conn.close()
@@ -1121,20 +1207,22 @@ async def get_wind_analysis(
     since = datetime.now() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
 
-    spot = get_spot_price_binance(currency) or 0
+    spot = get_spot_price(currency)
 
     cursor.execute("""
-        SELECT strike, direction, COUNT(*) as cnt,
+        SELECT strike, option_type, direction, COUNT(*) as cnt,
                SUM(notional_usd) as total_notional,
                SUM(CASE WHEN direction='buy' THEN 1 ELSE 0 END) as buys,
                SUM(CASE WHEN direction='sell' THEN 1 ELSE 0 END) as sells,
                SUM(volume) as total_volume,
-               flow_label
-        FROM large_trades_history 
+               MAX(instrument_name) as last_inst,
+               MAX(flow_label) as flow_label
+        FROM large_trades_history
         WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
-        GROUP BY strike
-        ORDER BY cnt DESC
-    """, (currency, since_str))
+              AND strike > ? AND strike < ?
+        GROUP BY strike, option_type
+        ORDER BY strike ASC
+    """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
 
     strike_rows = cursor.fetchall()
 
@@ -1167,19 +1255,21 @@ async def get_wind_analysis(
     strike_flows = []
     max_abs_net = 1
     for row in strike_rows:
-        strike = row[0]
-        buys = row[4] or 0
-        sells = row[5] or 0
+        strike = float(row[0] or 0)
+        option_type = row[1] or ''
+        buys = int(row[5] or 0)
+        sells = int(row[6] or 0)
         net = buys - sells
-        notional = row[2] or 0
-        vol = row[6] or 0
-        flow = row[7] or ''
+        notional = row[4] or 0
+        vol = row[7] or 0
+        flow = row[9] or ''
         max_abs_net = max(max_abs_net, abs(net))
 
         dist_pct = ((strike - spot) / spot * 100) if spot > 0 else 0
 
         strike_flows.append({
             "strike": strike,
+            "option_type": option_type,
             "buys": buys,
             "sells": sells,
             "net": net,
@@ -1272,7 +1362,7 @@ async def get_wind_analysis(
     return {
         "summary": summary,
         "sentiment_text": sentiment_text,
-        "strike_flows": strike_flows[:25],
+        "strike_flows": strike_flows,
         "flow_breakdown": flow_breakdown,
     }
 
@@ -1318,3 +1408,33 @@ def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
 
     adjusted['_dvol_advice'] = advice
     return adjusted
+
+
+def _get_positions_greeks(currency: str) -> dict:
+    import concurrent.futures
+    cache = {}
+    try:
+        from deribit_options_monitor import DeribitOptionsMonitor
+        mon = DeribitOptionsMonitor()
+        summaries = mon._get_book_summaries(currency)
+        if not summaries:
+            return cache
+        instruments = list({s["instrument_name"] for s in summaries})
+        def fetch_greeks(inst):
+            try:
+                book = mon._request_json("/api/v2/public/get_order_book", {"instrument_name": inst})
+                result = book.get("result", {}) if book else {}
+                greeks = result.get("greeks", {}) if result else {}
+                return inst, {"gamma": greeks.get("gamma"), "delta": greeks.get("delta"), "vega": greeks.get("vega"), "theta": greeks.get("theta")}
+            except:
+                return inst, {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            for fut in concurrent.futures.as_completed({ex.submit(fetch_greeks, i): i for i in instruments}, timeout=20):
+                try:
+                    inst, gk = fut.result()
+                    cache[inst] = gk
+                except:
+                    pass
+    except:
+        pass
+    return cache

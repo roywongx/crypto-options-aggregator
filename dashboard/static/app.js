@@ -1140,19 +1140,19 @@ async function loadTermStructure() {
         const bwTxt = document.getElementById('bwText');
         if (bwEl && bwTxt && d.backwardation) {
             bwEl.classList.remove('hidden');
-            bwTxt.textContent = d.alert || 'BACKWARDATION!';
+            bwTxt.textContent = d.alert || '⚠️ 远期IV < 近期IV（倒挂/Backwardation）！';
         }
 
         const ctx = document.getElementById('termStructureChart');
         if (!ctx) return;
         const validTs = (d.term_structure || []).filter(t => t.avg_iv !== null && t.avg_iv > 0);
         if (validTs.length < 2) {
-            ctx.parentElement.innerHTML = '<div class="text-gray-500 text-center py-8 text-sm">Insufficient data (' + validTs.length + ' DTE buckets)</div>';
+            ctx.parentElement.innerHTML = '<div class="text-gray-500 text-center py-8 text-sm">数据不足 (' + validTs.length + ' 个到期月份)</div>';
             return;
         }
 
         if (typeof Chart === 'undefined') {
-            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">Chart.js not loaded</div>';
+            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">⚠️ Chart.js 未加载</div>';
             return;
         }
 
@@ -1162,7 +1162,7 @@ async function loadTermStructure() {
             data: {
                 labels: validTs.map(t => t.dte + 'D'),
                 datasets: [{
-                    label: 'Avg IV %',
+                    label: '平均隐含波动率 (%)',
                     data: validTs.map(t => t.avg_iv),
                     borderColor: '#22d3ee',
                     backgroundColor: 'rgba(34,211,238,0.1)',
@@ -1176,7 +1176,7 @@ async function loadTermStructure() {
                 responsive: true,
                 plugins: { legend: { display: false } },
                 scales: {
-                    y: { title: { display: true, text: 'IV %', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                    y: { title: { display: true, text: '隐含波动率 (%)', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
                     x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } }
                 }
             }
@@ -1185,7 +1185,7 @@ async function loadTermStructure() {
     } catch(e) {
         console.error('TS error:', e);
         const ctx = document.getElementById('termStructureChart');
-        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">Error: ' + e.message + '</div>';
+        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">❌ 错误: ' + e.message + '</div>';
     }
 }
 
@@ -1219,29 +1219,134 @@ async function loadMaxPain() {
         if (!ctx || !exp.pain_curve || !exp.pain_curve.length) return;
 
         if (typeof Chart === 'undefined') {
-            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">Chart.js not loaded</div>';
+            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">⚠️ Chart.js 未加载</div>';
             return;
         }
 
         const strikes = exp.pain_chart || exp.pain_curve;
         if (mpChart) try { mpChart.destroy(); } catch(e) {}
+        var painData = exp.pain_curve || [];
+        var gexData = exp.gex_curve || exp.gex_chart || [];
+        var strikeLabels = strikes.map(function(s) { return '$' + (s.strike / 1000).toFixed(0) + 'K'; });
+        var painValues = painData.map(function(p) { return p.pain || p.total_pain || 0; });
+        var gexValues = gexData.map(function(g) { return g.gex || 0; });
+        var mpStrike = exp.max_pain || 0;
+        var spotPrice = d.spot || 0;
+        
+        var painMin = Math.min.apply(null, painValues.filter(function(v){return v>0;}));
+        var painMax = Math.max.apply(null, painValues);
+        var normPain = painValues.map(function(v) {
+            return painMax > painMin ? ((v - painMin) / (painMax - painMin) * 100) : 50;
+        });
+        
+        var gexAbsMax = Math.max.apply(null, gexValues.map(Math.abs));
+        var normGex = gexValues.map(function(v) {
+            return gexAbsMax > 0 ? (v / gexAbsMax * 100) : 0;
+        });
+
         mpChart = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: strikes.map(s => (s.strike / 1000).toFixed(0) + 'K'),
+                labels: strikeLabels,
                 datasets: [
-                    { label: 'Total Pain', data: (exp.pain_curve || []).map(p => p.pain || p.total_pain || 0), type: 'line', borderColor: '#fb923c', backgroundColor: 'transparent', yAxisID: 'y' },
-                    { label: 'GEX', data: (exp.gex_chart || []).map(g => g.gex || 0), backgroundColor: (exp.gex_chart || []).map(g => (g.gex || 0) >= 0 ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)'), yAxisID: 'y1' }
+                    {
+                        label: 'OI净敞口分布 (归一化)',
+                        data: normGex,
+                        backgroundColor: gexValues.map(function(v) {
+                            return v >= 0 ? 'rgba(34,197,94,0.6)' : 'rgba(239,68,68,0.6)';
+                        }),
+                        borderColor: gexValues.map(function(v) {
+                            return v >= 0 ? 'rgba(34,197,94,1)' : 'rgba(239,68,68,1)';
+                        }),
+                        borderWidth: 1,
+                        yAxisID: 'y1',
+                        order: 2
+                    },
+                    {
+                        label: '痛点曲线 (归一化)',
+                        data: normPain,
+                        type: 'line',
+                        borderColor: '#f97316',
+                        backgroundColor: 'rgba(249,115,22,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 5,
+                        pointHoverBackgroundColor: '#f97316',
+                        yAxisID: 'y',
+                        order: 1
+                    }
                 ]
             },
             options: {
                 responsive: true,
                 interaction: { mode: 'index', intersect: false },
-                plugins: { legend: { labels: { color: '#9ca3af', boxWidth: 12 } } },
+                plugins: {
+                    legend: { 
+                        labels: { color: '#9ca3af', boxWidth: 12, padding: 15, font: { size: 11 } },
+                        title: { display: true, text: '最大痛点 $' + mpStrike.toLocaleString() + ' | 现货 $' + spotPrice.toLocaleString(), color: '#eab308', font: { size: 13, weight: 'bold' } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) {
+                                var idx = items[0].dataIndex;
+                                var s = strikes[idx];
+                                return '行权价: $' + (s.strike || 0).toLocaleString();
+                            },
+                            afterBody: function(items) {
+                                var idx = items[0].dataIndex;
+                                var lines = [];
+                                if (painData[idx]) {
+                                    var pd = painData[idx];
+                                    lines.push('实际痛点: $' + pd.pain.toLocaleString());
+                                    if (pd.call_pain !== undefined) lines.push('  Call损耗: $' + pd.call_pain.toLocaleString() + ' | Put损耗: $' + pd.put_pain.toLocaleString());
+                                }
+                                if (gexData[idx]) {
+                                    var gd = gexData[idx];
+                                    lines.push('OI净敞口: ' + gd.gex.toLocaleString());
+                                    if (gd.oi_call !== undefined) lines.push('  Call OI: ' + gd.oi_call.toLocaleString() + ' | Put OI: ' + gd.oi_put.toLocaleString());
+                                }
+                                var stk = strikes[idx] ? strikes[idx].strike : 0;
+                                if (Math.abs(stk - mpStrike) < 500) lines.push('⭐ 最大痛点');
+                                if (Math.abs(stk - spotPrice) < 500) lines.push('📍 当前现货');
+                                return lines;
+                            }
+                        }
+                    }
+                },
                 scales: {
-                    y: { type: 'linear', position: 'left', title: { display: true, text: 'Pain ($)', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
-                    y1: { type: 'linear', position: 'right', title: { display: true, text: 'GEX', color: '#9ca3af' }, grid: { drawOnChartArea: false }, ticks: { color: '#9ca3af' } },
-                    x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af', maxTicksLimit: 15 } }
+                    y: { 
+                        type: 'linear', position: 'left', 
+                        min: 0, max: 110,
+                        title: { display: true, text: '痛点曲线 (%)', color: '#f97316' }, 
+                        grid: { color: 'rgba(255,255,255,0.06)' }, 
+                        ticks: { color: '#f97316', callback: function(v) { return v + '%'; } } 
+                    },
+                    y1: { 
+                        type: 'linear', position: 'right',
+                        title: { display: true, text: 'OI净敞口 (%)', color: '#22c55e' }, 
+                        grid: { drawOnChartArea: false }, 
+                        ticks: { 
+                            color: '#22c55e', 
+                            callback: function(v) { 
+                                if (Math.abs(v) >= 1000) return (v/1000).toFixed(0) + 'K';
+                                return v; 
+                            } 
+                        }
+                    },
+                    x: { 
+                        grid: { color: 'rgba(255,255,255,0.06)' }, 
+                        ticks: { 
+                            color: '#9ca3af', maxTicksLimit: 20,
+                            callback: function(val, idx) {
+                                var s = this.getLabelForValue(val);
+                                var stk = parseFloat(s.replace(/[$K]/g, '')) * 1000;
+                                if (Math.abs(stk - mpStrike) < 1000) return '🎯 ' + s + ' MP';
+                                if (Math.abs(stk - spotPrice) < 1000) return '📍 ' + s + ' SPOT';
+                                return s;
+                            }
+                        } 
+                    }
                 }
             }
         });
@@ -1249,7 +1354,7 @@ async function loadMaxPain() {
     } catch(e) {
         console.error('MP error:', e);
         const ctx = document.getElementById('painGexChart');
-        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">Error: ' + e.message + '</div>';
+        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">❌ 错误: ' + e.message + '</div>';
     }
 }
 
@@ -1263,8 +1368,8 @@ async function runSandbox() {
     var nContracts = parseInt(document.getElementById('sbContracts').value) || 1;
 
     var resultDiv = document.getElementById('sandboxResult');
-    if (!resultDiv) { alert('Sandbox container not found'); return; }
-    resultDiv.innerHTML = '<div class="text-center py-4 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>Simulating...</div>';
+    if (!resultDiv) { alert('沙盘容器未找到'); return; }
+    resultDiv.innerHTML = '<div class="text-center py-4 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>🔄 推演计算中...</div>';
 
     try {
         var resp = await fetch(API_BASE + '/api/sandbox/simulate', {
@@ -1277,19 +1382,19 @@ async function runSandbox() {
         var html = '';
         html += '<div class="p-3 rounded-lg ' + (d.crash && d.crash.drop_pct < -20 ? 'bg-red-900/30 border border-red-500/30' : 'bg-gray-800') + ' mb-3">';
         html += '<div class="flex justify-between items-center mb-2">';
-        html += '<span class="text-sm font-medium">Crash Scenario</span>';
+        html += '<span class="text-sm font-medium">📉 崩盘情景模拟</span>';
         html += '<span class="text-xs font-mono">$' + (d.crash ? d.crash.from.toLocaleString() : '?') + ' -> $' + (d.crash ? d.crash.to.toLocaleString() : '?') + (' (' + (d.crash ? d.crash.drop_pct : '?') + '%)</span>');
         html += '</div>';
         html += '<div class="grid grid-cols-3 gap-2 text-xs">';
-        html += '<div>Position: <span class="text-white">' + (d.position ? d.position.symbol : '?') + '</span></div>';
-        html += '<div>Est Loss: <span class="' + (d.loss > 0 ? 'text-red-400' : '') + '">$' + (d.loss || 0).toLocaleString() + '</span></div>';
-        html += '<div>Reserve: <span class="text-cyan-400">$' + (d.reserve || 0).toLocaleString() + '</span></div>';
+        html += '<div>当前持仓: <span class="text-white">' + (d.position ? d.position.symbol : '?') + '</span></div>';
+        html += '<div>预估亏损: <span class="' + (d.loss > 0 ? 'text-red-400' : '') + '">$' + (d.loss || 0).toLocaleString() + '</span></div>';
+        html += '<div>后备资金: <span class="text-cyan-400">$' + (d.reserve || 0).toLocaleString() + '</span></div>';
         html += '</div></div>';
 
         (d.steps || []).forEach(function(st) {
             var sc = st.status === 'danger' ? 'border-red-500/50 bg-red-900/20' : st.status === 'warning' ? 'border-yellow-500/50 bg-yellow-900/20' : 'border-green-500/50 bg-green-900/20';
             html += '<div class="p-3 rounded-lg border ' + sc + ' mb-2">';
-            html += '<div class="text-sm font-medium mb-1">Step ' + st.step + ': ' + st.title + '</div>';
+            html += '<div class="text-sm font-medium mb-1">第 ' + st.step + ': ' + st.title + '</div>';
             (st.details || []).forEach(function(det) { html += '<div class="text-xs text-gray-300 ml-2 py-0.5">' + det + '</div>'; });
             if (st.alert) {
                 var ac = st.status === 'danger' ? 'text-red-400' : st.status === 'warning' ? 'text-yellow-400' : 'text-green-400';
@@ -1300,25 +1405,25 @@ async function runSandbox() {
 
         if (d.best) {
             html += '<div class="p-3 rounded-lg bg-purple-900/20 border border-purple-500/30 mt-2">';
-            html += '<div class="text-sm font-medium mb-2">Recommended Recovery</div>';
+            html += '<div class="text-sm font-medium mb-2">🎯 推荐恢复方案</div>';
             html += '<div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
-            html += '<div>Contract: <span class="text-white">' + (d.best.symbol || '?') + '</span></div>';
-            html += '<div>Quantity: <span class="text-white">' + (d.best.contracts || 0) + 'x</span></div>';
-            html += '<div>Margin: <span class="text-yellow-400">$' + ((d.best.margin || 0)).toLocaleString() + '</span></div>';
+            html += '<div>恢复合约: <span class="text-white">' + (d.best.symbol || '?') + '</span></div>';
+            html += '<div>加仓数量: <span class="text-white">' + (d.best.contracts || 0) + 'x</span></div>';
+            html += '<div>所需保证金: $<span class="text-yellow-400">$' + ((d.best.margin || 0)).toLocaleString() + '</span></div>';
             var nc = d.best.net >= 0 ? 'text-green-400' : 'text-red-400';
-            html += '<div>Net result: <span class="' + nc + '">$' + ((d.best.net || 0)).toLocaleString() + '</span></div>';
+            html += '<div>净盈亏: $<span class="' + nc + '">$' + ((d.best.net || 0)).toLocaleString() + '</span></div>';
             var rc = d.best.reserve >= 0 ? 'text-green-400' : 'text-red-400';
-            html += '<div>Reserve after: <span class="' + rc + '">$' + ((d.best.reserve || 0)).toLocaleString() + '</span></div>';
+            html += '<div>剩余后备金: $<span class="' + rc + '">$' + ((d.best.reserve || 0)).toLocaleString() + '</span></div>';
             html += '</div></div>';
         }
 
         if (d.n_cands === 0) {
-            html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">No recovery candidates at this price level.</div>';
+            html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">⚠️ 该价格水平下无可用恢复合约（链上无深度或IV过高）</div>';
         }
 
         resultDiv.innerHTML = html;
     } catch(e) {
-        resultDiv.innerHTML = '<div class="text-red-400 text-sm p-3">Error: ' + e.message + '</div>';
+        resultDiv.innerHTML = '<div class="text-red-400 text-sm p-3">❌ 错误: ' + e.message + '</div>';
     }
 }
 

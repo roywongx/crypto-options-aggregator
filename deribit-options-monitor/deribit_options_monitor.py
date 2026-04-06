@@ -1586,3 +1586,54 @@ class DeribitOptionsMonitor:
         lines.extend(["", "总结", summary])
 
         return "\n".join(lines)
+
+
+    def _get_order_book(self, instrument_name: str) -> dict[str, Any]:
+        try:
+            resp = self._request_json(f"/api/v2/public/get_order_book", {"instrument_name": instrument_name})
+            return resp.get("result", {}) if resp else {}
+        except Exception:
+            return {}
+
+    def get_greeks_for_contracts(self, currency: str) -> dict[str, dict]:
+        """获取合约Greeks数据的优化方法
+        Deribit没有批量Greeks API，改用单合约并发请求 + 缓存
+        返回: {instrument_name: {gamma, delta, vega, theta, iv}}
+        """
+        import concurrent.futures
+        import threading
+        cache = {}
+        cache_lock = threading.Lock()
+        
+        summaries = self._get_book_summaries(currency)
+        if not summaries:
+            return cache
+        
+        instruments = list({s["instrument_name"] for s in summaries})
+        
+        def fetch_greeks(inst: str) -> tuple[str, dict]:
+            try:
+                book = self._request_json("/api/v2/public/get_order_book", {"instrument_name": inst})
+                result = book.get("result", {}) if book else {}
+                greeks = result.get("greeks", {}) if result else {}
+                with cache_lock:
+                    cache[inst] = {
+                        "gamma": greeks.get("gamma"),
+                        "delta": greeks.get("delta"),
+                        "vega": greeks.get("vega"),
+                        "theta": greeks.get("theta"),
+                        "mark_iv": greeks.get("mark_iv")
+                    }
+                return inst, cache[inst]
+            except Exception:
+                return inst, {}
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(fetch_greeks, inst): inst for inst in instruments}
+            for future in concurrent.futures.as_completed(futures, timeout=30):
+                try:
+                    future.result()
+                except Exception:
+                    pass
+        
+        return cache
