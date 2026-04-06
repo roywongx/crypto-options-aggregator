@@ -139,12 +139,18 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
 
     strike = trade.get('strike')
     if not strike:
-        strike_match = re.search(r'(?:strike|行权价)?[:\s]*(\d{3}(?:,\d{3})*)\s*(?:PUT|CALL)', message, re.IGNORECASE)
-        if not strike_match:
-            strike_match = re.search(r'\$(\d{3}(?:,\d{3})*)', message)
-        if strike_match:
+        ins_name = trade.get('instrument_name') or trade.get('symbol') or ''
+        ins_match = re.search(r'-(\d+)-[PC]$', str(ins_name))
+        if ins_match:
             try:
-                strike = float(strike_match.group(1).replace(',', ''))
+                strike = float(ins_match.group(1))
+            except ValueError:
+                pass
+    if not strike:
+        msg_match = re.search(r'(?:strike|行权价)?[:\s]*(\d{3}(?:,\d{3})*)\s*(?:PUT|CALL|-[PC])', message, re.IGNORECASE)
+        if msg_match:
+            try:
+                strike = float(msg_match.group(1).replace(',', ''))
             except ValueError:
                 pass
 
@@ -346,8 +352,7 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         cmd.extend(["--strike-range", params.strike_range])
 
     try:
-        result = await run_in_threadpool(
-            subprocess.run,
+        result = subprocess.run(
             cmd,
             capture_output=True,
             text=False,
@@ -831,7 +836,7 @@ async def get_wind_analysis(
         buys = row[4] or 0
         sells = row[5] or 0
         net = buys - sells
-        notional = row[3] or 0
+        notional = row[2] or 0
         vol = row[6] or 0
         flow = row[7] or ''
         max_abs_net = max(max_abs_net, abs(net))
@@ -876,7 +881,7 @@ async def get_wind_analysis(
     for row in flow_rows:
         fl = row[3] or 'unknown'
         cnt = row[1]
-        notional = row[3] or 0
+        notional = row[2] or 0
         pct = (cnt / total_trades * 100) if total_trades > 0 else 0
         info = FLOW_LABEL_MAP.get(fl, (fl, ""))
         flow_breakdown.append({
