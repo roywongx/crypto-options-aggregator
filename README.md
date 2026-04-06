@@ -315,28 +315,6 @@ pip install -r dashboard/requirements.txt
 
 ---
 
-## 📋 更新日志
-
-> 详细变更记录见 [CHANGELOG.md](./CHANGELOG.md)
-
-### v5.2 (2026-04-07) — 全面 Bug 审计 + 策略增强
-- **fix-SEVERE**: `get_strike_distribution()` NameError - spot 变量未定义
-- **fix-MEDIUM**: `generate_wind_sentiment()` 字段不匹配 - net_buy_count -> buy_ratio
-- **fix-SEVERE**: quick-scan 返回值缺少 large_trades_details -> 前端大宗异动为空
-- **fix**: 硬编码 fallback spot=69455 -> 动态 get_spot_price_deribit()
-- **feat-HIGH**: DVOL 自适应筛选 - 高波动(>=80th pct)自动收紧delta，低波动(<=20th)放宽
-- **fix-MEDIUM**: loss_at_10pct 从错误的 cv*0.1 改为内在价值计算
-
-### v5.1 (2026-04-07) — 全面审计修复版
-- **fix**: 大宗异动金额门槛：Deribit fallback 添加 `$10,000` 最小名义值过滤
-- **fix**: Wind Analysis PUT/CALL 标签判定 Bug（`optType==='P'` → 完整匹配 `'PUT'`）
-- **fix**: Wind Analysis SQL 过滤 option_type=NULL 垃圾记录
-- **fix**: 数据库清理：删除 7,879 条垃圾数据（60%），保留 5,150 条有效记录
-- **fix**: 大宗交易前端渲染重写，使用实际 API 字段
-- **fix**: Flow 分类算法重写，匹配原始项目逻辑
-
----
-
 ## ⚠️ 免责声明
 
 > 期权交易有风险，本工具仅供信息参考，不构成投资建议。
