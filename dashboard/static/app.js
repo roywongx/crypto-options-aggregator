@@ -1116,38 +1116,47 @@ async function loadWindAnalysis() {
         console.error('加载风向分析失败:', error);
     }
 }
-
 // ============================================================
 // Module 1: IV Term Structure
 // ============================================================
 let tsChart = null;
 async function loadTermStructure() {
+    const statusEl = document.getElementById('ts7');
+    if (!statusEl) { console.warn('TS: container not found'); return; }
     try {
         const resp = await fetch(API_BASE + '/api/charts/vol-surface?currency=BTC');
         const d = await resp.json();
-        if (d.error) return;
+        if (d.error) { console.warn('TS:', d.error); return; }
 
-        // Update DTE badges
-        d.term_structure.forEach(t => {
-            const el = document.getElementById('ts' + t.dte);
-            if (el) el.textContent = t.avg_iv ? t.avg_iv + '%' : '--';
+        [7,14,30,60,90].forEach(dte => {
+            const el = document.getElementById('ts' + dte);
+            if (el) {
+                const ts = (d.term_structure || []).find(t => t.dte === dte);
+                el.textContent = ts && ts.avg_iv ? ts.avg_iv + '%' : '--';
+            }
         });
 
-        // Backwardation alert
         const bwEl = document.getElementById('backwardationAlert');
         const bwTxt = document.getElementById('bwText');
-        if (d.backwardation && bwEl && bwTxt) {
+        if (bwEl && bwTxt && d.backwardation) {
             bwEl.classList.remove('hidden');
-            bwTxt.textContent = d.alert || 'BACKWARDATION detected!';
+            bwTxt.textContent = d.alert || 'BACKWARDATION!';
         }
 
-        // Term structure line chart
         const ctx = document.getElementById('termStructureChart');
         if (!ctx) return;
-        const validTs = d.term_structure.filter(t => t.avg_iv !== null);
-        if (validTs.length < 2) return;
+        const validTs = (d.term_structure || []).filter(t => t.avg_iv !== null && t.avg_iv > 0);
+        if (validTs.length < 2) {
+            ctx.parentElement.innerHTML = '<div class="text-gray-500 text-center py-8 text-sm">Insufficient data (' + validTs.length + ' DTE buckets)</div>';
+            return;
+        }
 
-        if (tsChart) tsChart.destroy();
+        if (typeof Chart === 'undefined') {
+            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">Chart.js not loaded</div>';
+            return;
+        }
+
+        if (tsChart) try { tsChart.destroy(); } catch(e) {}
         tsChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -1159,9 +1168,8 @@ async function loadTermStructure() {
                     backgroundColor: 'rgba(34,211,238,0.1)',
                     fill: true,
                     tension: 0.3,
-                    pointRadius: 4,
-                    pointBackgroundColor: validTs.map(t =>
-                        t.dte <= 14 ? '#ef4444' : '#22d3ee')
+                    pointRadius: 5,
+                    pointBackgroundColor: validTs.map(t => t.dte <= 14 ? '#ef4444' : '#22d3ee')
                 }]
             },
             options: {
@@ -1173,7 +1181,12 @@ async function loadTermStructure() {
                 }
             }
         });
-    } catch(e) { console.error('TS error:', e); }
+        console.log('TS chart rendered:', validTs.length, 'points');
+    } catch(e) {
+        console.error('TS error:', e);
+        const ctx = document.getElementById('termStructureChart');
+        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">Error: ' + e.message + '</div>';
+    }
 }
 
 // ============================================================
@@ -1181,10 +1194,12 @@ async function loadTermStructure() {
 // ============================================================
 let mpChart = null;
 async function loadMaxPain() {
+    const spotEl = document.getElementById('mpSpot');
+    if (!spotEl) { console.warn('MP: container not found'); return; }
     try {
         const resp = await fetch(API_BASE + '/api/metrics/max-pain?currency=BTC');
         const d = await resp.json();
-        if (d.error || !d.expiries || !d.expiries.length) return;
+        if (d.error || !d.expiries) { console.warn('MP:', d.error || 'no expiries'); return; }
 
         const exp = d.expiries[0];
         document.getElementById('mpSpot').textContent = '$' + (d.spot || 0).toLocaleString();
@@ -1193,7 +1208,6 @@ async function loadMaxPain() {
         document.getElementById('mpPCR').textContent = (exp.pcr || 0).toFixed(2);
         document.getElementById('mpSignal').textContent = exp.signal || '';
 
-        // MM Alert
         const mmEl = document.getElementById('mmAlert');
         if (exp.mm_signal && mmEl) {
             mmEl.classList.remove('hidden');
@@ -1201,19 +1215,23 @@ async function loadMaxPain() {
             mmEl.textContent = exp.mm_signal;
         }
 
-        // Pain curve + GEX chart
         const ctx = document.getElementById('painGexChart');
         if (!ctx || !exp.pain_curve || !exp.pain_curve.length) return;
 
-        if (mpChart) mpChart.destroy();
-        const strikes = exp.pain_curve.map(p => p.strike);
+        if (typeof Chart === 'undefined') {
+            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">Chart.js not loaded</div>';
+            return;
+        }
+
+        const strikes = exp.pain_chart || exp.pain_curve;
+        if (mpChart) try { mpChart.destroy(); } catch(e) {}
         mpChart = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: strikes.map(s => (s/1000).toFixed(0) + 'K'),
+                labels: strikes.map(s => (s.strike / 1000).toFixed(0) + 'K'),
                 datasets: [
-                    { label: 'Total Pain', data: exp.pain_curve.map(p => p.pain), backgroundColor: 'rgba(251,146,60,0.5)', type: 'line', borderColor: '#fb923c', yAxisID: 'y' },
-                    { label: 'GEX', data: exp.gex_chart.map(g => g.gex), backgroundColor: g => g.gex >= 0 ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)', yAxisID: 'y1' }
+                    { label: 'Total Pain', data: (exp.pain_curve || []).map(p => p.pain || p.total_pain || 0), type: 'line', borderColor: '#fb923c', backgroundColor: 'transparent', yAxisID: 'y' },
+                    { label: 'GEX', data: (exp.gex_chart || []).map(g => g.gex || 0), backgroundColor: (exp.gex_chart || []).map(g => (g.gex || 0) >= 0 ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)'), yAxisID: 'y1' }
                 ]
             },
             options: {
@@ -1227,74 +1245,75 @@ async function loadMaxPain() {
                 }
             }
         });
-    } catch(e) { console.error('MP error:', e); }
+        console.log('MP chart rendered:', strikes.length, 'strikes');
+    } catch(e) {
+        console.error('MP error:', e);
+        const ctx = document.getElementById('painGexChart');
+        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">Error: ' + e.message + '</div>';
+    }
 }
 
 // ============================================================
 // Module 3: Martingale Sandbox
 // ============================================================
 async function runSandbox() {
-    const symbol = document.getElementById('sbSymbol').value.trim() || 'BTC-26APR26-65000-P';
-    const crash = parseFloat(document.getElementById('sbCrash').value) || 45000;
-    const reserve = parseFloat(document.getElementById('sbReserve').value) || 50000;
-    const nContracts = parseInt(document.getElementById('sbContracts').value) || 1;
+    var symbol = (document.getElementById('sbSymbol').value || '').trim() || 'BTC-26APR26-65000-P';
+    var crash = parseFloat(document.getElementById('sbCrash').value) || 45000;
+    var reserve = parseFloat(document.getElementById('sbReserve').value) || 50000;
+    var nContracts = parseInt(document.getElementById('sbContracts').value) || 1;
 
-    const resultDiv = document.getElementById('sandboxResult');
+    var resultDiv = document.getElementById('sandboxResult');
+    if (!resultDiv) { alert('Sandbox container not found'); return; }
     resultDiv.innerHTML = '<div class="text-center py-4 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>Simulating...</div>';
 
     try {
-        const resp = await fetch(API_BASE + '/api/sandbox/simulate', {
+        var resp = await fetch(API_BASE + '/api/sandbox/simulate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ current_symbol: symbol, crash_price: crash, reserve_capital: reserve, num_contracts: nContracts })
         });
-        const d = await resp.json();
+        var d = await resp.json();
 
-        let html = '';
-        // Crash scenario header
-        html += `<div class="p-3 rounded-lg ${d.crash.drop_pct < -20 ? 'bg-red-900/30 border border-red-500/30' : 'bg-gray-800'} mb-3">
-            <div class="flex justify-between items-center mb-2">
-                <span class="text-sm font-medium">Crash Scenario</span>
-                <span class="text-xs font-mono">${d.crash.from.toLocaleString()} -> $${d.crash.to.toLocaleString()} (${d.crash.drop_pct}%)</span>
-            </div>
-            <div class="grid grid-cols-3 gap-2 text-xs">
-                <div>Position: <span class="text-white">${d.position.symbol}</span></div>
-                <div>Est Loss: <span class="${d.loss > 0 ? 'text-red-400' : ''}">$${d.loss.toLocaleString()}</span></div>
-                <div>Reserve: <span class="text-cyan-400">$${d.reserve.toLocaleString()}</span></div>
-            </div>
-        </div>`;
+        var html = '';
+        html += '<div class="p-3 rounded-lg ' + (d.crash && d.crash.drop_pct < -20 ? 'bg-red-900/30 border border-red-500/30' : 'bg-gray-800') + ' mb-3">';
+        html += '<div class="flex justify-between items-center mb-2">';
+        html += '<span class="text-sm font-medium">Crash Scenario</span>';
+        html += '<span class="text-xs font-mono">$' + (d.crash ? d.crash.from.toLocaleString() : '?') + ' -> $' + (d.crash ? d.crash.to.toLocaleString() : '?') + (' (' + (d.crash ? d.crash.drop_pct : '?') + '%)</span>');
+        html += '</div>';
+        html += '<div class="grid grid-cols-3 gap-2 text-xs">';
+        html += '<div>Position: <span class="text-white">' + (d.position ? d.position.symbol : '?') + '</span></div>';
+        html += '<div>Est Loss: <span class="' + (d.loss > 0 ? 'text-red-400' : '') + '">$' + (d.loss || 0).toLocaleString() + '</span></div>';
+        html += '<div>Reserve: <span class="text-cyan-400">$' + (d.reserve || 0).toLocaleString() + '</span></div>';
+        html += '</div></div>';
 
-        // Steps
-        (d.steps || []).forEach(st => {
-            const statusColor = st.status === 'danger' ? 'border-red-500/50 bg-red-900/20' : st.status === 'warning' ? 'border-yellow-500/50 bg-yellow-900/20' : 'border-green-500/50 bg-green-900/20';
-            html += `<div class="p-3 rounded-lg border ${statusColor} mb-2">
-                <div class="text-sm font-medium mb-1">Step ${st.step}: ${st.title}</div>`;
-            (st.details || []).forEach(det => html += `<div class="text-xs text-gray-300 ml-2 py-0.5">${det}</div>`);
-            if (st.alert) html += `<div class="mt-2 text-xs font-medium ${st.status === 'danger' ? 'text-red-400' : st.status === 'warning' ? 'text-yellow-400' : 'text-green-400'}">${st.alert}</div>`;
+        (d.steps || []).forEach(function(st) {
+            var sc = st.status === 'danger' ? 'border-red-500/50 bg-red-900/20' : st.status === 'warning' ? 'border-yellow-500/50 bg-yellow-900/20' : 'border-green-500/50 bg-green-900/20';
+            html += '<div class="p-3 rounded-lg border ' + sc + ' mb-2">';
+            html += '<div class="text-sm font-medium mb-1">Step ' + st.step + ': ' + st.title + '</div>';
+            (st.details || []).forEach(function(det) { html += '<div class="text-xs text-gray-300 ml-2 py-0.5">' + det + '</div>'; });
+            if (st.alert) {
+                var ac = st.status === 'danger' ? 'text-red-400' : st.status === 'warning' ? 'text-yellow-400' : 'text-green-400';
+                html += '<div class="mt-2 text-xs font-medium ' + ac + '">' + st.alert + '</div>';
+            }
             html += '</div>';
         });
 
-        // Best plan summary
         if (d.best) {
-            html += `<div class="p-3 rounded-lg bg-purple-900/20 border border-purple-500/30 mt-2">
-                <div class="text-sm font-medium mb-2">Recommended Recovery</div>
-                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                    <div>Contract: <span class="text-white">${d.best.symbol}</span></div>
-                    <div>Quantity: <span class="text-white">${d.best.contracts}x</span></div>
-                    <div>Margin needed: <span class="text-yellow-400">$${d.best.margin?.toLocaleString()}</span></div>
-                    <div>Net result: <span class="${d.best.net >= 0 ? 'text-green-400' : 'text-red-400'}">$${d.best.net?.toLocaleString()}</span></div>
-                    <div>Reserve after: <span class="${
-                        d.best.reserve >= 0 ? 'text-green-400' : 'text-red-400'
-                    }">$${d.best.reserve?.toLocaleString()}</span></div>
-                    <div>Status: <span class="${
-                        d.best.status === 'success' ? 'text-green-400' : d.best.status === 'partial' ? 'text-yellow-400' : 'text-red-400'
-                    }">${d.best.status.toUpperCase()}</span></div>
-                </div>
-            </div>`;
+            html += '<div class="p-3 rounded-lg bg-purple-900/20 border border-purple-500/30 mt-2">';
+            html += '<div class="text-sm font-medium mb-2">Recommended Recovery</div>';
+            html += '<div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
+            html += '<div>Contract: <span class="text-white">' + (d.best.symbol || '?') + '</span></div>';
+            html += '<div>Quantity: <span class="text-white">' + (d.best.contracts || 0) + 'x</span></div>';
+            html += '<div>Margin: <span class="text-yellow-400">$' + ((d.best.margin || 0)).toLocaleString() + '</span></div>';
+            var nc = d.best.net >= 0 ? 'text-green-400' : 'text-red-400';
+            html += '<div>Net result: <span class="' + nc + '">$' + ((d.best.net || 0)).toLocaleString() + '</span></div>';
+            var rc = d.best.reserve >= 0 ? 'text-green-400' : 'text-red-400';
+            html += '<div>Reserve after: <span class="' + rc + '">$' + ((d.best.reserve || 0)).toLocaleString() + '</span></div>';
+            html += '</div></div>';
         }
 
         if (d.n_cands === 0) {
-            html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">No recovery candidates found at this price level. Try a higher crash floor.</div>';
+            html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">No recovery candidates at this price level.</div>';
         }
 
         resultDiv.innerHTML = html;
@@ -1303,8 +1322,8 @@ async function runSandbox() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => loadWindAnalysis(), 2000);
-    setTimeout(() => loadTermStructure(), 2500);
-    setTimeout(() => loadMaxPain(), 3000);
-})
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() { loadWindAnalysis(); }, 2000);
+    setTimeout(function() { loadTermStructure(); }, 2500);
+    setTimeout(function() { loadMaxPain(); }, 3000);
+});

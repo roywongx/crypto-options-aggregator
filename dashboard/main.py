@@ -1214,7 +1214,9 @@ async def get_wind_analysis(
     dominant_flow = ""
     max_flow_cnt = 0
     for row in flow_rows:
-        fl = row[3] or 'unknown'
+        fl = row[3] or ''
+        if not fl or fl == 'unknown':
+            fl = 'unclassified'
         cnt = row[1]
         notional = row[2] or 0
         pct = (cnt / total_trades * 100) if total_trades > 0 else 0
@@ -1227,9 +1229,14 @@ async def get_wind_analysis(
             "notional": round(notional, 0),
             "pct": round(pct, 1)
         })
-        if cnt > max_flow_cnt:
+        if fl != 'unclassified' and cnt > max_flow_cnt:
             max_flow_cnt = cnt
             dominant_flow = fl
+    if not dominant_flow:
+        dominant_flow = 'unclassified'
+    # Also add unclassified to FLOW_LABEL_MAP if missing
+    if 'unclassified' not in FLOW_LABEL_MAP:
+        FLOW_LABEL_MAP['unclassified'] = ('未分类', '历史数据无流向标签')
 
     buy_ratio = total_buys / total_trades if total_trades > 0 else 0.5
 
