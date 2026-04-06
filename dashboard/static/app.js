@@ -731,7 +731,7 @@ async function loadAprChartData() {
         }
 
         aprChart.data.labels = data.map(d => {
-            const date = new Date(d.timestamp);
+            const date = new Date(d.time || d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
         });
         aprChart.data.datasets[0].data = data.map(d => d.max_apr);
@@ -757,7 +757,7 @@ async function loadDvolChartData() {
         }
 
         dvolChart.data.labels = data.map(d => {
-            const date = new Date(d.timestamp);
+            const date = new Date(d.time || d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
         });
         dvolChart.data.datasets[0].data = data.map(d => d.dvol);
