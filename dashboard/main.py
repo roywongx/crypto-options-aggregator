@@ -343,19 +343,30 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         cmd.extend(["--strike-range", params.strike_range])
     
     try:
-        result = subprocess.run(
+        result = await run_in_threadpool(
+            subprocess.run,
             cmd,
             capture_output=True,
-            text=True,
-            encoding='utf-8',
-            timeout=60
+            text=False, # Receive bytes first
+            timeout=120
         )
-        
+
         if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "扫描失败"}
-        
-        # 直接解析JSON输出
-        parsed = json.loads(result.stdout)
+            return {"success": False, "error": result.stderr.decode('utf-8', errors='replace') or "扫描失败"}
+
+        # Decode stdout explicitly handling potential gbk/utf-8 confusion from subprocess on Windows
+        output_text = result.stdout.decode('utf-8', errors='replace')
+        try:
+            parsed = json.loads(output_text)
+            parsed['success'] = True
+        except json.JSONDecodeError:
+            # Fallback to try GBK if utf-8 fails, common on Windows Chinese cmd
+            try:
+                output_text = result.stdout.decode('gbk', errors='replace')
+                parsed = json.loads(output_text)
+                parsed['success'] = True
+            except Exception as e:
+                return {"success": False, "error": "JSON 解析失败", "raw": output_text[:200]}
         parsed['success'] = True
         
         # 使用从API获取的数据覆盖
@@ -508,6 +519,11 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     if row[10]:
         try: _dvol_raw = json.loads(row[10])
         except: pass
+        
+    try:
+        large_trades = json.loads(row[8]) if row[8] else []
+    except:
+        large_trades = row[8] if isinstance(row[8], list) else []
     
     return {
         "timestamp": row[1],
@@ -517,7 +533,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
         "dvol_z_score": row[5],
         "dvol_signal": row[6],
         "large_trades_count": row[7],
-        "large_trades_details": json.loads(row[8]) if row[8] else [],
+        "large_trades_details": large_trades,
         "contracts": json.loads(row[9]) if row[9] else [],
         "dvol_raw": _dvol_raw
     }
