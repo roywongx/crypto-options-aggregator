@@ -148,10 +148,35 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
                 else:
                     signal = "正常区间"
 
+                # Calculate trend from recent data points
+                trend = "→"  # default: sideways
+                confidence = "中"  # default: medium
+                if len(closes) >= 6:
+                    recent_avg = sum(closes[-3:]) / 3
+                    prev_avg = sum(closes[-6:-3]) / 3
+                    diff_pct = (recent_avg - prev_avg) / prev_avg * 100 if prev_avg > 0 else 0
+                    if diff_pct > 1.5:
+                        trend = "↑"  # up
+                    elif diff_pct < -1.5:
+                        trend = "↓"  # down
+                
+                # Confidence based on data quality
+                n_points = len(closes)
+                if n_points >= 100:
+                    confidence = "高"
+                elif n_points >= 30:
+                    confidence = "中"
+                else:
+                    confidence = "低"
+
                 return {
                     "current": round(current, 2),
                     "z_score": round(z_score, 2),
-                    "signal": signal
+                    "signal": signal,
+                    "trend": trend,
+                    "confidence": confidence,
+                    "data_points": n_points,
+                    "percentile_7d": round(sum(1 for x in closes if x <= current) / len(closes) * 100, 1) if closes else 50.0
                 }
         return {}
     except Exception as e:
@@ -852,6 +877,9 @@ async def quick_scan(params: dict = None):
             "dvol_current": dvol_current,
             "dvol_z_score": dvol_z,
             "dvol_signal": dvol_signal,
+            "dvol_trend": dvol_data.get("trend", ""),
+            "dvol_confidence": dvol_data.get("confidence", ""),
+            "dvol_percentile_7d": dvol_data.get("percentile_7d", None),
             "large_trades_count": large_trades_count,
             "large_trades_details": large_trades[:20]
         }

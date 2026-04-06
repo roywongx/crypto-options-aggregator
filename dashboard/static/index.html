@@ -298,12 +298,13 @@
                                     <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('open_interest')" data-sort="open_interest">持仓量</th>
                                     <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('spread_pct')" data-sort="spread_pct">买卖价差</th>
                                     <th style="width:4.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-blue-300 transition select-none" onclick="sortContracts('iv_rank')" data-sort="iv_rank" title="IV Rank - 当前IV在历史分位中的位置，50%为中性">IV Rank</th>
+                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('_score')" data-sort="_score" title="\u52a0\u6743\u8bc4\u5206 - \u7efc\u5408APR+POP+\u5b89\u5168\u57ab+\u6d41\u52a8\u6027+IV">\u8bc4\u5206</th>
                                     <th style="width:5.5%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('risk')" data-sort="risk">风险等级</th>
                                 </tr>
                             </thead>
                             <tbody id="opportunitiesTable" class="divide-y divide-gray-800/40">
                                 <tr>
-                                    <td colspan="19" class="text-center py-12 text-gray-500">
+                                    <td colspan="20" class="text-center py-12 text-gray-500">
                                         <div class="flex flex-col items-center gap-3">
                                             <i class="fas fa-search text-3xl text-gray-600"></i>
                                             <p>点击"立即扫描"获取期权数据</p>

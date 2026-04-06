@@ -548,6 +548,7 @@ function updateOpportunitiesTable(contracts) {
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${spreadColor}">${spreadPct.toFixed(2)}%</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${bePct ? (bePct >= 10 ? 'text-emerald-400' : bePct >= 5 ? 'text-yellow-300' : 'text-orange-400') : 'text-gray-500'}">${bePct ? bePct.toFixed(1) + '%' : '-'}</td>
             <td class="py-2 px-2 text-center font-mono text-xs tabular-nums ${ivRank ? (ivRank >= 70 ? 'text-red-400' : ivRank <= 30 ? 'text-emerald-400' : 'text-gray-400') : 'text-gray-500'}">${ivRank ? String(ivRank).split('.')[0] : '-'}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${contract._score !== undefined ? (contract._score >= 0.7 ? "text-emerald-400 font-bold" : contract._score >= 0.5 ? "text-green-300" : contract._score >= 0.3 ? "text-yellow-300" : "text-gray-500") : "text-gray-500"}" title="\u52a0\u6743\u8bc4\u5206: APR(25%)+POP(25%)+\u5b89\u5168\u57ab(20%)+\u6d41\u52a8\u6027(15%)+IV\u4e2d\u6027(15%)">${contract._score !== undefined ? contract._score.toFixed(3) : "-"}</td>
             <td class="py-2 px-3 text-center">${riskBadge}</td>
         </tr>`;
     }).join('');
@@ -690,11 +691,11 @@ function updateLargeTrades(trades, count) {
             directionIcon = '<i class="fas fa-minus text-gray-400"></i>'; directionClass = 'border-l-gray-500'; dirLabel = '';
         }
 
-        const severity = notional >= 2000000 ? 'high' : notional >= 500000 ? 'medium' : 'info';
+        const severity = trade.severity || (notional >= 2000000 ? 'high' : notional >= 500000 ? 'medium' : 'info');
         const sevConfig = {
-            high: { bg: 'bg-red-500/20', badge: 'bg-red-500', label: '高' },
-            medium: { bg: 'bg-orange-500/20', badge: 'bg-orange-500', label: '中' },
-            info: { bg: 'bg-blue-500/10', badge: 'bg-blue-500', label: '低' }
+            high: { bg: 'bg-red-500/20', badge: 'bg-red-500', label: '\u5927\u5355', emoji: '\u26a0\ufe0f' },
+            medium: { bg: 'bg-orange-500/20', badge: 'bg-orange-500', label: '\u4e2d\u5355', emoji: '\U0001f7e1' },
+            info: { bg: 'bg-blue-500/10', badge: 'bg-blue-500', label: '\u666e\u901a', emoji: '\u2705' }
         };
         const sev = sevConfig[severity] || sevConfig.info;
 
@@ -712,7 +713,7 @@ function updateLargeTrades(trades, count) {
                         ${optTypeTag}
                         ${dirLabel ? '<span class="text-gray-400">·</span><span class="' + (dir === 'buy' ? 'text-red-400' : 'text-green-400') + '">' + dirLabel + '</span>' : ''}
                         ${strikeStr ? '<span class="text-gray-500">' + strikeStr + '</span>' : ''}
-                        <span class="${sev.badge} text-white text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ml-auto">${sev.label}</span>
+                        <span class="${sev.badge} text-white text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ml-auto">${sev.label} ${sev.emoji}</span>
                     </div>
                     <div class="flex items-center gap-2 flex-wrap">
                         ${flowCN ? '<span class="text-cyan-300">' + flowCN + '</span>' : ''}
