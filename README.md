@@ -66,7 +66,13 @@ cd dashboard && python main.py
 
 #### 🐋 大宗异动面板
 - 近1小时大单实时展示（标题 + 严重程度badge + 方向箭头）
-- **大单风向标**：Strike 分布柱状图（按买/卖方向着色）
+- **情绪总览卡**：五档情绪评分 (🐂偏多 / 📈温和看多 / ➡️中性 / 📉温和看空 / 🐻偏空)
+  - 自然语言总结（支撑/阻力位 + 主流行为判断）
+  - 买卖比例 / 总名义金额 / 主流行为类型
+- **净头寸 Strike 分布图**：每个行权价的净头寸(buy-sell)横向柱状图
+  - 现价锚点标记 + 支撑位(黄)/阻力位(橙)自动识别 + 距现价百分比
+- **流向分类网格**：8类 flow_label 中文展示 + 占比进度条
+  - 保护性对冲 / 收权利金 / 看跌投机 / 看涨投机 / 追涨建仓 / 备兑开仓 / 改仓操作
 - 支持按币种(BTC/ETH/SOL)和时间范围(7/30/90天)筛选
 
 #### 📉 DVOL 分析面板
@@ -91,6 +97,7 @@ cd dashboard && python main.py
 | `GET` | `/api/charts/dvol?hours=168` | DVOL 趋势数据 |
 | `GET` | `/api/trades/history?days=7` | 大宗交易历史（支持方向/来源/行权价筛选） |
 | `GET` | `/api/trades/strike-distribution?days=30` | Strike 分布数据 |
+| `GET` | `/api/trades/wind-analysis?currency=BTC&days=30` | **风向分析 v2**（情绪+Strike分布+流向分类） |
 
 ### 扫描参数 (POST /api/scan)
 
@@ -142,6 +149,33 @@ cd dashboard && python main.py
   }],
   "validation_warnings": []
 }
+
+### 风向分析响应 (/api/trades/wind-analysis)
+
+```json
+{
+  "summary": {
+    "total_trades": 5198,
+    "total_notional": 6742138905,
+    "buy_ratio": 0.53,
+    "sell_ratio": 0.47,
+    "sentiment_score": -1,
+    "dominant_flow": "speculative_put",
+    "key_levels": { "heaviest_strike": 69000, "net_support": 63000, "net_resistance": 71000 },
+    "spot_price": 69016,
+    "time_range": "近30天"
+  },
+  "sentiment_text": "支撑$63K(-8.7%)/阻力$71K(+2.9%) | 主流行为:看跌投机",
+  "strike_flows": [
+    { "strike": 69000, "buys": 455, "sells": 322, "net": 133, "notional": 777000, "dist_from_spot_pct": 1.3 }
+  ],
+  "flow_breakdown": [
+    { "label": "speculative_put", "label_cn": "看跌投机", "count": 2254, "pct": 43.4 }
+  ]
+}
+```
+
+**情绪评分规则**: buy_ratio > 55%→+分, < 45%→-分; dominant_flow 加减/增加 1分
 ```
 
 **字段格式约定**:
@@ -242,6 +276,8 @@ crypto-options-aggregator/
          ├─ 透传 dvol_raw (完整DVOL分析)
          ├─ 透传 large_trades_detail (富化交易)
          ├─ SQLite 存储 (WAL模式, 并发安全)
+         │   └─ large_trades_history: flow_label/notional_usd/delta/instrument_name
+         ├─ /api/trades/wind-analysis: 情绪评分 + 净头寸Strike + 流向分类
          └─ REST API
                   │
         ┌─────────┼─────────┐
