@@ -705,6 +705,329 @@ async def get_dvol_chart(hours: int = Query(default=168)):
     return [{"time": r[0], "dvol": round(r[1], 2) if r[1] else 0, "z_score": round(r[2], 2) if r[2] else 0, "signal": r[3]} for r in rows]
 
 
+# ============================================================
+# Module 1: Volatility Surface & Term Structure
+# ============================================================
+
+def _fetch_derivit_summaries(currency="BTC"):
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
+        from deribit_options_monitor import DeribitOptionsMonitor
+        mon = DeribitOptionsMonitor()
+        return mon._get_book_summaries(currency)
+    except Exception:
+        return []
+
+
+def _parse_inst_name(inst):
+    import re
+    from datetime import datetime
+    m = re.match(r'([A-Z]+)-(\d+[A-Z]{3}\d+)-(\d+)-([PC])', inst)
+    if not m:
+        return None
+    currency, expiry_str, strike_str, opt_type = m.groups()
+    try:
+        exp_date = datetime.strptime(expiry_str, '%d%b%y')
+        dte = max(1, (exp_date - datetime.utcnow()).days)
+    except:
+        dte = 30
+    return {"currency": currency, "expiry": expiry_str, "strike": float(strike_str),
+            "option_type": opt_type, "dte": dte}
+
+
+@app.get("/api/charts/vol-surface")
+async def get_vol_surface(currency: str = Query(default="BTC")):
+    summaries = _fetch_derivit_summaries(currency)
+    if not summaries:
+        return {"error": "Cannot fetch Deribit", "surface": [], "term_structure": [], "backwardation": False}
+
+    dte_buckets = [7, 14, 30, 60, 90]
+    delta_levels = [-0.4, -0.2, 0.0, 0.2, 0.4]
+    delta_labels = ["-40D", "-20D", "ATM", "+20D", "+40D"]
+    surface = []
+    term_data = {d: [] for d in dte_buckets}
+
+    spot = _get_spot_from_scan() or float(summaries[0].get('underlying_price', 0) or 70000) if summaries else (_get_spot_from_scan() or 70000)
+
+    for s in summaries:
+        meta = _parse_inst_name(s.get("instrument_name", ""))
+        if not meta or meta["dte"] < 1 or meta["dte"] > 180:
+            continue
+        iv_pct = float(s.get("mark_iv") or 0)
+        if iv_pct <= 5 or iv_pct > 500:
+            continue
+        oi = float(s.get("open_interest") or 0)
+        strike = meta["strike"]
+        moneyness = (strike - spot) / spot if spot > 0 else 0
+
+        bucket = "ATM"
+        if meta["option_type"] == "P":
+            if moneyness < -0.08: bucket = "-40D"
+            elif moneyness < -0.03: bucket = "-20D"
+            elif moneyness > 0.03: bucket = "+20D"
+            elif moneyness > 0.08: bucket = "+40D"
+        else:
+            if moneyness > 0.08: bucket = "+40D"
+            elif moneyness > 0.03: bucket = "+20D"
+            elif moneyness < -0.03: bucket = "-20D"
+            elif moneyness < -0.08: bucket = "-40D"
+
+        surface.append({"dte": meta["dte"], "strike": strike,
+            "type": meta["option_type"], "iv": round(iv_pct, 1),
+            "bucket": bucket, "oi": round(oi, 1), "moneyness": round(moneyness, 3)})
+
+        for db in dte_buckets:
+            if abs(meta["dte"] - db) <= 10:
+                term_data[db].append(iv_pct)
+                break
+
+    term_structure = []
+    for d in dte_buckets:
+        ivs = term_data[d]
+        avg_iv = sum(ivs) / len(ivs) if ivs else None
+        term_structure.append({"dte": d, "avg_iv": round(avg_iv, 1) if avg_iv else None,
+            "count": len(ivs), "min_iv": round(min(ivs), 1) if ivs else None,
+            "max_iv": round(max(ivs), 1) if ivs else None})
+
+    backwardation = False
+    alert_msg = ""
+    valid_ts = [t for t in term_structure if t["avg_iv"] is not None]
+    if len(valid_ts) >= 2:
+        near = [t for t in valid_ts if t["dte"] <= 14]
+        far = [t for t in valid_ts if t["dte"] >= 30]
+        if near and far:
+            na = sum(t["avg_iv"] for t in near) / len(near)
+            fa = sum(t["avg_iv"] for t in far) / len(far)
+            backwardation = na > fa * 1.02
+            if backwardation:
+                alert_msg = f"BACKWARDATION! Near={na:.1f}% > Far={fa:.1f}%"
+
+    return {"currency": currency, "spot_price": _get_spot_from_scan(),
+        "surface": sorted(surface, key=lambda x: (x["dte"], x["strike"]))[:500],
+        "term_structure": term_structure, "backwardation": backwardation,
+        "alert": alert_msg, "total": len(surface)}
+
+
+def _get_spot_from_scan():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT contracts_data FROM scan_records ORDER BY timestamp DESC LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            data = json.loads(row[0])
+            for item in data:
+                sp = item.get("spot_price")
+                if sp and sp > 1000:
+                    return sp
+    except:
+        pass
+    return 0
+
+
+# ============================================================
+# Module 2: Max Pain & Gamma Exposure (GEX)
+# ============================================================
+
+@app.get("/api/metrics/max-pain")
+async def get_max_pain(currency: str = Query(default="BTC")):
+    summaries = _fetch_derivit_summaries(currency)
+    if not summaries:
+        return {"error": "No data"}
+
+    parsed = []
+    for s in summaries:
+        meta = _parse_inst_name(s.get("instrument_name", ""))
+        if not meta or meta["dte"] < 1:
+            continue
+        oi = float(s.get("open_interest") or 0)
+        gamma = float(s.get("gamma") or 0)
+        if oi < 1:
+            continue
+        parsed.append({**meta, "oi": oi, "gamma": gamma})
+
+    if not parsed:
+        return {"error": "No OI data"}
+
+    strikes = sorted(set(p["strike"] for p in parsed))
+    expiries = sorted(set((p["expiry"], p["dte"]) for p in parsed))
+    spot = _get_spot_from_scan() or strikes[len(strikes)//2]
+
+    results = []
+    for exp_name, exp_dte in expiries[:4]:
+        calls = [p for p in parsed if p["expiry"] == exp_name and p["option_type"] == "C"]
+        puts = [p for p in parsed if p["expiry"] == exp_name and p["option_type"] == "P"]
+        if not calls and not puts:
+            continue
+        co_map = {p["strike"]: p["oi"] for p in calls}
+        po_map = {p["strike"]: p["oi"] for p in puts}
+        cg_map = {p["strike"]: p["gamma"] * p["oi"] for p in calls}
+        pg_map = {p["strike"]: p["gamma"] * p["oi"] for p in puts}
+
+        mp_strike = strikes[0]
+        min_pain = float('inf')
+        pain_at_s = 0
+        pc = []
+        gc = []
+        flip = None
+        prev_sign = None
+
+        for ts in strikes:
+            cp = sum(max(0, ts - k) * v for k, v in co_map.items())
+            pp = sum(max(0, k - ts) * v for k, v in po_map.items())
+            tp = cp + pp
+            pc.append({"strike": ts, "pain": round(tp, 0), "call_pain": round(cp, 0), "put_pain": round(pp, 0)})
+            if tp < min_pain:
+                min_pain = tp
+                mp_strike = ts
+            if int(round(ts)) == int(round(spot)):
+                pain_at_s = tp
+            ng = sum(g for k, g in cg_map.items() if k >= ts) + sum(-g for k, g in pg_map.items() if k <= ts)
+            ngex = ng * spot * spot / 100
+            gc.append({"strike": ts, "gex": round(ngex, 0), "net_gamma": round(ng, 2)})
+            cs = 1 if ngex >= 0 else -1
+            if prev_sign is not None and cs != prev_sign:
+                flip = ts
+            prev_sign = cs
+
+        dist = ((mp_strike - spot) / spot * 100) if spot > 0 else 0
+        tco = sum(co_map.values())
+        tpo = sum(po_map.values())
+        pcr = tpo / tco if tco > 0 else 0
+        sig = "Neutral"
+        if dist > 3:
+            sig = "Bullish: below Max Pain"
+        elif dist < -3:
+            sig = "Bearish: above Max Pain"
+        mm = ""
+        if flip:
+            if spot < flip:
+                mm = f"DANGER: Spot ${spot:,.0f} < Flip ${flip:,.0f} | Neg Gamma = Squeeze risk"
+            else:
+                mm = f"SAFE: Spot ${spot:,.0f} > Flip ${flip:,.0f} | Pos Gamma = vol suppression"
+
+        results.append({"expiry": exp_name, "dte": exp_dte, "max_pain": round(mp_strike, 0),
+            "dist_pct": round(dist, 2), "pain_at_spot": round(pain_at_s, 0),
+            "pcr": round(pcr, 3), "call_oi": round(tco, 0), "put_oi": round(tpo, 0),
+            "signal": sig, "pain_curve": pc, "gex_curve": gc,
+            "flip_point": flip, "mm_signal": mm})
+
+    best = results[0] if results else {}
+    return {"currency": currency, "spot": round(spot, 0), "expiries": results,
+        "nearest_mp": best.get("max_pain"), "nearest_dist": best.get("dist_pct"),
+        "signal": best.get("signal", ""), "mm_overview": best.get("mm_signal", "")}
+
+
+# ============================================================
+# Module 3: Martingale Sandbox Simulation Engine
+# ============================================================
+
+class SandboxParams(BaseModel):
+    current_symbol: str = Field(default="BTC-26APR26-65000-P")
+    crash_price: float = Field(default=45000.0, gt=1000)
+    reserve_capital: float = Field(default=50000.0, ge=1000)
+    num_contracts: int = Field(default=1)
+    margin_ratio: float = Field(default=0.20, ge=0.05, le=1.0)
+
+
+@app.post("/api/sandbox/simulate")
+async def sandbox_simulate(params: SandboxParams):
+    spot = _get_spot_from_scan()
+    if spot < 1000:
+        spot = params.crash_price * 1.5
+    steps = []
+
+    try:
+        parts = params.current_symbol.rsplit('-', 2)
+        base_strike = float(parts[-2]) if len(parts) >= 3 else spot * 0.95
+        opt_type = parts[-1] if len(parts) >= 3 else 'P'
+    except:
+        base_strike = spot * 0.95
+        opt_type = 'P'
+
+    drop = ((params.crash_price - spot) / spot * 100) if spot > 0 else -30
+    intrinsic = max(0, base_strike - params.crash_price) if opt_type.upper() == 'P' else max(0, params.crash_price - base_strike)
+    old_cv = base_strike * params.margin_ratio
+    old_margin = old_cv * params.num_contracts
+
+    summaries = _fetch_derivit_summaries("BTC" if "BTC" in params.current_symbol else "ETH")
+    cands = []
+    for s in summaries:
+        meta = _parse_inst_name(s.get("instrument_name", ""))
+        if not meta or meta["dte"] < 14 or meta["dte"] > 180:
+            continue
+        if meta["option_type"] != opt_type.upper():
+            continue
+        if opt_type.upper() == 'P' and meta["strike"] >= params.crash_price * 0.85:
+            continue
+        iv = float(s.get("mark_iv") or 0)
+        if iv <= 0.05 or iv > 3:
+            continue
+        prem = float(s.get("mark_price") or 0)
+        oi = float(s.get("open_interest") or 0)
+        if prem <= 0 or oi < 10:
+            continue
+        ncv = meta["strike"] * params.margin_ratio
+        apr_e = (prem / ncv) * (365 / meta["dte"]) * 100 if ncv > 0 else 0
+        if apr_e < 5:
+            continue
+        cands.append({**meta, "premium": prem, "apr": round(apr_e, 1), "oi": oi, "cv": round(ncv, 2)})
+    cands.sort(key=lambda x: x["apr"], reverse=True)
+
+    s1_loss = intrinsic * params.num_contracts
+    s1_vega = s1_loss * 0.15
+    total_cost = s1_loss + s1_vega
+
+    steps.append({"step": 1, "title": f"Loss at ${params.crash_price:,.0f}",
+        "details": [f"Pos: {params.num_contracts}x {params.current_symbol}",
+            f"Intrinsic: ${intrinsic:,.0f}/ct x {params.num_contracts} = ${s1_loss:,.0f}",
+            f"Vega bloat (~15%): ${s1_vega:,.0f}", f"Est loss: ~${total_cost:,.0f}"],
+        "loss_amount": round(total_cost, 0), "status": "warning"})
+
+    plans = []
+    for c in cands[:8]:
+        needed = total_cost
+        pyld = c["apr"] / 100 * (c["dte"] / 365)
+        if pyld <= 0.001:
+            continue
+        nc = max(1, min(20, int(needed / (c["cv"] * pyld))))
+        tnm = c["cv"] * nc
+        ei = tnm * pyld
+        nr = ei - needed
+        tcn = old_margin + tnm
+        ok = tcn <= params.reserve_capital + old_margin
+        st = "success" if ok and nr >= 0 else ("partial" if ok else "danger")
+        plans.append({"symbol": f"{c.get('currency','BTC')}-{c['expiry']}-{int(c['strike'])}-{opt_type}",
+            "strike": int(c["strike"]), "dte": c["dte"], "apr": c["apr"],
+            "prem_ct": round(c["premium"], 2), "contracts": nc, "margin": round(tnm, 0),
+            "income": round(ei, 0), "net": round(nr, 0), "capital": round(tcn, 0),
+            "reserve": round(params.reserve_capital - tnm, 0), "ok": ok, "status": st})
+
+    bp = plans[0] if plans else None
+    if bp:
+        al = ""
+        if bp["status"] == "danger":
+            al = f"MARGIN CALL! Reserve ${params.reserve_capital:,.0f} cannot cover recovery at ${params.crash_price:,.0f}"
+        elif bp["status"] == "partial":
+            al = f"TIGHT! Can open but net may be negative"
+        else:
+            al = f"VIABLE! Loss ~${total_cost:,.0f} -> Deploy ${bp['margin']:,.0f} -> {bp['contracts']}x -> Net ${abs(bp['net']):+.0f}"
+        steps.append({"step": 2, "title": "Recovery Plan",
+            "details": [f"{bp['contracts']}x {bp['symbol']} ({bp['dte']}d APR={bp['apr']}%)",
+                f"Prem/ct: ${bp['prem_ct']}", f"Margin: ${bp['margin']:,.0f}", f"Income: ${bp['income']:,.0f}",
+                f"Net: ${bp['net']:+,.0f}", f"Reserve: ${bp['reserve']:,.0f}"],
+            "loss_amount": 0, "status": bp["status"], "alert": al})
+
+    return {"crash": {"from": round(spot, 0), "to": params.crash_price, "drop_pct": round(drop, 1)},
+        "position": {"symbol": params.current_symbol, "contracts": params.num_contracts, "strike": base_strike},
+        "loss": round(total_cost, 0), "reserve": params.reserve_capital,
+        "steps": steps, "plans": plans[:10], "best": bp,
+        "status": bp.get("status", "none") if bp else "no_candidates", "n_cands": len(plans)}
+
+
+
 @app.get("/api/trades/history")
 async def get_trades_history(
     days: int = Query(default=7),

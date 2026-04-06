@@ -1117,6 +1117,194 @@ async function loadWindAnalysis() {
     }
 }
 
+// ============================================================
+// Module 1: IV Term Structure
+// ============================================================
+let tsChart = null;
+async function loadTermStructure() {
+    try {
+        const resp = await fetch(API_BASE + '/api/charts/vol-surface?currency=BTC');
+        const d = await resp.json();
+        if (d.error) return;
+
+        // Update DTE badges
+        d.term_structure.forEach(t => {
+            const el = document.getElementById('ts' + t.dte);
+            if (el) el.textContent = t.avg_iv ? t.avg_iv + '%' : '--';
+        });
+
+        // Backwardation alert
+        const bwEl = document.getElementById('backwardationAlert');
+        const bwTxt = document.getElementById('bwText');
+        if (d.backwardation && bwEl && bwTxt) {
+            bwEl.classList.remove('hidden');
+            bwTxt.textContent = d.alert || 'BACKWARDATION detected!';
+        }
+
+        // Term structure line chart
+        const ctx = document.getElementById('termStructureChart');
+        if (!ctx) return;
+        const validTs = d.term_structure.filter(t => t.avg_iv !== null);
+        if (validTs.length < 2) return;
+
+        if (tsChart) tsChart.destroy();
+        tsChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: validTs.map(t => t.dte + 'D'),
+                datasets: [{
+                    label: 'Avg IV %',
+                    data: validTs.map(t => t.avg_iv),
+                    borderColor: '#22d3ee',
+                    backgroundColor: 'rgba(34,211,238,0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointBackgroundColor: validTs.map(t =>
+                        t.dte <= 14 ? '#ef4444' : '#22d3ee')
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { title: { display: true, text: 'IV %', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                    x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } }
+                }
+            }
+        });
+    } catch(e) { console.error('TS error:', e); }
+}
+
+// ============================================================
+// Module 2: Max Pain & GEX
+// ============================================================
+let mpChart = null;
+async function loadMaxPain() {
+    try {
+        const resp = await fetch(API_BASE + '/api/metrics/max-pain?currency=BTC');
+        const d = await resp.json();
+        if (d.error || !d.expiries || !d.expiries.length) return;
+
+        const exp = d.expiries[0];
+        document.getElementById('mpSpot').textContent = '$' + (d.spot || 0).toLocaleString();
+        document.getElementById('mpPrice').textContent = '$' + (exp.max_pain || 0).toLocaleString();
+        document.getElementById('mpDist').textContent = (exp.dist_pct || 0).toFixed(1) + '%';
+        document.getElementById('mpPCR').textContent = (exp.pcr || 0).toFixed(2);
+        document.getElementById('mpSignal').textContent = exp.signal || '';
+
+        // MM Alert
+        const mmEl = document.getElementById('mmAlert');
+        if (exp.mm_signal && mmEl) {
+            mmEl.classList.remove('hidden');
+            mmEl.className = exp.mm_signal.includes('DANGER') ? 'mb-3 p-2 rounded text-xs bg-red-900/40 border border-red-500/50 text-red-300' : 'mb-3 p-2 rounded text-xs bg-green-900/30 border border-green-500/30 text-green-300';
+            mmEl.textContent = exp.mm_signal;
+        }
+
+        // Pain curve + GEX chart
+        const ctx = document.getElementById('painGexChart');
+        if (!ctx || !exp.pain_curve || !exp.pain_curve.length) return;
+
+        if (mpChart) mpChart.destroy();
+        const strikes = exp.pain_curve.map(p => p.strike);
+        mpChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: strikes.map(s => (s/1000).toFixed(0) + 'K'),
+                datasets: [
+                    { label: 'Total Pain', data: exp.pain_curve.map(p => p.pain), backgroundColor: 'rgba(251,146,60,0.5)', type: 'line', borderColor: '#fb923c', yAxisID: 'y' },
+                    { label: 'GEX', data: exp.gex_chart.map(g => g.gex), backgroundColor: g => g.gex >= 0 ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)', yAxisID: 'y1' }
+                ]
+            },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { labels: { color: '#9ca3af', boxWidth: 12 } } },
+                scales: {
+                    y: { type: 'linear', position: 'left', title: { display: true, text: 'Pain ($)', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                    y1: { type: 'linear', position: 'right', title: { display: true, text: 'GEX', color: '#9ca3af' }, grid: { drawOnChartArea: false }, ticks: { color: '#9ca3af' } },
+                    x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af', maxTicksLimit: 15 } }
+                }
+            }
+        });
+    } catch(e) { console.error('MP error:', e); }
+}
+
+// ============================================================
+// Module 3: Martingale Sandbox
+// ============================================================
+async function runSandbox() {
+    const symbol = document.getElementById('sbSymbol').value.trim() || 'BTC-26APR26-65000-P';
+    const crash = parseFloat(document.getElementById('sbCrash').value) || 45000;
+    const reserve = parseFloat(document.getElementById('sbReserve').value) || 50000;
+    const nContracts = parseInt(document.getElementById('sbContracts').value) || 1;
+
+    const resultDiv = document.getElementById('sandboxResult');
+    resultDiv.innerHTML = '<div class="text-center py-4 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>Simulating...</div>';
+
+    try {
+        const resp = await fetch(API_BASE + '/api/sandbox/simulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_symbol: symbol, crash_price: crash, reserve_capital: reserve, num_contracts: nContracts })
+        });
+        const d = await resp.json();
+
+        let html = '';
+        // Crash scenario header
+        html += `<div class="p-3 rounded-lg ${d.crash.drop_pct < -20 ? 'bg-red-900/30 border border-red-500/30' : 'bg-gray-800'} mb-3">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-sm font-medium">Crash Scenario</span>
+                <span class="text-xs font-mono">${d.crash.from.toLocaleString()} -> $${d.crash.to.toLocaleString()} (${d.crash.drop_pct}%)</span>
+            </div>
+            <div class="grid grid-cols-3 gap-2 text-xs">
+                <div>Position: <span class="text-white">${d.position.symbol}</span></div>
+                <div>Est Loss: <span class="${d.loss > 0 ? 'text-red-400' : ''}">$${d.loss.toLocaleString()}</span></div>
+                <div>Reserve: <span class="text-cyan-400">$${d.reserve.toLocaleString()}</span></div>
+            </div>
+        </div>`;
+
+        // Steps
+        (d.steps || []).forEach(st => {
+            const statusColor = st.status === 'danger' ? 'border-red-500/50 bg-red-900/20' : st.status === 'warning' ? 'border-yellow-500/50 bg-yellow-900/20' : 'border-green-500/50 bg-green-900/20';
+            html += `<div class="p-3 rounded-lg border ${statusColor} mb-2">
+                <div class="text-sm font-medium mb-1">Step ${st.step}: ${st.title}</div>`;
+            (st.details || []).forEach(det => html += `<div class="text-xs text-gray-300 ml-2 py-0.5">${det}</div>`);
+            if (st.alert) html += `<div class="mt-2 text-xs font-medium ${st.status === 'danger' ? 'text-red-400' : st.status === 'warning' ? 'text-yellow-400' : 'text-green-400'}">${st.alert}</div>`;
+            html += '</div>';
+        });
+
+        // Best plan summary
+        if (d.best) {
+            html += `<div class="p-3 rounded-lg bg-purple-900/20 border border-purple-500/30 mt-2">
+                <div class="text-sm font-medium mb-2">Recommended Recovery</div>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    <div>Contract: <span class="text-white">${d.best.symbol}</span></div>
+                    <div>Quantity: <span class="text-white">${d.best.contracts}x</span></div>
+                    <div>Margin needed: <span class="text-yellow-400">$${d.best.margin?.toLocaleString()}</span></div>
+                    <div>Net result: <span class="${d.best.net >= 0 ? 'text-green-400' : 'text-red-400'}">$${d.best.net?.toLocaleString()}</span></div>
+                    <div>Reserve after: <span class="${
+                        d.best.reserve >= 0 ? 'text-green-400' : 'text-red-400'
+                    }">$${d.best.reserve?.toLocaleString()}</span></div>
+                    <div>Status: <span class="${
+                        d.best.status === 'success' ? 'text-green-400' : d.best.status === 'partial' ? 'text-yellow-400' : 'text-red-400'
+                    }">${d.best.status.toUpperCase()}</span></div>
+                </div>
+            </div>`;
+        }
+
+        if (d.n_cands === 0) {
+            html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">No recovery candidates found at this price level. Try a higher crash floor.</div>';
+        }
+
+        resultDiv.innerHTML = html;
+    } catch(e) {
+        resultDiv.innerHTML = '<div class="text-red-400 text-sm p-3">Error: ' + e.message + '</div>';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => loadWindAnalysis(), 2000);
+    setTimeout(() => loadTermStructure(), 2500);
+    setTimeout(() => loadMaxPain(), 3000);
 })

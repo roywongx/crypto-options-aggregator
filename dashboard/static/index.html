@@ -417,6 +417,60 @@
                     </div>
                 </div>
 
+                <!-- Module 1: IV Term Structure -->
+                <div class="card-glass rounded-xl p-5">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <i class="fas fa-chart-area text-cyan-400"></i>
+                        IV Term Structure (期限结构)
+                    </h2>
+                    <div id="backwardationAlert" class="hidden mb-3 p-3 rounded-lg bg-red-900/40 border border-red-500/50 text-red-300 text-sm font-medium">
+                        <span id="bwText"></span>
+                    </div>
+                    <div class="grid grid-cols-5 gap-2 mb-3 text-xs text-center">
+                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">7D</div><div id="ts7" class="font-mono">--</div></div>
+                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">14D</div><div id="ts14" class="font-mono">--</div></div>
+                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">30D</div><div id="ts30" class="font-mono">--</div></div>
+                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">60D</div><div id="ts60" class="font-mono">--</div></div>
+                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">90D</div><div id="ts90" class="font-mono">--</div></div>
+                    </div>
+                    <canvas id="termStructureChart" height="160"></canvas>
+                </div>
+
+                <!-- Module 2: Max Pain & GEX -->
+                <div class="card-glass rounded-xl p-5">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <i class="fas fa-crosshairs text-orange-400"></i>
+                        Max Pain / Gamma Flip
+                    </h2>
+                    <div id="mpOverview" class="grid grid-cols-4 gap-2 mb-3 text-xs">
+                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">Spot</div><div id="mpSpot" class="font-mono text-white">$--</div></div>
+                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">Max Pain</div><div id="mpPrice" class="font-mono text-yellow-400">$--</div></div>
+                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">Deviation</div><div id="mpDist" class="font-mono">--%</div></div>
+                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">P/C Ratio</div><div id="mpPCR" class="font-mono">--</div></div>
+                    </div>
+                    <div id="mmAlert" class="hidden mb-3 p-2 rounded text-xs" id="mmAlertBox"></div>
+                    <canvas id="painGexChart" height="180"></canvas>
+                    <div id="mpSignal" class="mt-2 text-xs text-center text-gray-400"></div>
+                </div>
+
+                <!-- Module 3: Martingale Sandbox -->
+                <div class="card-glass rounded-xl p-5 xl:col-span-2">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                        <i class="fas fa-flask text-purple-400"></i>
+                        Martingale Sandbox (沙盘推演)
+                    </h2>
+                    <div class="grid grid-cols-5 gap-2 mb-3">
+                        <input id="sbSymbol" type="text" value="BTC-26APR26-65000-P" placeholder="Current Symbol" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                        <input id="sbCrash" type="number" value="45000" placeholder="Crash Price" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                        <input id="sbReserve" type="number" value="50000" placeholder="Reserve Capital" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                        <input id="sbContracts" type="number" value="1" min="1" placeholder="# Contracts" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                        <button onclick="runSandbox()" class="bg-purple-600 hover:bg-purple-500 rounded px-3 py-1.5 text-xs font-medium whitespace-nowrap">Run Simulation</button>
+                    </div>
+                    <div id="sandboxResult" class="space-y-3">
+                        <div class="text-gray-500 text-center py-6 text-sm">Click "Run Simulation" to start</div>
+                    </div>
+                </div>
+
                 <!-- 预警日志 -->
                 <div class="card-glass rounded-xl p-5">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
