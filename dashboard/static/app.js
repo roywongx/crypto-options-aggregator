@@ -537,7 +537,7 @@ function updateOpportunitiesTable(contracts) {
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-orange-400' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-yellow-400' : 'text-gray-300'}">${vega.toFixed(1)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-300">${(iv * 100).toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-300">${iv ? (iv >= 80 ? "text-red-400" : iv >= 50 ? "text-yellow-400" : "text-emerald-400") + " " + iv.toFixed(1) + "%" : "-"}</td>
             <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}%</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (pop >= 70 ? 'text-emerald-400' : pop >= 50 ? 'text-yellow-300' : 'text-orange-400') : 'text-gray-500'}">${pop ? pop.toFixed(0) + '%' : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${(contract.premium || contract.premium_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
