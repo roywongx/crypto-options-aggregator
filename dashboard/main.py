@@ -192,6 +192,7 @@ FLOW_LABEL_MAP = {
     "call_momentum": ("追涨建仓", "高Delta Call买入，看好上涨"),
     "covered_call": ("备兑开仓", "卖出Call锁定收益"),
     "call_overwrite": ("改仓操作", "高Delta Call卖出改仓"),
+    "unknown": ("未知流向", "无法判断交易意图"),
 }
 def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
     """流向分类 (参考 lianyanshe-ai/deribit-options-monitor 原始逻辑)

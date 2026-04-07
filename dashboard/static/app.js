@@ -655,6 +655,16 @@ function updateRiskAlerts(alerts) {
     if (highRiskCount > 0) showAlert(`检测到 ${highRiskCount} 个高风险合约，建议执行滚仓操作！`, 'warning');
 }
 
+const flowSugg = {
+    protective_hedge: '\u673a\u6784\u62a4\u51b2 \u2193 \u77edf\u671f\u8c28\u614e',
+    premium_collect: '\u6536\u53d6\u6743\u5229 \u2191 \u503c\u597d\u73af\u5883',
+    speculative_put: '\u770b\u8dcc\u6295\u673a \u2193 \u98ce\u9669\u5347',
+    call_momentum: '\u8ffd\u6da8\u5efa\u4ed3 \u2191 \u770b\u597d\u884c\u60c5',
+    call_speculative: '\u770b\u6da8\u6295\u673a \u2191 \u5c0f\u5355\u4f4e\u4f4d\u5165\u573a',
+    covered_call: '\u5907\u5156\u5f00\u4ed3 \u2191 \u9501\u5b9a\u6536\u76ca',
+    call_overwrite: '\u6539\u4ed3\u64cd\u4f5c \u2191 \u8c03\u6574\u4ef7\u683c',
+};
+
 function updateLargeTrades(trades, count) {
     const container = document.getElementById('largeTradesList');
     const titleCount = document.getElementById('largeTradesTitleCount');
@@ -671,7 +681,8 @@ function updateLargeTrades(trades, count) {
         protective_hedge: '保护性对冲', premium_collect: '收权利金',
         speculative_put: '看跌投机', call_speculative: '看涨投机',
         call_momentum: '追涨建仓', covered_call: '备兑开仓',
-        call_overwrite: '改仓操作', unclassified: '未分类'
+        call_overwrite: '改仓操作', unclassified: '未分类',
+        unknown: '未知流向'
     };
 
     container.innerHTML = trades.map(trade => {
@@ -717,6 +728,20 @@ function updateLargeTrades(trades, count) {
                     </div>
                     <div class="flex items-center gap-2 flex-wrap">
                         ${flowCN ? '<span class="text-cyan-300">' + flowCN + '</span>' : ''}
+                        ${flowCN ? '<span class="text-gray-500 text-[10px] ml-1">' + (() => {
+                            const suggestions = {
+                                'protective_hedge': '\u673a\u6784\u62a4\u51b2\u2193 \u77ed0\u671f\u8c28\u614e',
+                                'premium_collect': '\u6536\u53d6\u6743\u5229\u9650 \u2191 \u503c\u597d\u73af\u5883',
+                                'speculative_put': '\u770b\u8dcc\u6295\u673a \u2193 \u98ce\u9669\ 吻\u5347',
+                                'call_momentum': '\u8ffd\u6da8\u5efa\u4ed3 \u2191 \u770b\u597d\u884c\u60c5',
+                                'call_speculative': '\u770b\u6da8\u6295\u673a \u2191 \u5c0f\u5355\u4f4e\u4f4d\u5165\u573a',
+                                'covered_call': '\u5907\u5156\u5f00\u4ed3 \u2191 \u9501\u5b9a\u6536\u76ca',
+                                'call_overwrite': '\u6539\u4ed3\u64cd\u4f5c \u2191 \u8c03\u6574\u4ef7\u683c',
+                                'unclassified': '',
+                                'unknown': ''
+                            };
+                            return suggestions[flow] || '';
+                        })() + '</span>' : ''}
                         <span class="text-yellow-300 font-medium">${notionalStr}</span>
                     </div>
                 </div>
