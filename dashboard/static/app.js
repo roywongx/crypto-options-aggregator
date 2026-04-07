@@ -1114,7 +1114,8 @@ async function loadWindAnalysis() {
                 'call_momentum':'追涨建仓',
                 'covered_call':'备兑开仓',
                 'call_overwrite':'改仓操作',
-                'unclassified':'未分类'
+                'unclassified':'未分类',
+                'unknown':'未知流向'
             };
             document.getElementById('windDominantFlow').textContent =
                 flowNames[summary.dominant_flow] || summary.dominant_flow || '-';

@@ -210,7 +210,7 @@ def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
       sell + delta>0.40                -> call_overwrite
     """
     if not direction or direction == "unknown" or not option_type:
-        return "unclassified"
+        return "unknown"
     d = abs(delta or 0)
     if direction == "buy":
         if option_type in ("PUT", "P"):
@@ -230,7 +230,7 @@ def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
             if d <= 0.40:
                 return "covered_call"
             return "call_overwrite"
-    return "unclassified"
+    return "unknown"
 
 
 def _severity_from_notional(notional: float) -> str:
@@ -1770,7 +1770,7 @@ async def get_wind_analysis(
             "notional": round(notional, 0),
             "pct": round(pct, 1)
         })
-        if fl != 'unclassified' and cnt > max_flow_cnt:
+        if fl not in ('unclassified', 'unknown') and cnt > max_flow_cnt:
             max_flow_cnt = cnt
             dominant_flow = fl
     if not dominant_flow:
@@ -1778,6 +1778,8 @@ async def get_wind_analysis(
     # Also add unclassified to FLOW_LABEL_MAP if missing
     if 'unclassified' not in FLOW_LABEL_MAP:
         FLOW_LABEL_MAP['unclassified'] = ('未分类', '历史数据无流向标签')
+    if 'unknown' not in FLOW_LABEL_MAP:
+        FLOW_LABEL_MAP['unknown'] = ('未知流向', '无法判断交易意图')
 
     buy_ratio = total_buys / total_trades if total_trades > 0 else 0.5
 
