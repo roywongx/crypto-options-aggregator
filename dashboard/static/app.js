@@ -99,7 +99,7 @@ function initCharts() {
         data: {
             labels: [],
             datasets: [{
-                label: '最高 APR',
+                label: 'P75 APR(稳健上限)',
                 data: [],
                 borderColor: '#22c55e',
                 backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -784,8 +784,10 @@ async function loadAprChartData() {
             const date = new Date(d.time || d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
         });
-        aprChart.data.datasets[0].data = data.map(d => d.max_apr);
-        aprChart.data.datasets[1].data = data.map(d => d.avg_apr);
+        const cleanMax = data.map(d => d.p75_apr != null ? d.p75_apr : d.max_apr);
+        const cleanAvg = data.map(d => d.avg_apr != null ? d.avg_apr : null);
+        aprChart.data.datasets[0].data = cleanMax;
+        aprChart.data.datasets[1].data = cleanAvg;
         aprChart.update();
     } catch (error) {
         console.error('加载APR图表失败:', error);

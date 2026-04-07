@@ -1015,25 +1015,70 @@ async def health_check():
 
 @app.get("/api/charts/apr")
 async def get_apr_chart(hours: int = Query(default=168)):
+    import json as _json
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     since = datetime.now() - timedelta(hours=hours)
 
     cursor.execute("""
-        SELECT 
-               MAX(timestamp) as ts,
-               AVG(CAST(json_extract(contracts_data, '$[0].apr') AS REAL)) as avg_apr,
-               MAX(CAST(json_extract(contracts_data, '$[0].apr') AS REAL)) as max_apr
+        SELECT MAX(timestamp) as ts, contracts_data
         FROM scan_records 
         WHERE timestamp > ?
         GROUP BY strftime('%Y-%m-%d %H:00', timestamp)
         ORDER BY ts ASC
     """, (since.strftime('%Y-%m-%d %H:%M:%S'),))
 
-    rows = cursor.fetchall()
+    raw_rows = cursor.fetchall()
     conn.close()
 
-    return [{"time": r[0], "avg_apr": round(r[1] or 0, 1), "max_apr": round(r[2] or 0, 1)} for r in rows]
+    APR_MIN, APR_MAX = 1.0, 500.0
+    result = []
+    for r in raw_rows:
+        ts = r[0]
+        cdata = r[1]
+        aprs = []
+        try:
+            arr = _json.loads(cdata) if isinstance(cdata, str) else cdata
+            if isinstance(arr, list):
+                for c in arr:
+                    if isinstance(c, dict):
+                        v = c.get('apr')
+                        if isinstance(v, (int, float)) and APR_MIN <= v <= APR_MAX:
+                            aprs.append(v)
+        except Exception:
+            pass
+        if aprs:
+            aprs.sort()
+            n = len(aprs)
+            p75_idx = min(int(n * 0.75), n - 1)
+            p90_idx = min(int(n * 0.90), n - 1)
+            avg_val = sum(aprs) / n
+            result.append({
+                "time": ts,
+                "avg_apr": round(avg_val, 1),
+                "max_apr": round(aprs[p90_idx], 1),
+                "p75_apr": round(aprs[p75_idx], 1),
+                "count": n
+            })
+        else:
+            result.append({
+                "time": ts,
+                "avg_apr": None,
+                "max_apr": None,
+                "p75_apr": None,
+                "count": 0
+            })
+
+    _prev_avg = None
+    for item in result:
+        if item["avg_apr"] is not None:
+            _prev_avg = item["avg_apr"]
+        elif _prev_avg is not None:
+            item["avg_apr"] = _prev_avg
+            item["max_apr"] = _prev_avg
+            item["p75_apr"] = _prev_avg
+
+    return result
 
 
 @app.get("/api/charts/dvol")
@@ -1773,13 +1818,26 @@ async def get_wind_analysis(
         if fl not in ('unclassified', 'unknown') and cnt > max_flow_cnt:
             max_flow_cnt = cnt
             dominant_flow = fl
+    ALL_FLOW_TYPES = [
+        "protective_hedge", "premium_collect", "speculative_put",
+        "call_speculative", "call_momentum", "covered_call",
+        "call_overwrite", "unknown"
+    ]
+    existing_labels = {f["label"] for f in flow_breakdown}
+    for fl in ALL_FLOW_TYPES:
+        if fl not in existing_labels:
+            info = FLOW_LABEL_MAP.get(fl, (fl, ""))
+            flow_breakdown.append({
+                "label": fl,
+                "label_cn": info[0] if info else fl,
+                "desc": info[1] if info else "",
+                "count": 0,
+                "notional": 0,
+                "pct": 0.0
+            })
+    flow_breakdown.sort(key=lambda x: (-x["count"], x["label"]))
     if not dominant_flow:
-        dominant_flow = 'unclassified'
-    # Also add unclassified to FLOW_LABEL_MAP if missing
-    if 'unclassified' not in FLOW_LABEL_MAP:
-        FLOW_LABEL_MAP['unclassified'] = ('未分类', '历史数据无流向标签')
-    if 'unknown' not in FLOW_LABEL_MAP:
-        FLOW_LABEL_MAP['unknown'] = ('未知流向', '无法判断交易意图')
+        dominant_flow = 'unknown'
 
     buy_ratio = total_buys / total_trades if total_trades > 0 else 0.5
 
