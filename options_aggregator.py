@@ -100,32 +100,41 @@ def validate_contract(item):
     )
     return is_valid, warnings
 
-def extract_spot_price(binance_data, deribit_data):
-    """从数据中动态提取现价，不再硬编码"""
-    # 优先从 Deribit 取（更可靠）
+def extract_spot_price(binance_data, deribit_data, currency="BTC"):
+    """从可靠Oracle获取现货价格，禁止使用逆向推算"""
     if isinstance(deribit_data, dict) and 'contracts' in deribit_data:
         for c in deribit_data['contracts']:
             up = c.get('underlying_price', 0)
-            if up > 0:
+            if up > 100:
                 return up
-    
-    # 其次尝试从 Binance 数据推算
-    if isinstance(binance_data, list) and len(binance_data) > 0:
-        for c in binance_data[:5]:
-            premium = c.get('premium_usdt', 0)
-            apr = c.get('apr', 0)
-            strike = c.get('strike', 0)
-            dte = c.get('dte', 1)
-            if premium > 0 and apr > 0 and strike > 0:
-                margin_ratio = 0.2
-                estimated_spot = (premium / (apr / 100)) * (365 / dte) / margin_ratio
-                if estimated_spot > 10000:
-                    return round(estimated_spot, 0)
-    
-    return 0
+
+    try:
+        import urllib.request, json
+        coin_id = currency.lower()
+        for oracle_url in [
+            f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd",
+            f"https://api.binance.com/api/v3/ticker/price?symbol={currency}USDT",
+        ]:
+            try:
+                req = urllib.request.Request(oracle_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    d = json.loads(resp.read().decode())
+                    if "price" in d and float(d["price"]) > 100:
+                        return float(d["price"])
+                    elif coin_id in d and d[coin_id].get("usd", 0) > 100:
+                        return float(d[coin_id]["usd"])
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        f"[CRITICAL] extract_spot_price: Cannot obtain spot price for {currency}. "
+        f"All sources failed. Refusing unreliable reverse-calculation."
+    )
 
 def build_report_data(currency, dvol_data, trades_data, binance_data, deribit_data):
-    spot_price = extract_spot_price(binance_data, deribit_data)
+    spot_price = extract_spot_price(binance_data, deribit_data, currency)
 
     dvol_info = dvol_data.get('dvol', {}) if isinstance(dvol_data, dict) else {}
     dvol_raw = dvol_data if isinstance(dvol_data, dict) else {}

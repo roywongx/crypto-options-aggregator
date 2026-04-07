@@ -16,12 +16,60 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+
+class CalculationEngine:
+    """v5.6: 统一计算引擎 - 消除 main.py 和 options_aggregator.py 的公式不一致"""
+    
+    @staticmethod
+    def calc_apr(premium_usd: float, strike: float, dte: int, margin_ratio: float = 0.2) -> float:
+        cv = strike * margin_ratio
+        if cv <= 0 or dte <= 0: return 0.0
+        return round((premium_usd / cv) * (365 / dte) * 100, 1)
+    
+    @staticmethod
+    def calc_pop(delta_val: float) -> float:
+        abs_d = abs(delta_val)
+        pop = max(5.0, min(95.0, round((1.0 - abs_d) * 100, 1)))
+        return pop
+    
+    @staticmethod
+    def calc_breakeven_pct(spot: float, strike: float, premium_usd: float, option_type: str) -> float:
+        premium_per_unit = premium_usd / spot if spot > 0 else 0
+        if option_type.upper() in ('P', 'PUT'):
+            safety = (spot - (strike - premium_per_unit)) / spot * 100
+        else:
+            safety = ((strike + premium_per_unit) - spot) / spot * 100
+        return round(max(0, safety), 1)
+    
+    @staticmethod
+    def calc_iv_rank(current_iv: float, history_ivs: list) -> float:
+        if not history_ivs or current_iv <= 0: return 50.0
+        sorted_ivs = sorted(history_ivs); n = len(sorted_ivs)
+        rank = 1
+        for i, v in enumerate(sorted_ivs):
+            if v >= current_iv: rank = i + 1; break
+        else: rank = n
+        if n == 1: return 50.0
+        return round((rank - 1) / (n - 1) * 100, 1)
+    
+    @staticmethod
+    def weighted_score(apr: float, pop: float, breakeven_pct: float,
+                       liquidity_score: float, iv_rank: float) -> float:
+        a = min(max(apr, 0) / 200.0, 1.0)
+        p = min(max(pop, 0) / 100.0, 1.0)
+        b = min(max(breakeven_pct, 0) / 20.0, 1.0)
+        l = min(max(liquidity_score, 0) / 100.0, 1.0)
+        ir = max(iv_rank, 0); iv = 1.0 - abs(ir - 50) / 50.0
+        return round(a*0.25 + p*0.25 + b*0.20 + l*0.15 + iv*0.15, 4)
 
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
 DB_PATH.parent.mkdir(exist_ok=True)
@@ -82,48 +130,87 @@ def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
 
 
 def get_spot_price(currency: str = "BTC") -> float:
-    # 优先使用原生API
-    spot = get_spot_price_binance(currency)
-    if spot and spot > 1000:
-        return spot
-    spot = get_spot_price_deribit(currency)
-    if spot and spot > 1000:
-        return spot
-    # 备用ccxt
+    sources = []
+    
+    def _try(name, val):
+        if val and isinstance(val, (int, float)) and val > 100:
+            sources.append(name)
+            return float(val)
+        return None
+
+    spot = _try("BinanceSpot", get_spot_price_binance(currency))
+    if spot: return spot
+    
+    spot = _try("DeribitIndex", get_spot_price_deribit(currency))
+    if spot: return spot
+
     try:
         import ccxt
-        if currency == "BTC":
-            symbol = "BTC/USDT"
-        elif currency == "ETH":
-            symbol = "ETH/USDT"
-        else:
-            symbol = f"{currency}/USDT"
-        deribit = ccxt.deribit()
-        ticker = deribit.fetch_ticker(symbol)
-        if ticker and ticker.get('last') and ticker['last'] > 100:
-            return float(ticker['last'])
+        sym_map = {"BTC": "BTC/USDT", "ETH": "ETH/USDT"}
+        ex = ccxt.binance() if currency in ("BTC","ETH") else ccxt.deribit()
+        t = ex.fetch_ticker(sym_map.get(currency, f"{currency}/USDT"))
+        spot = _try("CCXT", t.get('last') if t else None)
+        if spot: return spot
     except Exception as e:
-        print(f"ccxt deribit failed: {e}")
-    if currency == "BTC":
-        return 100000.0
-    elif currency == "ETH":
-        return 5000.0
-    return 100000.0
+        print(f"[WARN] All spot price sources failed for {currency}: tried {sources}. Last error: {e}")
+
+    try:
+        import urllib.request, json
+        for url_base, path_fn in [
+            ("https://api.binance.com", lambda c: f"/api/v3/ticker/price?symbol={c}USDT"),
+            ("https://api.coingecko.com", lambda c: f"/api/v3/simple/price?ids={c.lower()}&vs_currencies=usd"),
+        ]:
+            try:
+                req = urllib.request.Request(url_base + path_fn(currency), headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    d = json.loads(resp.read().decode())
+                    if "price" in d:
+                        spot = _try(url_base.split("//")[1].split(".")[0], d["price"])
+                        if spot: return spot
+                    elif currency.lower() in d:
+                        spot = _try("CoinGecko", d[currency.lower()].get("usd"))
+                        if spot: return spot
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[WARN] Fallback oracle failed: {e}")
+
+    raise RuntimeError(
+        f"[CRITICAL] Cannot obtain spot price for {currency}. "
+        f"All sources exhausted: {sources}. "
+        f"Scan aborted to prevent dangerous miscalculations."
+    )
 
 
 def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
     try:
-        response = requests.get(
-            "https://www.deribit.com/api/v2/public/get_volatility_index_data",
-            params={
-                "currency": currency,
-                "resolution": "3600",
-                "start_timestamp": int((datetime.now() - timedelta(days=7)).timestamp() * 1000),
-                "end_timestamp": int(datetime.now().timestamp() * 1000)
-            },
-            timeout=10
-        )
-        data = response.json()
+        base_params = {
+            "currency": currency,
+            "start_timestamp": int((datetime.now() - timedelta(days=7)).timestamp() * 1000),
+            "end_timestamp": int(datetime.now().timestamp() * 1000)
+        }
+        
+        data = None
+        for res in ["60", "300", "3600"]:
+            try:
+                p = dict(base_params); p["resolution"] = res
+                response = requests.get(
+                    "https://www.deribit.com/api/v2/public/get_volatility_index_data",
+                    params=p, timeout=10
+                )
+                raw = response.json()
+                pts = raw.get("result", {}).get("data", [])
+                if len(pts) >= 24:
+                    data = raw; break
+            except Exception:
+                continue
+        
+        if data is None:
+            response = requests.get(
+                "https://www.deribit.com/api/v2/public/get_volatility_index_data",
+                params={**base_params, "resolution": "3600"}, timeout=10
+            )
+            data = response.json()
 
         if data.get("result") and data["result"].get("data"):
             points = data["result"]["data"]
@@ -633,6 +720,13 @@ async def lifespan(app: FastAPI):
     init_database()
     yield
 
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+API_KEY = os.getenv("DASHBOARD_API_KEY", "")
+
+def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):
+    if API_KEY and api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API key. Set DASHBOARD_API_KEY env to enable.")
+
 app = FastAPI(title="期权监控面板", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
@@ -670,7 +764,12 @@ async def quick_scan(params: dict = None):
     currency = "BTC"
     spot = get_spot_price(currency)
     if spot < 1000:
-        spot = get_spot_price_deribit(currency) or 100000.0
+        try:
+            spot = get_spot_price_deribit(currency) or get_spot_price_binance(currency)
+            if not spot or spot < 100:
+                raise ValueError("No valid spot price")
+        except Exception:
+            raise RuntimeError("[CRITICAL] quick_scan: cannot obtain spot price, scan aborted")
 
     # 获取DVOL数据
     dvol_data = get_dvol_from_deribit(currency)
@@ -791,7 +890,12 @@ async def quick_scan(params: dict = None):
                 bid = float(ticker['bidPrice']) if ticker else 0
                 ask = float(ticker['askPrice']) if ticker else 0
                 
-                if volume < 5: continue # Binance 流动性极差的过滤
+                if volume < 5: continue
+                
+                spread_pct = 0.0
+                if bid > 0 and ask > 0:
+                    spread_pct = ((ask - bid) / bid) * 100
+                if spread_pct >= 10.0: continue  # 强制过滤高Spread合约
                 
                 strike = float(s['strikePrice'])
                 prem_usd = float(mark['markPrice'])
