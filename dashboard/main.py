@@ -9,6 +9,7 @@ import json
 import sqlite3
 import asyncio
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 import requests
 import re
 from datetime import datetime, timedelta
@@ -520,23 +521,23 @@ def save_scan_record(data: Dict[str, Any]):
 
 
 def run_options_scan(params: ScanParams) -> Dict[str, Any]:
+    import warnings
+    warnings.warn(
+        "/api/scan is deprecated - use /api/quick-scan for better performance",
+        DeprecationWarning, stacklevel=2
+    )
+
     base_dir = Path(__file__).parent.parent
+    sys.path.insert(0, str(base_dir))
 
     spot_price = get_spot_price(params.currency)
     dvol_data = get_dvol_from_deribit(params.currency)
-
-    dvol_full = get_dvol_from_deribit(params.currency)
-    dvol_raw_for_adapt = {}
-    if isinstance(dvol_full, dict):
-        dvol_raw_for_adapt = dvol_full
+    dvol_raw_for_adapt = dvol_data if isinstance(dvol_data, dict) else {}
 
     scan_params = {
-        "max_delta": params.max_delta,
-        "min_dte": params.min_dte,
-        "max_dte": params.max_dte,
-        "margin_ratio": params.margin_ratio,
-        "option_type": params.option_type,
-        "min_apr": 15.0
+        "max_delta": params.max_delta, "min_dte": params.min_dte,
+        "max_dte": params.max_dte, "margin_ratio": params.margin_ratio,
+        "option_type": params.option_type, "min_apr": 15.0
     }
     adapted = adapt_params_by_dvol(scan_params, dvol_raw_for_adapt)
 
@@ -545,47 +546,49 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     use_max_dte = adapted.get('max_dte', params.max_dte)
     use_margin = adapted.get('margin_ratio', params.margin_ratio)
 
-    cmd = [
-        sys.executable,
-        str(base_dir / "options_aggregator.py"),
-        "--currency", params.currency,
-        "--min-dte", str(use_min_dte),
-        "--max-dte", str(use_max_dte),
-        "--max-delta", str(use_delta),
-        "--margin-ratio", str(use_margin),
-        "--option-type", params.option_type,
-        "--json"
-    ]
-
-    if params.strike:
-        cmd.extend(["--strike", str(int(params.strike))])
-    if params.strike_range:
-        cmd.extend(["--strike-range", params.strike_range])
+    try:
+        from options_aggregator import format_report
+        from binance_options import scan_binance_options
+        from deribit_options_monitor import DeribitOptionsMonitor
+    except ImportError as e:
+        return {"success": False, "error": f"Module import failed: {e}"}
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=False,
-            timeout=120
-        )
+        mon = DeribitOptionsMonitor()
+        
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            f_dvol = executor.submit(mon.get_dvol_signal, params.currency)
+            f_trades = executor.submit(mon.get_large_trade_alerts, currency=params.currency, min_usd_value=500000)
+            
+            def _run_binance():
+                kw = {"currency": params.currency, "min_dte": use_min_dte,
+                      "max_dte": use_max_dte, "max_delta": use_delta,
+                      "margin_ratio": use_margin, "option_type": params.option_type}
+                if params.strike: kw["strike"] = params.strike
+                if params.strike_range: kw["strike_range"] = params.strike_range
+                return scan_binance_options(kw)
+            
+            def _run_deribit():
+                kw = dict(currency=params.currency, max_delta=use_delta, min_apr=15.0,
+                         min_dte=use_min_dte, max_dte=use_max_dte, top_k=20,
+                         max_spread_pct=10.0, min_open_interest=100.0, option_type=params.option_type)
+                if params.strike: kw["strike"] = params.strike
+                if params.strike_range: kw["strike_range"] = params.strike_range
+                return mon.get_sell_put_recommendations(**kw)
 
-        if result.returncode != 0:
-            return {"success": False, "error": result.stderr.decode('utf-8', errors='replace') or "扫描失败"}
+            f_bin = executor.submit(_run_binance)
+            f_der = executor.submit(_run_deribit)
 
-        output_text = result.stdout.decode('utf-8', errors='replace')
-        try:
-            parsed = json.loads(output_text)
-            parsed['success'] = True
-        except json.JSONDecodeError:
-            try:
-                output_text = result.stdout.decode('gbk', errors='replace')
-                parsed = json.loads(output_text)
-                parsed['success'] = True
-            except Exception as e:
-                return {"success": False, "error": "JSON 解析失败", "raw": output_text[:200]}
+            dvol_res = f_dvol.result(timeout=30)
+            trades_res = f_trades.result(timeout=30)
+            bin_res = f_bin.result(timeout=60)
+            der_res = f_der.result(timeout=60)
+
+        parsed = format_report(params.currency, dvol_res, trades_res, bin_res, der_res, json_output=True)
+        if not isinstance(parsed, dict):
+            parsed = {"raw_output": str(parsed), "contracts": []}
+
         parsed['success'] = True
-
         if spot_price:
             parsed['spot_price'] = spot_price
         if dvol_data.get('current'):
@@ -598,17 +601,11 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         parsed['dvol_advice'] = adapted.get('_dvol_advice', [])
         parsed['dvol_adjustment'] = adapted.get('_adjustment_level', 'none')
         parsed['adapted_params'] = {
-            'max_delta': use_delta,
-            'min_dte': use_min_dte,
-            'max_dte': use_max_dte
+            'max_delta': use_delta, 'min_dte': use_min_dte, 'max_dte': use_max_dte
         }
 
         return parsed
 
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": "扫描超时"}
-    except json.JSONDecodeError as e:
-        return {"success": False, "error": f"JSON解析错误: {e}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
