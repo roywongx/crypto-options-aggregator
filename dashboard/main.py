@@ -87,6 +87,19 @@ class ScanParams(BaseModel):
     strike_range: Optional[str] = Field(default=None, description="行权价范围，如 60000-65000")
 
 
+
+class RollCalcParams(BaseModel):
+    currency: str = Field(default="BTC", description="币种")
+    old_strike: float = Field(..., description="原持仓行权价")
+    old_qty: float = Field(default=1.0, gt=0, description="原持仓数量")
+    close_cost_total: float = Field(..., gt=0, description="平仓总成本(USDT)")
+    reserve_capital: float = Field(default=50000.0, ge=0, description="可用后备资金(USDT)")
+    target_max_delta: float = Field(default=0.35, ge=0.01, le=0.8, description="目标最大Delta")
+    min_dte: int = Field(default=7, ge=1)
+    max_dte: int = Field(default=90, ge=1)
+    max_qty_multiplier: float = Field(default=3.0, ge=1.0, description="最大倍投倍数")
+    margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
+
 class RecoveryCalcParams(BaseModel):
     currency: str = Field(default="BTC", description="币种")
     current_loss: float = Field(..., gt=0, description="当前浮亏金额(USDT)")
@@ -1057,6 +1070,117 @@ async def calculate_recovery(params: RecoveryCalcParams):
     result = calculate_recovery_plan(contracts, params, spot)
     return result
 
+
+
+@app.post("/api/calculator/roll")
+async def calculate_net_credit_roll(params: RollCalcParams):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (params.currency,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="暂无扫描数据，请先执行扫描")
+
+    try:
+        contracts = json.loads(row[0])
+    except:
+        contracts = []
+
+    import math
+
+    MIN_NET_CREDIT_USD = 10.0
+    SLIPPAGE_PCT = 0.05
+    SAFETY_BUFFER_PCT = 0.10
+
+    plans = []
+    break_even_exceeds_cap = 0
+    filtered_by_negative_nc = 0
+    filtered_by_margin = 0
+
+    for c in contracts:
+        if c.get('option_type', 'P').upper() != 'P': continue
+        if c.get('strike', 0) >= params.old_strike: continue
+        if c.get('dte', 0) < params.min_dte or c.get('dte', 0) > params.max_dte: continue
+        if abs(c.get('delta', 1)) > params.target_max_delta: continue
+        
+        prem_usd = c.get('premium_usd') or c.get('premium', 0)
+        if prem_usd <= 0: continue
+
+        effective_prem_usd = prem_usd * (1 - SLIPPAGE_PCT)
+
+        break_even_qty = math.ceil(params.close_cost_total / effective_prem_usd)
+        
+        min_qty_for_profit = math.ceil(
+            params.close_cost_total / effective_prem_usd * (1 + SAFETY_BUFFER_PCT)
+        )
+        max_allowed_qty = int(params.old_qty * params.max_qty_multiplier)
+
+        if break_even_qty > max_allowed_qty:
+            break_even_exceeds_cap += 1
+            continue
+
+        new_qty = max(min_qty_for_profit, break_even_qty)
+
+        strike = c['strike']
+        margin_req = new_qty * strike * params.margin_ratio
+        if margin_req > params.reserve_capital:
+            filtered_by_margin += 1
+            continue
+            
+        gross_credit = new_qty * effective_prem_usd
+        net_credit = gross_credit - params.close_cost_total
+
+        if net_credit < MIN_NET_CREDIT_USD:
+            filtered_by_negative_nc += 1
+            continue
+
+        delta_val = abs(c.get('delta', 0))
+        dte_val = c.get('dte', 30)
+        apr_val = c.get('apr', 0)
+
+        capital_efficiency = net_credit / margin_req if margin_req > 0 else 0
+        delta_penalty = max(0, (delta_val - 0.25) * 2)
+        dte_weight = min(1.0, dte_val / 45.0)
+        risk_adjusted_score = capital_efficiency * (1 - delta_penalty) * (0.5 + 0.5 * dte_weight)
+        annualized_roi = (net_credit / margin_req * 365 / max(dte_val, 1)) if margin_req > 0 else 0
+
+        plans.append({
+            "symbol": c.get('symbol', 'N/A'),
+            "platform": c.get('platform', 'N/A'),
+            "strike": strike,
+            "dte": dte_val,
+            "delta": delta_val,
+            "apr": apr_val,
+            "premium_usd": prem_usd,
+            "effective_prem_usd": round(effective_prem_usd, 2),
+            "new_qty": new_qty,
+            "break_even_qty": break_even_qty,
+            "margin_req": round(margin_req, 2),
+            "gross_credit": round(gross_credit, 2),
+            "net_credit": round(net_credit, 2),
+            "roi_pct": round(annualized_roi, 1),
+            "score": round(risk_adjusted_score, 4),
+            "capital_efficiency": round(capital_efficiency, 4)
+        })
+
+    plans.sort(key=lambda x: (x['score'], x['net_credit'], -x['delta']), reverse=True)
+
+    return {
+        "success": True,
+        "params": params.dict(),
+        "plans": plans[:15],
+        "meta": {
+            "total_contracts_scanned": len(contracts),
+            "plans_found": len(plans),
+            "filtered": {
+                "break_even_exceeded_cap": break_even_exceeds_cap,
+                "negative_net_credit": filtered_by_negative_nc,
+                "insufficient_margin": filtered_by_margin
+            }
+        }
+    }
 
 @app.get("/api/stats")
 async def get_stats():

@@ -1496,3 +1496,113 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() { loadTermStructure(); }, 2500);
     setTimeout(function() { loadMaxPain(); }, 3000);
 });
+
+
+// \u{1F504} 正收益滚仓计算器器逻辑
+function openRollCalcModal() {
+    document.getElementById('rollCalcModal').classList.add('active');
+    const curSpot = currentSpotPrice;
+    if (curSpot && !document.getElementById('rcOldStrike').value) {
+        document.getElementById('rcOldStrike').value = Math.round(curSpot * 0.95);
+    }
+}
+
+function closeRollCalcModal() {
+    document.getElementById('rollCalcModal').classList.remove('active');
+}
+
+async function submitRollCalc() {
+    const btn = document.getElementById('rcSubmitBtn');
+    const tbody = document.getElementById('rcResultsTable');
+    
+    const currency = document.getElementById('rcCurrency').value;
+    const oldStrike = parseFloat(document.getElementById('rcOldStrike').value);
+    const oldQty = parseFloat(document.getElementById('rcOldQty').value);
+    const closeCost = parseFloat(document.getElementById('rcCloseCost').value);
+    const reserve = parseFloat(document.getElementById('rcReserve').value);
+    
+    if (!oldStrike || !oldQty || !closeCost) {
+        showAlert('请填写完整的实盘持仓与平仓成本信息', 'error');
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 计算中...';
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-10 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>扫描匹配最优滚仓路径...</td></tr>';
+    
+    try {
+        const payload = {
+            currency: currency,
+            old_strike: oldStrike,
+            old_qty: oldQty,
+            close_cost_total: closeCost,
+            reserve_capital: reserve,
+            target_max_delta: parseFloat(document.getElementById('rcMaxDelta').value) || 0.35,
+            min_dte: parseInt(document.getElementById('rcMinDte').value) || 7,
+            max_dte: parseInt(document.getElementById('rcMaxDte').value) || 90,
+            max_qty_multiplier: parseFloat(document.getElementById('rcMaxMult').value) || 3.0
+        };
+        
+        const response = await fetch(API_BASE + '/api/calculator/roll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        const result = await response.json();
+        
+        if (!result.success || !result.plans || result.plans.length === 0) {
+            const meta = (result.meta || {}).filtered || {};
+            let reasonHtml = '';
+            if (Object.keys(meta).length > 0) {
+                reasonHtml = `<br><span class="text-xs text-gray-400">
+                    过滤统计: BE超限${meta.break_even_exceeded_cap||0} | 负收益${meta.negative_net_credit||0} | 保证金不足${meta.insufficient_margin||0}<br>
+                    建议: 增大倍数上限 / 提高后备金 / 放宽Delta
+                </span>`;
+            }
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-10 text-yellow-500">
+                ${!result.success ? ('计算失败: ' + (result.error || '未知错误')) : '未找到满足条件的正收益滚仓方案。'}
+                ${reasonHtml}
+            </td></tr>`;
+        } else {
+            tbody.innerHTML = result.plans.map((plan, idx) => {
+                const isBest = idx === 0;
+                return `
+                <tr class="hover:bg-white/5 transition ${isBest ? 'bg-green-500/10' : ''}">
+                    <td class="py-3 px-3">
+                        <div class="flex flex-col">
+                            <span class="font-mono text-white flex items-center gap-2">
+                                ${isBest ? '<i class="fas fa-crown text-yellow-400"></i>' : ''}
+                                ${plan.symbol}
+                            </span>
+                            <span class="text-[10px] text-gray-500">DTE: ${plan.dte} | APR: ${plan.apr.toFixed(1)}% | 平台: ${plan.platform}</span>
+                        </div>
+                    </td>
+                    <td class="py-3 px-3 text-right">
+                        <span class="font-mono text-orange-400 font-bold">${plan.new_qty}</span>
+                        <span class="text-xs text-gray-500 ml-1">(BE:${plan.break_even_qty || '?'})</span>
+                    </td>
+                    <td class="py-3 px-3 text-right font-mono ${plan.delta > 0.3 ? 'text-red-400' : 'text-green-400'}">${plan.delta.toFixed(3)}</td>
+                    <td class="py-3 px-3 text-right">
+                        <span class="font-mono">$${Math.round(plan.margin_req).toLocaleString()}</span>
+                    </td>
+                    <td class="py-3 px-3 text-right">
+                        <span class="font-mono font-bold text-green-400">+$${Math.round(plan.net_credit).toLocaleString()}</span>
+                        <div class="text-[10px] text-gray-500">已扣除平仓成本</div>
+                    </td>
+                    <td class="py-3 px-3 text-right">
+                        <span class="font-mono ${((plan.roi_pct || 0) > 50) ? 'text-green-400 font-bold' : 'text-yellow-300'}">${(plan.roi_pct || 0).toFixed(1)}%</span>
+                        <div class="text-[10px] text-gray-500">${(plan.capital_efficiency || 0).toFixed(2)}x</div>
+                    </td>
+                </tr>
+                `;
+            }).join('');
+        }
+        
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-10 text-red-500">计算失败: ${e.message}</td></tr>`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-magic"></i> 计算正收益滚仓方案';
+    }
+}
