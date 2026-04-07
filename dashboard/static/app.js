@@ -1500,20 +1500,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // \u{1F504} 正收益滚仓计算器器逻辑
 function openRollCalcModal() {
-    document.getElementById('rollCalcModal').classList.add('active');
-    const curSpot = currentSpotPrice;
-    if (curSpot && !document.getElementById('rcOldStrike').value) {
-        document.getElementById('rcOldStrike').value = Math.round(curSpot * 0.95);
+    const el = document.getElementById('rollCalcInline');
+    if (el) {
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+        const curSpot = currentSpotPrice;
+        if (curSpot && !document.getElementById('rcOldStrike').value) {
+            document.getElementById('rcOldStrike').value = Math.round(curSpot * 0.95);
+        }
+        document.getElementById('rcOldStrike').focus();
     }
 }
 
-function closeRollCalcModal() {
-    document.getElementById('rollCalcModal').classList.remove('active');
-}
+function closeRollCalcModal() {}
 
 async function submitRollCalc() {
     const btn = document.getElementById('rcSubmitBtn');
-    const tbody = document.getElementById('rcResultsTable');
+    const wrapper = document.getElementById('rcResultsWrapper');
+    const table = document.getElementById('rcResultsTable');
+    const tbody = document.getElementById('rcResultsBody');
+    
+    table.classList.remove('hidden');
     
     const currency = document.getElementById('rcCurrency').value;
     const oldStrike = parseFloat(document.getElementById('rcOldStrike').value);
@@ -1560,11 +1566,15 @@ async function submitRollCalc() {
                     建议: 增大倍数上限 / 提高后备金 / 放宽Delta
                 </span>`;
             }
-            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-10 text-yellow-500">
-                ${!result.success ? ('计算失败: ' + (result.error || '未知错误')) : '未找到满足条件的正收益滚仓方案。'}
-                ${reasonHtml}
-            </td></tr>`;
+            wrapper.innerHTML = `<div class="text-center py-6 ${!result.success ? 'text-red-400' : 'text-yellow-500'}">
+                <i class="fas ${!result.success ? 'fa-times-circle' : 'fa-search'} text-2xl mb-2 opacity-50 block"></i>
+                <div class="font-medium">${!result.success ? ('计算失败: ' + (result.error || '未知错误')) : '未找到满足条件的正收益滚仓方案'}</div>
+                ${reasonHtml ? `<div class="text-xs text-gray-400 mt-2">${reasonHtml}</div>` : '<div class="text-xs text-gray-500 mt-2">建议: 放宽Delta/增大倍数/提高后备金</div>'}
+            </div>`;
+            table.classList.add('hidden');
         } else {
+            wrapper.innerHTML = '';
+            table.classList.remove('hidden');
             tbody.innerHTML = result.plans.map((plan, idx) => {
                 const isBest = idx === 0;
                 return `
@@ -1600,7 +1610,8 @@ async function submitRollCalc() {
         }
         
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-10 text-red-500">计算失败: ${e.message}</td></tr>`;
+        wrapper.innerHTML = `<div class="text-center py-6 text-red-500"><i class="fas fa-exclamation-triangle text-2xl mb-2"></i><div>计算失败: ${e.message}</div></div>`;
+        table.classList.add('hidden');
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-magic"></i> 计算正收益滚仓方案';

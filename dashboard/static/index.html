@@ -71,7 +71,7 @@
                         <span id="lastUpdate" class="text-gray-300">等待数据...</span>
                     </div>
                     <button onclick="triggerScan()" 
-                <button onclick="openRollCalcModal(); console.log('rollCalcModal clicked')" onerror="console.error('roll btn error', event)" id="rollCalcBtn" class="btn-primary text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-600 active:scale-95 transition-all cursor-pointer" title="打开正收益滚仓计算器">
+                <button onclick="document.getElementById('rollCalcInline').scrollIntoView({behavior:'smooth',block:'start'})" id="rollCalcBtn" class="btn-primary text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-600 active:scale-95 transition-all cursor-pointer" title="跳转到正收益滚仓计算器">
                     <i class="fas fa-calculator"></i>
                     <span class="hidden sm:inline">正收益滚仓计算</span>
                 </button>
@@ -184,6 +184,97 @@
                             <tbody id="recoveryPlansTable" class="text-sm"></tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 正收益滚仓计算器 (Net-Credit Roll) -->
+        <section id="rollCalcInline" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-orange-500">
+            <div class="flex items-center gap-2 mb-4">
+                <i class="fas fa-sync-alt text-orange-500"></i>
+                <h3 class="font-semibold text-lg">正收益滚仓计算器 (Net-Credit Roll)</h3>
+                <span class="text-xs text-gray-400 ml-2">寻找更低Strike的新合约，确保净流入>0出局</span>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
+                <!-- 左侧: 实盘输入 -->
+                <div class="lg:col-span-1 space-y-3">
+                    <div class="bg-gray-800/50 p-3 rounded-xl border border-gray-700">
+                        <h4 class="text-xs font-semibold text-gray-300 mb-2"><i class="fas fa-edit mr-1"></i>实盘持仓</h4>
+                        <div class="space-y-2">
+                            <div>
+                                <label class="block text-[11px] text-gray-400 mb-0.5">币种</label>
+                                <select id="rcCurrency" class="input-dark w-full p-1.5 rounded-lg text-xs">
+                                    <option value="BTC">BTC</option><option value="ETH">ETH</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] text-gray-400 mb-0.5">旧行权价 (旧Strike)</label>
+                                <input type="number" id="rcOldStrike" class="input-dark w-full p-1.5 rounded-lg text-xs" placeholder="如 65000">
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-[11px] text-gray-400 mb-0.5">原数量</label>
+                                    <input type="number" id="rcOldQty" value="1" class="input-dark w-full p-1.5 rounded-lg text-xs">
+                                </div>
+                                <div>
+                                    <label class="block text-[11px] text-gray-400 mb-0.5">平仓成本(USDT)</label>
+                                    <input type="number" id="rcCloseCost" class="input-dark w-full p-1.5 rounded-lg text-xs" placeholder="平仓总花费">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-[11px] text-gray-400 mb-0.5">可用后备金 (USDT)</label>
+                                <input type="number" id="rcReserve" value="50000" class="input-dark w-full p-1.5 rounded-lg text-xs">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 约束条件 -->
+                    <div class="bg-gray-800/30 p-3 rounded-xl border border-gray-700/50">
+                        <h4 class="text-[11px] font-semibold text-gray-400 mb-2"><i class="fas fa-sliders-h mr-1"></i>约束条件</h4>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="block text-[10px] text-gray-500 mb-0.5">最大Delta</label>
+                                <input type="number" id="rcMaxDelta" value="0.35" step="0.05" class="input-dark w-full p-1 rounded-lg text-xs text-center">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] text-gray-500 mb-0.5">最高倍数</label>
+                                <input type="number" id="rcMaxMult" value="3.0" step="0.5" class="input-dark w-full p-1 rounded-lg text-xs text-center">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] text-gray-500 mb-0.5">DTE范围(天)</label>
+                                <div class="flex gap-1 items-center">
+                                    <input type="number" id="rcMinDte" value="7" class="input-dark w-full p-1 rounded-lg text-xs text-center">
+                                    <span class="text-gray-600 text-xs">~</span>
+                                    <input type="number" id="rcMaxDte" value="90" class="input-dark w-full p-1 rounded-lg text-xs text-center">
+                                </div>
+                            </div>
+                        </div>
+                        <button onclick="submitRollCalc()" id="rcSubmitBtn" class="w-full btn-primary text-white py-2.5 rounded-xl font-bold flex justify-center items-center gap-2 mt-2 hover:bg-blue-600 active:scale-[0.98] transition-all cursor-pointer">
+                            <i class="fas fa-magic"></i> 计算正收益滚仓方案
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 右侧: 结果展示 -->
+                <div class="lg:col-span-3">
+                    <div id="rcResultsWrapper">
+                        <div class="text-center py-8 text-gray-500 text-sm">
+                            <i class="fas fa-calculator text-3xl mb-2 opacity-30 block"></i>
+                            输入持仓信息后点击 "计算"<br>
+                            <span class="text-xs text-gray-600">自动从数据库扫描最优远期Put合约</span>
+                        </div>
+                    </div>
+                    <table id="rcResultsTable" class="w-full text-xs hidden">
+                        <thead class="bg-gray-800/80"><tr>
+                            <th class="text-left py-2 px-2 font-medium">合约</th>
+                            <th class="text-right py-2 px-2 font-medium">数量(BE)</th>
+                            <th class="text-right py-2 px-2 font-medium">Delta</th>
+                            <th class="text-right py-2 px-2 font-medium">保证金</th>
+                            <th class="text-right py-2 px-2 font-medium">净流入(Net)</th>
+                            <th class="text-right py-2 px-2 font-medium">ROI%/yr</th>
+                        </tr></thead>
+                        <tbody id="rcResultsBody" class="divide-y divide-gray-800/30"></tbody>
+                    </table>
                 </div>
             </div>
         </section>
@@ -553,113 +644,7 @@
     </div>
 
     
-    <!-- 滚仓计算器弹窗 -->
-    <div id="rollCalcModal" class="modal">
-        <div class="modal-content !max-w-4xl">
-            <div class="flex items-center justify-between mb-4 border-b border-gray-700 pb-3">
-                <h3 class="text-xl font-bold text-orange-400 flex items-center gap-2">
-                    <i class="fas fa-calculator"></i>
-                    正收益滚仓 (Net-Credit Roll) 计算器
-                </h3>
-                <button onclick="closeRollCalcModal()" class="text-gray-400 hover:text-white">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
-            </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- 左侧输入区 -->
-                <div class="space-y-4 col-span-1">
-                    <div class="bg-gray-800/50 p-4 rounded-xl border border-gray-700">
-                        <h4 class="text-sm font-semibold text-gray-300 mb-3"><i class="fas fa-edit mr-1"></i> 手动输入实盘持仓</h4>
-                        <div class="space-y-3">
-                            <div>
-                                <label class="block text-xs text-gray-400 mb-1">币种</label>
-                                <select id="rcCurrency" class="input-dark w-full p-2 rounded-lg text-sm">
-                                    <option value="BTC">BTC</option>
-                                    <option value="ETH">ETH</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-xs text-gray-400 mb-1">原持仓行权价 (旧 Strike)</label>
-                                <input type="number" id="rcOldStrike" class="input-dark w-full p-2 rounded-lg text-sm" placeholder="例如 65000">
-                            </div>
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">原数量</label>
-                                    <input type="number" id="rcOldQty" class="input-dark w-full p-2 rounded-lg text-sm" value="1">
-                                </div>
-                                <div>
-                                    <label class="block text-xs text-gray-400 mb-1">平仓总成本(USDT)</label>
-                                    <input type="number" id="rcCloseCost" class="input-dark w-full p-2 rounded-lg text-sm" placeholder="当前平仓需花费">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-xs text-gray-400 mb-1">可用后备金 (USDT)</label>
-                                <input type="number" id="rcReserve" class="input-dark w-full p-2 rounded-lg text-sm" value="50000">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="bg-gray-800/30 p-4 rounded-xl border border-gray-700/50">
-                        <h4 class="text-sm font-semibold text-gray-400 mb-3"><i class="fas fa-sliders-h mr-1"></i> 目标约束条件</h4>
-                        <div class="space-y-2">
-                            <div class="flex items-center justify-between">
-                                <label class="text-xs text-gray-400">最大 Delta 容忍</label>
-                                <input type="number" id="rcMaxDelta" class="input-dark w-16 p-1 text-center rounded text-xs" value="0.35" step="0.05">
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <label class="text-xs text-gray-400">最高倍数</label>
-                                <input type="number" id="rcMaxMult" class="input-dark w-16 p-1 text-center rounded text-xs" value="3.0" step="0.5">
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <label class="text-xs text-gray-400">DTE (天数)</label>
-                                <div class="flex gap-1 items-center">
-                                    <input type="number" id="rcMinDte" class="input-dark w-12 p-1 text-center rounded text-xs" value="7">
-                                    <span class="text-gray-500">-</span>
-                                    <input type="number" id="rcMaxDte" class="input-dark w-12 p-1 text-center rounded text-xs" value="90">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <button onclick="submitRollCalc()" id="rcSubmitBtn" class="w-full btn-primary text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2">
-                        <i class="fas fa-magic"></i> 计算正收益滚仓方案
-                    </button>
-                </div>
-                
-                <!-- 右侧结果区 -->
-                <div class="col-span-1 md:col-span-2 flex flex-col h-full">
-                    <div class="bg-blue-500/10 border border-blue-500/20 p-3 rounded-lg text-xs text-blue-300 mb-3 flex gap-2">
-                        <i class="fas fa-info-circle mt-0.5"></i>
-                        <div><b>数学级滚仓逻辑：</b>寻找 Strike 更低、Delta 安全的新合约，增加卖出数量，确保<b>收取的总权利金(扣除5%滑点) > 平仓旧合约的总成本</b>。实现 0 亏损出局并净赚差价。</div>
-                    </div>
-                    
-                    <div class="flex-1 bg-gray-900/50 rounded-xl border border-gray-700 overflow-hidden flex flex-col min-h-[300px]">
-                        <div class="p-3 border-b border-gray-700 bg-gray-800/50 font-semibold text-sm">
-                            推演结果 (按资金利用率排序)
-                        </div>
-                        <div class="flex-1 overflow-y-auto custom-scrollbar p-0">
-                            <table class="w-full text-left border-collapse whitespace-nowrap">
-                                <thead class="text-xs text-gray-400 bg-gray-800/80 sticky top-0 z-10">
-                                    <tr>
-                                        <th class="py-2 px-3 font-medium">新合约</th>
-                                        <th class="py-2 px-3 font-medium text-right">数量</th>
-                                        <th class="py-2 px-3 font-medium text-right">Delta</th>
-                                        <th class="py-2 px-3 font-medium text-right">新保证金</th>
-                                        <th class="py-2 px-3 font-medium text-right">净权利金(Net)</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="rcResultsTable" class="text-sm divide-y divide-gray-800">
-                                    <tr><td colspan="5" class="text-center py-10 text-gray-500 text-xs">请输入参数后点击计算</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
+    
     <!-- 滚仓建议弹窗 -->
     <div id="rollModal" class="modal">
         <div class="modal-content">
@@ -676,6 +661,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=561&t=1775586598"></script>
+    <script src="/static/app.js?v=564&t=1775587065"></script>
 <div style="display:none" data-app-version="v561-t1775586598"></div></body>
 </html>
