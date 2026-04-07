@@ -1,3 +1,11 @@
+
+function $(id) { return document.getElementById(id); }
+
+function safeHTML(str) {
+    if (str == null) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 const STRATEGY_PRESETS = {
     "PUT": {
         "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "label": "纯收租"},
@@ -26,6 +34,29 @@ let currentSpotPrice = null;
 let scanStatusInterval = null;
 
 const API_BASE = '';
+const API_TIMEOUT_MS = 15000;
+const FETCH_MAX_RETRIES = 1;
+
+async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+        const opts = {...options, signal: controller.signal};
+        const res = await fetch(url, opts);
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        return res;
+    } catch (e) {
+        clearTimeout(timer);
+        if (retries > 0 && e.name !== 'AbortError') {
+            await new Promise(r => setTimeout(r, 1000));
+            return safeFetch(url, options, retries - 1);
+        }
+        throw e;
+    }
+}
+
+
 
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();
@@ -831,7 +862,10 @@ async function loadStats() {
     }
 }
 
+let alertQueue = [];
 function showAlert(message, type = 'info') {
+    alertQueue.push({m:message, t:type, time:Date.now()});
+    alertQueue = alertQueue.filter(a => Date.now() - a.time < 3000).slice(-3);
     const alertsList = document.getElementById('alertsList');
     if (alertsList.children.length === 1 && alertsList.children[0].textContent === '暂无预警') alertsList.innerHTML = '';
 
@@ -1188,7 +1222,7 @@ async function loadTermStructure() {
     const statusEl = document.getElementById('ts7');
     if (!statusEl) { console.warn('TS: container not found'); return; }
     try {
-        const resp = await fetch(API_BASE + '/api/charts/vol-surface?currency=BTC');
+        const resp = await safeFetch(API_BASE + '/api/charts/vol-surface?currency=BTC');
         const d = await resp.json();
         if (d.error) { console.warn('TS:', d.error); return; }
 
@@ -1261,7 +1295,7 @@ async function loadMaxPain() {
     const spotEl = document.getElementById('mpSpot');
     if (!spotEl) { console.warn('MP: container not found'); return; }
     try {
-        const resp = await fetch(API_BASE + '/api/metrics/max-pain?currency=BTC');
+        const resp = await safeFetch(API_BASE + '/api/metrics/max-pain?currency=BTC');
         const d = await resp.json();
         if (d.error || !d.expiries) { console.warn('MP:', d.error || 'no expiries'); return; }
 
@@ -1436,7 +1470,7 @@ async function runSandbox() {
     resultDiv.innerHTML = '<div class="text-center py-4 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>🔄 推演计算中...</div>';
 
     try {
-        var resp = await fetch(API_BASE + '/api/sandbox/simulate', {
+        var resp = await safeFetch(API_BASE + '/api/sandbox/simulate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ current_symbol: symbol, crash_price: crash, reserve_capital: reserve, num_contracts: nContracts })
@@ -1549,7 +1583,7 @@ async function submitRollCalc() {
             max_qty_multiplier: parseFloat(document.getElementById('rcMaxMult').value) || 3.0
         };
         
-        const response = await fetch(API_BASE + '/api/calculator/roll', {
+        const response = await safeFetch(API_BASE + '/api/calculator/roll', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

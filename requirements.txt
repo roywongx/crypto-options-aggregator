@@ -1,3 +1,10 @@
-requests>=2.28.0
-urllib3>=1.26.0
-pyyaml>=6.0
+# Core dependencies (pinned for reproducibility)
+requests>=2.31.0,<3.0.0
+urllib3>=2.0.0,<3.0.0
+pyyaml>=6.0,<7.0
+
+# Optional: CCXT for spot price fallback
+ccxt>=4.0.0,<5.0.0
+
+# Optional: SciPy for statistical calculations (DVOL percentile)
+scipy>=1.11.0,<2.0.0

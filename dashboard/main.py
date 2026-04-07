@@ -75,6 +75,23 @@ class CalculationEngine:
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
 DB_PATH.parent.mkdir(exist_ok=True)
 
+import threading
+
+_db_local = threading.local()
+
+def get_db_connection():
+    """Thread-safe SQLite connection with WAL mode and busy timeout"""
+    conn = getattr(_db_local, 'conn', None)
+    if conn is None:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.row_factory = sqlite3.Row
+        _db_local.conn = conn
+    return conn
+
+
 
 class ScanParams(BaseModel):
     currency: str = Field(default="BTC", description="币种")
@@ -99,6 +116,16 @@ class RollCalcParams(BaseModel):
     max_dte: int = Field(default=90, ge=1)
     max_qty_multiplier: float = Field(default=3.0, ge=1.0, description="最大倍投倍数")
     margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
+
+
+class QuickScanParams(BaseModel):
+    currency: str = Field(default="BTC", pattern="^(BTC|ETH|SOL|XRP)$")
+    min_dte: int = Field(default=14, ge=1, le=365)
+    max_dte: int = Field(default=35, ge=1, le=365)
+    max_delta: float = Field(default=0.4, ge=0.01, le=1.0)
+    margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
+    option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$")
+    strike_range: Optional[str] = Field(default=None)
 
 class RecoveryCalcParams(BaseModel):
     currency: str = Field(default="BTC", description="币种")
@@ -423,7 +450,7 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
 
 
 def init_database():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("PRAGMA journal_mode=WAL")
@@ -483,11 +510,11 @@ def init_database():
             cursor.execute(f"ALTER TABLE large_trades_history ADD COLUMN {col} {'REAL' if col in ('notional_usd','delta') else 'TEXT'}")
 
     conn.commit()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
 
 def save_scan_record(data: Dict[str, Any]):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -530,7 +557,7 @@ def save_scan_record(data: Dict[str, Any]):
     cursor.execute("DELETE FROM large_trades_history WHERE timestamp < datetime('now', '-90 days')")
 
     conn.commit()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
 
 def run_options_scan(params: ScanParams) -> Dict[str, Any]:
@@ -620,7 +647,9 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         return parsed
 
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        import logging
+        logging.getLogger(__name__).error("adapt_params_by_dvol failed: %s", str(e), exc_info=True)
+        return {"success": False, "error": "参数适配失败，请检查输入参数"}
 
 
 def calculate_recovery_plan(contracts: List[Dict], params: RecoveryCalcParams, spot_price: float) -> Dict[str, Any]:
@@ -768,10 +797,11 @@ async def scan_options(params: ScanParams):
 
 
 @app.post("/api/quick-scan")
-async def quick_scan(params: dict = None):
+async def quick_scan(params: QuickScanParams = None):
     """快速扫描：直接获取Deribit数据，不依赖options_aggregator.py"""
     from datetime import datetime
-    currency = "BTC"
+    _p = params or QuickScanParams()
+    currency = _p.currency
     spot = get_spot_price(currency)
     if spot < 1000:
         try:
@@ -787,8 +817,8 @@ async def quick_scan(params: dict = None):
     dvol_z = dvol_data.get('z_score', 0) or 0
     dvol_signal = dvol_data.get('signal', '正常区间')
     
-    use_min_dte = params.get('min_dte', 14) if params else 14
-    use_max_dte = params.get('max_dte', 35) if params else 35
+    use_min_dte = _p.min_dte
+    use_max_dte = _p.max_dte
     
     import math
     dvol_pct = 50
@@ -830,7 +860,7 @@ async def quick_scan(params: dict = None):
                 delta_val = abs(_estimate_delta(strike, underlying, iv, meta["dte"], meta["option_type"]))
             else:
                 delta_val = abs(float(raw_delta))
-            max_delta = params.get("max_delta", 0.4) if params else 0.4
+            max_delta = _p.max_delta
             
             if isinstance(dvol_pct, (int, float)) and dvol_pct >= 80:
                 max_delta = max_delta * 0.7
@@ -879,7 +909,7 @@ async def quick_scan(params: dict = None):
             
             now_ms = time.time() * 1000
             req_type = params.get("option_type", "PUT").upper() if params else "PUT"
-            max_delta = params.get("max_delta", 0.4) if params else 0.4
+            max_delta = _p.max_delta
             margin_ratio = params.get("margin_ratio", 0.2) if params else 0.2
 
             for s in r_info.get('optionSymbols', []):
@@ -972,7 +1002,7 @@ async def quick_scan(params: dict = None):
 
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
@@ -981,7 +1011,7 @@ async def quick_scan(params: dict = None):
         """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
               json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps({})))
         conn.commit()
-        conn.close()
+        # conn.close()  # managed by connection pool
 
         return {
             "success": True,
@@ -999,14 +1029,14 @@ async def quick_scan(params: dict = None):
             "large_trades_details": large_trades[:20]
         }
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {"success": False, "error": str(e)}
+        import logging
+        logging.getLogger(__name__).error("quick_scan failed: %s", str(e), exc_info=True)
+        return {"success": False, "error": "扫描失败，请稍后重试或检查日志"}
 
 
 @app.get("/api/latest")
 async def get_latest_scan(currency: str = Query(default="BTC")):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -1017,7 +1047,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     """, (currency,))
 
     row = cursor.fetchone()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     if not row:
         raise HTTPException(status_code=404, detail="暂无数据")
@@ -1048,7 +1078,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
 
 @app.post("/api/recovery-calculate")
 async def calculate_recovery(params: RecoveryCalcParams):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -1056,7 +1086,7 @@ async def calculate_recovery(params: RecoveryCalcParams):
         WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
     """, (params.currency,))
     row = cursor.fetchone()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     if not row:
         raise HTTPException(status_code=404, detail="暂无扫描数据，请先执行扫描")
@@ -1074,11 +1104,11 @@ async def calculate_recovery(params: RecoveryCalcParams):
 
 @app.post("/api/calculator/roll")
 async def calculate_net_credit_roll(params: RollCalcParams):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (params.currency,))
     row = cursor.fetchone()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="暂无扫描数据，请先执行扫描")
@@ -1184,7 +1214,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
 
 @app.get("/api/stats")
 async def get_stats():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("SELECT COUNT(*) FROM scan_records")
@@ -1198,7 +1228,7 @@ async def get_stats():
 
     db_size = os.path.getsize(DB_PATH)
 
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     return {
         "total_scans": total_scans,
@@ -1213,13 +1243,13 @@ async def health_check():
     checks = {}
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode")
         mode = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM scan_records")
         count = cursor.fetchone()[0]
-        conn.close()
+        # conn.close()  # managed by connection pool
         checks["database"] = {"status": "ok", "mode": mode, "records": count}
     except Exception as e:
         checks["database"] = {"status": "error", "message": str(e)}
@@ -1241,7 +1271,7 @@ async def health_check():
 @app.get("/api/charts/apr")
 async def get_apr_chart(hours: int = Query(default=168)):
     import json as _json
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     since = datetime.now() - timedelta(hours=hours)
 
@@ -1254,7 +1284,7 @@ async def get_apr_chart(hours: int = Query(default=168)):
     """, (since.strftime('%Y-%m-%d %H:%M:%S'),))
 
     raw_rows = cursor.fetchall()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     APR_MIN, APR_MAX = 1.0, 500.0
     result = []
@@ -1308,7 +1338,7 @@ async def get_apr_chart(hours: int = Query(default=168)):
 
 @app.get("/api/charts/dvol")
 async def get_dvol_chart(hours: int = Query(default=168)):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     since = datetime.now() - timedelta(hours=hours)
 
@@ -1331,7 +1361,7 @@ async def get_dvol_chart(hours: int = Query(default=168)):
     """, (since.strftime('%Y-%m-%d %H:%M:%S'),))
 
     rows = cursor.fetchall()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     return [{"time": r[0], "dvol": round(r[1], 2) if r[1] else 0, "z_score": round(r[2], 2) if r[2] else 0, "signal": r[3]} for r in rows]
 
@@ -1359,7 +1389,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
     
     # Step 1: Try DB first
     since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta
@@ -1370,7 +1400,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
         ORDER BY notional_usd DESC LIMIT ?
     """, (currency, since, limit))
     rows = cursor.fetchall()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     results = []
     seen = set()
@@ -1586,11 +1616,11 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
 
 def _get_spot_from_scan():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT contracts_data FROM scan_records ORDER BY timestamp DESC LIMIT 1")
         row = cur.fetchone()
-        conn.close()
+        # conn.close()  # managed by connection pool
         if row and row[0]:
             data = json.loads(row[0])
             for item in data:
@@ -1826,7 +1856,7 @@ async def get_trades_history(
     direction: str = Query(default=""),
     source: str = Query(default="")
 ):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     since = datetime.now() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
@@ -1849,7 +1879,7 @@ async def get_trades_history(
     cursor.execute(query, params)
     rows = cursor.fetchall()
     cols = [desc[0] for desc in cursor.description]
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     result = []
     for row in rows:
@@ -1868,7 +1898,7 @@ async def get_strike_distribution(
     currency: str = Query(default="BTC"),
     days: int = Query(default=30)
 ):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     since = datetime.now() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
@@ -1889,7 +1919,7 @@ async def get_strike_distribution(
     """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
 
     rows = cursor.fetchall()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     distribution = []
     for row in rows:
@@ -1911,7 +1941,7 @@ async def get_wind_analysis(
     currency: str = Query(default="BTC"),
     days: int = Query(default=30)
 ):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     since = datetime.now() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
@@ -1955,7 +1985,7 @@ async def get_wind_analysis(
         WHERE currency = ? AND timestamp > ?
     """, (currency, since_str))
     totals = cursor.fetchone()
-    conn.close()
+    # conn.close()  # managed by connection pool
 
     total_trades = totals[0] or 0
     total_buys = totals[1] or 0
