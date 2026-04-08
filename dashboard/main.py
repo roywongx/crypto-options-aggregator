@@ -282,16 +282,19 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
                     signal = "正常区间"
 
                 # Calculate trend from recent data points
-                trend = "→"  # default: sideways
-                confidence = "中"  # default: medium
+                trend = "→"
+                trend_label = "震荡"
+                confidence = "中"
                 if len(closes) >= 6:
                     recent_avg = sum(closes[-3:]) / 3
                     prev_avg = sum(closes[-6:-3]) / 3
                     diff_pct = (recent_avg - prev_avg) / prev_avg * 100 if prev_avg > 0 else 0
                     if diff_pct > 1.5:
-                        trend = "↑"  # up
+                        trend = "↑"
+                        trend_label = "上涨"
                     elif diff_pct < -1.5:
-                        trend = "↓"  # down
+                        trend = "↓"
+                        trend_label = "下跌"
                 
                 # Confidence based on data quality
                 n_points = len(closes)
@@ -307,7 +310,9 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
                     "z_score": round(z_score, 2),
                     "signal": signal,
                     "trend": trend,
+                    "trend_label": trend_label,
                     "confidence": confidence,
+                    "interpretation": f"DVOL {round(current,1)}% (Z={round(z_score,2)}), {trend_label}趋势, 置信度{confidence}",
                     "data_points": n_points,
                     "percentile_7d": round(sum(1 for x in closes if x <= current) / len(closes) * 100, 1) if closes else 50.0
                 }
@@ -908,9 +913,16 @@ async def quick_scan(params: QuickScanParams = None):
         # 抓取 Binance 数据
         try:
             import requests, time
-            r_mark = requests.get('https://eapi.binance.com/eapi/v1/mark', timeout=10).json()
-            r_info = requests.get('https://eapi.binance.com/eapi/v1/exchangeInfo', timeout=10).json()
-            r_ticker = requests.get('https://eapi.binance.com/eapi/v1/ticker', timeout=10).json()
+            from concurrent.futures import ThreadPoolExecutor
+            def _fetch_bin(url):
+                return requests.get(url, timeout=10).json()
+            with ThreadPoolExecutor(max_workers=3) as _tp:
+                _f_mark = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/mark')
+                _f_info = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/exchangeInfo')
+                _f_ticker = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/ticker')
+                r_mark = _f_mark.result()
+                r_info = _f_info.result()
+                r_ticker = _f_ticker.result()
             
             now_ms = time.time() * 1000
             req_type = _p.option_type.upper()
@@ -1126,9 +1138,10 @@ async def calculate_net_credit_roll(params: RollCalcParams):
 
     import math
 
-    MIN_NET_CREDIT_USD = 10.0
-    SLIPPAGE_PCT = 0.05
-    SAFETY_BUFFER_PCT = 0.10
+    from dashboard.config import config
+    MIN_NET_CREDIT_USD = config.MIN_NET_CREDIT_USD
+    SLIPPAGE_PCT = config.ROLL_SLIPPAGE_PCT
+    SAFETY_BUFFER_PCT = config.ROLL_SAFETY_BUFFER_PCT
 
     plans = []
     break_even_exceeds_cap = 0
@@ -1136,8 +1149,11 @@ async def calculate_net_credit_roll(params: RollCalcParams):
     filtered_by_margin = 0
 
     for c in contracts:
-        if c.get('option_type', 'P').upper() != 'P': continue
-        if c.get('strike', 0) >= params.old_strike: continue
+        c_type = c.get('option_type', 'P').upper()
+        if c_type != 'P' and c_type != 'C': continue
+        c_strike = c.get('strike', 0)
+        if c_type == 'P' and c_strike >= params.old_strike: continue
+        if c_type == 'C' and c_strike <= params.old_strike: continue
         if c.get('dte', 0) < params.min_dte or c.get('dte', 0) > params.max_dte: continue
         if abs(c.get('delta', 1)) > params.target_max_delta: continue
         
@@ -1243,6 +1259,41 @@ async def get_stats():
         "db_size_mb": round(db_size / (1024 * 1024), 2)
     }
 
+
+
+
+@app.get("/api/export/csv")
+async def export_csv(currency: str = "BTC", hours: int = 168):
+    import csv, io
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT instrument_name, platform, option_type, strike, dte, delta, gamma, vega,
+                   iv, apr, pop, premium_usd, liquidity_score, loss_at_10pct,
+                   breakeven_usd, breakeven_pct, open_interest, spread_pct, iv_rank, _score
+            FROM scan_records
+            WHERE currency = ? AND timestamp > datetime('now', ?||' hours')
+            ORDER BY _score DESC
+        """, (currency, -hours))
+        rows = cursor.fetchall()
+    except Exception:
+        rows = []
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    headers = ["合约","平台","类型","行权价","DTE","Delta","Gamma","Vega","IV%","APR%","POP%",
+               "权利金$","流动性","-10%亏损","盈亏平衡$","安全垫%","持仓量","价差%","IV_Rank","评分"]
+    writer.writerow(headers)
+    for r in rows:
+        writer.writerow([r[i] if r[i] is not None else "" for i in range(len(headers))])
+
+    from fastapi.responses import Response
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f"attachment; filename=options_{currency}_{hours}h.csv"}
+    )
 
 @app.get("/api/health")
 async def health_check():
@@ -2180,36 +2231,6 @@ def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
 
     adjusted['_dvol_advice'] = advice
     return adjusted
-
-
-def _get_positions_greeks(currency: str) -> dict:
-    import concurrent.futures
-    cache = {}
-    try:
-        from deribit_options_monitor import DeribitOptionsMonitor
-        mon = DeribitOptionsMonitor()
-        summaries = mon._get_book_summaries(currency)
-        if not summaries:
-            return cache
-        instruments = list({s["instrument_name"] for s in summaries})
-        def fetch_greeks(inst):
-            try:
-                book = mon._request_json("/api/v2/public/get_order_book", {"instrument_name": inst})
-                result = book.get("result", {}) if book else {}
-                greeks = result.get("greeks", {}) if result else {}
-                return inst, {"gamma": greeks.get("gamma"), "delta": greeks.get("delta"), "vega": greeks.get("vega"), "theta": greeks.get("theta")}
-            except Exception:
-                return inst, {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-            for fut in concurrent.futures.as_completed({ex.submit(fetch_greeks, i): i for i in instruments}, timeout=20):
-                try:
-                    inst, gk = fut.result()
-                    cache[inst] = gk
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return cache
 
 
 def _calc_iv_rank(current_iv: float, history_ivs: list) -> float:

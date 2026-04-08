@@ -1513,6 +1513,16 @@ async function runSandbox() {
     }
 }
 
+
+function exportCSV() {
+    const currency = document.getElementById('currencySelect')?.value || 'BTC';
+    const url = `${API_BASE}/api/export/csv?currency=${currency}&hours=168`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `options_${currency}_168h.csv`;
+    a.click();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() { loadWindAnalysis(); }, 2000);
     setTimeout(function() { loadTermStructure(); }, 2500);
