@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateParamDisplay();
     setAutoRefresh(5);
     requestNotificationPermission();
+    loadPcrChart();
 });
 
 function requestNotificationPermission() {
@@ -283,8 +284,10 @@ async function triggerScan() {
     _scanLock = true;
     const btn = document.getElementById('scanBtn');
     const icon = document.getElementById('scanIcon');
+    const searchIcon = btn.querySelector('.fa-search');
     btn.disabled = true;
-    icon.classList.add('fa-spin');
+    if (searchIcon) searchIcon.style.display = 'none';
+    if (icon) { icon.style.display = ''; icon.classList.add('fa-spin'); }
 
     try {
         const strikeInput = document.getElementById('strikeInput').value;
@@ -323,7 +326,9 @@ async function triggerScan() {
         showAlert('请求错误: ' + error.message, 'error');
     } finally {
         btn.disabled = false;
-        icon.classList.remove('fa-spin');
+        const searchIcon = btn.querySelector('.fa-search');
+        if (searchIcon) searchIcon.style.display = '';
+        if (icon) { icon.classList.remove('fa-spin'); icon.style.display = 'none'; }
         _scanLock = false;
     }
 }
@@ -351,7 +356,7 @@ async function calculateRecovery() {
             max_delta: parseFloat(document.getElementById('recoveryMaxDelta').value) || 0.45
         };
 
-        const response = await fetch(`${API_BASE}/api/recovery-calculate`, {
+        const response = await safeFetch(`${API_BASE}/api/recovery-calculate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
@@ -421,7 +426,7 @@ function displayRecoveryResult(result) {
 async function loadLatestData() {
     try {
         const currency = document.getElementById('currencySelect').value;
-        const response = await fetch(`${API_BASE}/api/latest?currency=${currency}`);
+        const response = await safeFetch(`${API_BASE}/api/latest?currency=${currency}`);
         if (response.status === 404) return;
 
         const data = await response.json();
@@ -456,8 +461,13 @@ function updateMacroIndicators(data) {
     const dvolSignal = document.getElementById('dvolSignal');
     const zScore = data.dvol_z_score;
     const signal = data.dvol_signal;
+    const dvolInterp = data.dvol_interpretation || '';
+    const dvolTrend = data.dvol_trend_label || data.dvol_trend || '';
 
-    if (signal) {
+    if (dvolInterp) {
+        dvolSignal.textContent = dvolInterp;
+        dvolSignal.className = dvolTrend.includes('上涨') ? 'text-xs mt-1 text-red-400 font-medium' : dvolTrend.includes('下跌') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+    } else if (signal) {
         dvolSignal.textContent = signal;
         dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-red-400 font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
     } else if (zScore !== null && zScore !== undefined) {
@@ -567,13 +577,13 @@ function updateOpportunitiesTable(contracts) {
             <td class="py-2 px-3 text-center"><span class="${platformColor} text-xs font-semibold">${contract.platform}</span></td>
             <td class="py-2 px-2 text-center"><span class="${contract.option_type === 'PUT' ? 'text-green-400' : 'text-blue-400'} text-xs font-bold">${contract.option_type || 'PUT'}</span></td>
             <td class="py-2 px-2 text-center font-mono text-xs tabular-nums">${symbol.split('-')[1] || ''}</td>
-            <td class="py-2 px-2 text-center text-xs tabular-nums">${contract.dte.toFixed(0)}</td>
+            <td class="py-2 px-2 text-center text-xs tabular-nums">${(contract.dte || 0).toFixed(0)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums">$${Math.round(contract.strike).toLocaleString()}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-orange-400' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-yellow-400' : 'text-gray-300'}">${vega.toFixed(1)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${iv ? (iv >= 80 ? 'text-red-400' : iv >= 50 ? 'text-yellow-400' : 'text-emerald-400') : 'text-gray-300'}">${iv ? iv.toFixed(1) + '%' : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${(contract.apr || 0).toFixed(1)}%</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (pop >= 70 ? 'text-emerald-400' : pop >= 50 ? 'text-yellow-300' : 'text-orange-400') : 'text-gray-500'}">${pop ? pop.toFixed(0) + '%' : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${(contract.premium || contract.premium_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
             <td class="py-2 px-2 text-center"><span class="${liqColor} text-xs font-medium">${contract.liquidity_score}</span></td>
@@ -804,7 +814,7 @@ async function loadAprChartData() {
     try {
         const currency = document.getElementById('currencySelect').value;
         const hours = chartPeriods.apr;
-        const response = await fetch(`${API_BASE}/api/charts/apr?currency=${currency}&hours=${hours}`);
+        const response = await safeFetch(`${API_BASE}/api/charts/apr?currency=${currency}&hours=${hours}`);
         const data = await response.json();
 
         if (!data || data.length === 0) {
@@ -833,7 +843,7 @@ async function loadDvolChartData() {
     try {
         const currency = document.getElementById('currencySelect').value;
         const hours = chartPeriods.dvol;
-        const response = await fetch(`${API_BASE}/api/charts/dvol?currency=${currency}&hours=${hours}`);
+        const response = await safeFetch(`${API_BASE}/api/charts/dvol?currency=${currency}&hours=${hours}`);
         const data = await response.json();
 
         if (!data || data.length === 0) {
@@ -856,7 +866,7 @@ async function loadDvolChartData() {
 
 async function loadStats() {
     try {
-        const response = await fetch(`${API_BASE}/api/stats`);
+        const response = await safeFetch(`${API_BASE}/api/stats`);
         const data = await response.json();
         document.getElementById('totalScans').textContent = data.total_scans;
         document.getElementById('todayScans').textContent = data.today_scans;
@@ -1063,7 +1073,7 @@ function toggleDetail(idx) {
 
 async function showDvolAdvice(currency) {
     try {
-        const r = await fetch(`/api/dvol-advice?currency=${currency}`);
+        const r = await safeFetch(`${API_BASE}/api/dvol-advice?currency=${currency}`);
         const data = await r.json();
         if (data.error) return;
 
@@ -1101,7 +1111,7 @@ async function loadWindAnalysis() {
         const currency = document.getElementById('tradesCurrency').value;
         const days = document.getElementById('tradesDays').value;
 
-        const response = await fetch(`${API_BASE}/api/trades/wind-analysis?currency=${currency}&days=${days}`);
+        const response = await safeFetch(`${API_BASE}/api/trades/wind-analysis?currency=${currency}&days=${days}`);
         const data = await response.json();
         const summary = data.summary || {};
         const strikes = data.strike_flows || [];
@@ -1521,6 +1531,42 @@ function exportCSV() {
     a.href = url;
     a.download = `options_${currency}_168h.csv`;
     a.click();
+}
+
+
+async function loadPcrChart(currency = 'BTC', hours = 168) {
+    try {
+        const res = await safeFetch(`${API_BASE}/api/charts/pcr?currency=${currency}&hours=${hours}`);
+        const data = await res.json();
+        const ctx = document.getElementById('pcrChart');
+        if (!ctx || !data.data || data.data.length === 0) return;
+        if (window._pcrChart) window._pcrChart.destroy();
+        window._pcrChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.data.map(d => d.timestamp?.slice(5, 16)),
+                datasets: [{
+                    label: 'Put/Call Ratio',
+                    data: data.data.map(d => d.pcr),
+                    borderColor: 'rgb(168, 85, 247)',
+                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { title: { display: true, text: 'PCR', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                    x: { grid: { display: false }, ticks: { color: '#9ca3af', maxTicksLimit: 8 } }
+                }
+            }
+        });
+    } catch(e) { console.warn('PCR chart failed:', e); }
 }
 
 document.addEventListener('DOMContentLoaded', function() {

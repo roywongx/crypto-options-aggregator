@@ -107,6 +107,7 @@ class ScanParams(BaseModel):
 
 class RollCalcParams(BaseModel):
     currency: str = Field(default="BTC", description="币种")
+    option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$", description="期权类型")
     old_strike: float = Field(..., description="原持仓行权价")
     old_qty: float = Field(default=1.0, gt=0, description="原持仓数量")
     close_cost_total: float = Field(..., gt=0, description="平仓总成本(USDT)")
@@ -179,7 +180,7 @@ def get_spot_price(currency: str = "BTC") -> float:
     sources = []
     
     def _try(name, val):
-        if val and isinstance(val, (int, float)) and val > 100:
+        if val and isinstance(val, (int, float)) and val > 0:
             sources.append(name)
             return float(val)
         return None
@@ -544,7 +545,7 @@ def save_scan_record(data: Dict[str, Any]):
         data.get('large_trades_count', 0),
         json.dumps(large_trades, ensure_ascii=False),
         json.dumps(data.get('contracts', []), ensure_ascii=False),
-        json.dumps(data.get('dvol_raw', {}), ensure_ascii=False)
+        json.dumps({"dvol_raw": data.get('dvol_raw', {}), "trend": data.get('dvol_trend', ''), "trend_label": data.get('dvol_trend_label', ''), "confidence": data.get('dvol_confidence', ''), "interpretation": data.get('dvol_interpretation', '')}, ensure_ascii=False)
     ))
 
     if large_trades and isinstance(large_trades, list):
@@ -645,6 +646,10 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
             parsed['dvol_current'] = dvol_data['current']
             parsed['dvol_z_score'] = dvol_data['z_score']
             parsed['dvol_signal'] = dvol_data['signal']
+            parsed['dvol_trend'] = dvol_data.get('trend', '')
+            parsed['dvol_trend_label'] = dvol_data.get('trend_label', '')
+            parsed['dvol_confidence'] = dvol_data.get('confidence', '')
+            parsed['dvol_interpretation'] = dvol_data.get('interpretation', '')
 
         save_scan_record(parsed)
 
@@ -808,15 +813,20 @@ async def scan_options(params: ScanParams):
 
 @app.post("/api/quick-scan")
 async def quick_scan(params: QuickScanParams = None):
+    return await run_in_threadpool(_quick_scan_sync, params)
+
+
+def _quick_scan_sync(params: QuickScanParams = None):
     """快速扫描：直接获取Deribit数据，不依赖options_aggregator.py"""
     from datetime import datetime
     _p = params or QuickScanParams()
     currency = _p.currency
     spot = get_spot_price(currency)
-    if spot < 1000:
+    _min_spot = {"BTC": 1000, "ETH": 100, "SOL": 10, "XRP": 0.5}.get(currency, 100)
+    if spot < _min_spot:
         try:
             spot = get_spot_price_deribit(currency) or get_spot_price_binance(currency)
-            if not spot or spot < 100:
+            if not spot or spot < _min_spot * 0.1:
                 raise ValueError("No valid spot price")
         except Exception:
             raise RuntimeError("[CRITICAL] quick_scan: cannot obtain spot price, scan aborted")
@@ -915,14 +925,23 @@ async def quick_scan(params: QuickScanParams = None):
             import requests, time
             from concurrent.futures import ThreadPoolExecutor
             def _fetch_bin(url):
-                return requests.get(url, timeout=10).json()
+                try:
+                    resp = requests.get(url, timeout=10)
+                    resp.raise_for_status()
+                    return resp.json()
+                except Exception as e:
+                    return {}
             with ThreadPoolExecutor(max_workers=3) as _tp:
                 _f_mark = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/mark')
                 _f_info = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/exchangeInfo')
                 _f_ticker = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/ticker')
-                r_mark = _f_mark.result()
-                r_info = _f_info.result()
-                r_ticker = _f_ticker.result()
+                r_mark = r_info = r_ticker = {}
+                try:
+                    r_mark = _f_mark.result(timeout=15)
+                    r_info = _f_info.result(timeout=15)
+                    r_ticker = _f_ticker.result(timeout=15)
+                except Exception:
+                    pass
             
             now_ms = time.time() * 1000
             req_type = _p.option_type.upper()
@@ -953,7 +972,7 @@ async def quick_scan(params: QuickScanParams = None):
                 spread_pct = 0.0
                 if bid > 0 and ask > 0:
                     spread_pct = ((ask - bid) / bid) * 100
-                if spread_pct >= 10.0: continue  # 强制过滤高Spread合约
+                if spread_pct >= 10.0: continue
                 
                 strike = float(s['strikePrice'])
                 prem_usd = float(mark['markPrice'])
@@ -961,9 +980,6 @@ async def quick_scan(params: QuickScanParams = None):
                 apr = (prem_usd / cv) * (365 / dte) * 100 if cv > 0 else 0
                 iv = float(mark['markIV']) * 100
                 opt_type = 'P' if s['side'] == 'PUT' else 'C'
-                
-                spread_pct = 0.0
-                if bid > 0: spread_pct = ((ask - bid) / bid) * 100
                 liq_score = min(50, (volume / 100) * 50) + max(0, 50 - (spread_pct * 5))
 
                 dist = abs(strike - spot) / spot * 100
@@ -1041,7 +1057,9 @@ async def quick_scan(params: QuickScanParams = None):
             "dvol_z_score": dvol_z,
             "dvol_signal": dvol_signal,
             "dvol_trend": dvol_data.get("trend", ""),
+            "dvol_trend_label": dvol_data.get("trend_label", ""),
             "dvol_confidence": dvol_data.get("confidence", ""),
+            "dvol_interpretation": dvol_data.get("interpretation", ""),
             "dvol_percentile_7d": dvol_data.get("percentile_7d", None),
             "large_trades_count": large_trades_count,
             "large_trades_details": large_trades[:20]
@@ -1070,26 +1088,39 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     if not row:
         raise HTTPException(status_code=404, detail="暂无数据")
 
+    col_names = [desc[0] for desc in cursor.description] if cursor.description else []
+    rd = dict(zip(col_names, row)) if row and col_names else {}
+
     _dvol_raw = {}
-    if row[10]:
-        try: _dvol_raw = json.loads(row[10])
-        except: pass
+    if rd.get('raw_output'):
+        try: _dvol_raw = json.loads(rd['raw_output'])
+        except Exception: pass
 
     try:
-        large_trades = json.loads(row[8]) if row[8] else []
+        _ltd = rd.get('large_trades_details', '')
+        large_trades = json.loads(_ltd) if _ltd else []
     except Exception:
-        large_trades = row[8] if isinstance(row[8], list) else []
+        large_trades = rd.get('large_trades_details', []) if isinstance(rd.get('large_trades_details'), list) else []
+
+    dvol_trend = _dvol_raw.get('trend', '') if _dvol_raw else ''
+    dvol_trend_label = _dvol_raw.get('trend_label', '') if _dvol_raw else ''
+    dvol_confidence = _dvol_raw.get('confidence', '') if _dvol_raw else ''
+    dvol_interpretation = _dvol_raw.get('interpretation', '') if _dvol_raw else ''
 
     return {
-        "timestamp": row[1],
-        "currency": row[2],
-        "spot_price": row[3],
-        "dvol_current": row[4],
-        "dvol_z_score": row[5],
-        "dvol_signal": row[6],
-        "large_trades_count": row[7],
+        "timestamp": rd.get('timestamp'),
+        "currency": rd.get('currency'),
+        "spot_price": rd.get('spot_price'),
+        "dvol_current": rd.get('dvol_current'),
+        "dvol_z_score": rd.get('dvol_z_score'),
+        "dvol_signal": rd.get('dvol_signal', ''),
+        "dvol_trend": dvol_trend,
+        "dvol_trend_label": dvol_trend_label,
+        "dvol_confidence": dvol_confidence,
+        "dvol_interpretation": dvol_interpretation,
+        "large_trades_count": rd.get('large_trades_count', 0),
         "large_trades_details": large_trades,
-        "contracts": json.loads(row[9]) if row[9] else [],
+        "contracts": json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else [],
         "dvol_raw": _dvol_raw
     }
 
@@ -1109,12 +1140,15 @@ async def calculate_recovery(params: RecoveryCalcParams):
     if not row:
         raise HTTPException(status_code=404, detail="暂无扫描数据，请先执行扫描")
 
+    col_names = [desc[0] for desc in cursor.description] if cursor.description else []
+    rd = dict(zip(col_names, row)) if row and col_names else {}
+
     try:
-        contracts = json.loads(row[0]) if row[0] else []
+        contracts = json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else []
     except Exception:
         contracts = []
 
-    spot = row[1] or 0
+    spot = rd.get('spot_price', 0) or 0
     result = calculate_recovery_plan(contracts, params, spot)
     return result
 
@@ -1138,7 +1172,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
 
     import math
 
-    from dashboard.config import config
+    from config import config
     MIN_NET_CREDIT_USD = config.MIN_NET_CREDIT_USD
     SLIPPAGE_PCT = config.ROLL_SLIPPAGE_PCT
     SAFETY_BUFFER_PCT = config.ROLL_SAFETY_BUFFER_PCT
@@ -1176,7 +1210,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         new_qty = max(min_qty_for_profit, break_even_qty)
 
         strike = c['strike']
-        margin_req = new_qty * strike * params.margin_ratio
+        margin_req = new_qty * strike * params.margin_ratio if params.option_type == 'PUT' else new_qty * strike
         if margin_req > params.reserve_capital:
             filtered_by_margin += 1
             continue
@@ -1221,7 +1255,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
 
     return {
         "success": True,
-        "params": params.dict(),
+        "params": params.model_dump(),
         "plans": plans[:15],
         "meta": {
             "total_contracts_scanned": len(contracts),
@@ -1262,31 +1296,65 @@ async def get_stats():
 
 
 
+
+
+@app.get("/api/charts/pcr")
+async def get_pcr_chart(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT timestamp, large_trades_details FROM scan_records
+        WHERE currency = ? AND timestamp > datetime('now', ?||' hours')
+        ORDER BY timestamp ASC
+    """, (currency, -hours))
+    rows = cursor.fetchall()
+    result = []
+    for r in rows:
+        try:
+            trades = json.loads(r[1]) if r[1] else []
+            put_vol = sum(t.get('notional_usd', 0) for t in trades if 'P' in t.get('instrument_name', '') and t.get('notional_usd', 0) > 0)
+            call_vol = sum(t.get('notional_usd', 0) for t in trades if 'C' in t.get('instrument_name', '') and t.get('notional_usd', 0) > 0)
+            pcr = put_vol / call_vol if call_vol > 0 else None
+            if pcr is not None:
+                result.append({"timestamp": r[0], "pcr": round(pcr, 3)})
+        except Exception:
+            pass
+    return {"currency": currency, "data": result}
+
 @app.get("/api/export/csv")
 async def export_csv(currency: str = "BTC", hours: int = 168):
     import csv, io
     conn = get_db_connection()
+    all_contracts = []
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT instrument_name, platform, option_type, strike, dte, delta, gamma, vega,
-                   iv, apr, pop, premium_usd, liquidity_score, loss_at_10pct,
-                   breakeven_usd, breakeven_pct, open_interest, spread_pct, iv_rank, _score
-            FROM scan_records
+            SELECT contracts_data FROM scan_records
             WHERE currency = ? AND timestamp > datetime('now', ?||' hours')
-            ORDER BY _score DESC
         """, (currency, -hours))
-        rows = cursor.fetchall()
+        for row in cursor.fetchall():
+            try:
+                contracts = json.loads(row[0]) if row[0] else []
+                all_contracts.extend(contracts)
+            except Exception:
+                pass
     except Exception:
-        rows = []
+        pass
 
     output = io.StringIO()
     writer = csv.writer(output)
     headers = ["合约","平台","类型","行权价","DTE","Delta","Gamma","Vega","IV%","APR%","POP%",
                "权利金$","流动性","-10%亏损","盈亏平衡$","安全垫%","持仓量","价差%","IV_Rank","评分"]
     writer.writerow(headers)
-    for r in rows:
-        writer.writerow([r[i] if r[i] is not None else "" for i in range(len(headers))])
+    for c in all_contracts:
+        writer.writerow([
+            c.get('instrument_name', ''), c.get('platform', ''), c.get('option_type', ''),
+            c.get('strike', ''), c.get('dte', ''), c.get('delta', ''), c.get('gamma', ''),
+            c.get('vega', ''), c.get('iv', ''), c.get('apr', ''), c.get('pop', ''),
+            c.get('premium_usd', ''), c.get('liquidity_score', ''), c.get('loss_at_10pct', ''),
+            c.get('breakeven_usd', ''), c.get('breakeven_pct', ''), c.get('open_interest', ''),
+            c.get('spread_pct', ''), c.get('iv_rank', ''), c.get('_score', '')
+        ])
 
     from fastapi.responses import Response
     return Response(
@@ -1294,6 +1362,57 @@ async def export_csv(currency: str = "BTC", hours: int = 168):
         media_type="text/csv; charset=utf-8-sig",
         headers={"Content-Disposition": f"attachment; filename=options_{currency}_{hours}h.csv"}
     )
+
+@app.get("/api/dvol-advice")
+async def get_dvol_advice(currency: str = Query(default="BTC")):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT raw_output FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
+    row = cursor.fetchone()
+    dvol_raw = {}
+    if row and row[0]:
+        try:
+            dvol_raw = json.loads(row[0])
+        except Exception:
+            pass
+
+    dvol_snapshot = {
+        "current": dvol_raw.get("current", 0),
+        "z_score": dvol_raw.get("z_score", 0),
+        "signal": dvol_raw.get("signal", ""),
+        "trend": dvol_raw.get("trend", ""),
+        "trend_label": dvol_raw.get("trend_label", ""),
+        "percentile_7d": dvol_raw.get("percentile_7d", 50),
+        "confidence": dvol_raw.get("confidence", ""),
+        "interpretation": dvol_raw.get("interpretation", "")
+    }
+
+    base_params = {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15}
+    adapted = adapt_params_by_dvol(base_params, dvol_raw)
+
+    put_standard = dict(base_params)
+    put_adapted = adapt_params_by_dvol(put_standard, dvol_raw)
+
+    call_standard = dict(base_params)
+    call_standard["max_delta"] = 0.45
+    call_adapted = adapt_params_by_dvol(call_standard, dvol_raw)
+
+    return {
+        "dvol_snapshot": dvol_snapshot,
+        "adapted_presets": {
+            "PUT_standard": {
+                "adjustment_level": put_adapted.get("_adjustment_level", "none"),
+                "advice": put_adapted.get("_dvol_advice", []),
+                "params": {k: v for k, v in put_adapted.items() if not k.startswith("_")}
+            },
+            "CALL_standard": {
+                "adjustment_level": call_adapted.get("_adjustment_level", "none"),
+                "advice": call_adapted.get("_dvol_advice", []),
+                "params": {k: v for k, v in call_adapted.items() if not k.startswith("_")}
+            }
+        }
+    }
+
 
 @app.get("/api/health")
 async def health_check():
@@ -1326,7 +1445,7 @@ async def health_check():
 
 
 @app.get("/api/charts/apr")
-async def get_apr_chart(hours: int = Query(default=168)):
+async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
     import json as _json
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1335,10 +1454,10 @@ async def get_apr_chart(hours: int = Query(default=168)):
     cursor.execute("""
         SELECT MAX(timestamp) as ts, contracts_data
         FROM scan_records 
-        WHERE timestamp > ?
+        WHERE timestamp > ? AND currency = ?
         GROUP BY strftime('%Y-%m-%d %H:00', timestamp)
         ORDER BY ts ASC
-    """, (since.strftime('%Y-%m-%d %H:%M:%S'),))
+    """, (since.strftime('%Y-%m-%d %H:%M:%S'), currency))
 
     raw_rows = cursor.fetchall()
     # conn.close()  # managed by connection pool
@@ -1394,7 +1513,7 @@ async def get_apr_chart(hours: int = Query(default=168)):
 
 
 @app.get("/api/charts/dvol")
-async def get_dvol_chart(hours: int = Query(default=168)):
+async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
     conn = get_db_connection()
     cursor = conn.cursor()
     since = datetime.now() - timedelta(hours=hours)
@@ -1412,10 +1531,10 @@ async def get_dvol_chart(hours: int = Query(default=168)):
                AVG(dvol_z_score) as z_score,
                MAX(dvol_signal) as signal
         FROM scan_records 
-        WHERE timestamp > ? AND dvol_current IS NOT NULL
+        WHERE timestamp > ? AND currency = ? AND dvol_current IS NOT NULL
         GROUP BY ts
         ORDER BY ts ASC
-    """, (since.strftime('%Y-%m-%d %H:%M:%S'),))
+    """, (since.strftime('%Y-%m-%d %H:%M:%S'), currency))
 
     rows = cursor.fetchall()
     # conn.close()  # managed by connection pool
@@ -2205,7 +2324,7 @@ STRATEGY_PRESETS = {
 
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
-    pct_7d = (dvol_raw.get('iv_percentile_7d') or 50)
+    pct_7d = (dvol_raw.get('percentile_7d') or 50)
     trend = dvol_raw.get('trend', '')
 
     adjusted = dict(params)
@@ -2230,6 +2349,15 @@ def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
             advice.append("市场处于下跌阶段，建议降低仓位或观望")
 
     adjusted['_dvol_advice'] = advice
+    if isinstance(pct_7d, (int, float)):
+        if pct_7d >= 80:
+            adjusted['_adjustment_level'] = 'conservative'
+        elif pct_7d <= 20:
+            adjusted['_adjustment_level'] = 'aggressive'
+        else:
+            adjusted['_adjustment_level'] = 'none'
+    else:
+        adjusted['_adjustment_level'] = 'none'
     return adjusted
 
 
