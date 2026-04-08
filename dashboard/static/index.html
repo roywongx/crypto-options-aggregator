@@ -50,7 +50,9 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-    </style>
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.animate-fade-in { animation: fadeIn 0.3s ease-out; }
+</style>
 </head>
 <body class="gradient-bg min-h-screen text-white">
     <div class="container mx-auto px-4 py-6 max-w-[1600px]">
@@ -70,10 +72,7 @@
                         <span class="w-2 h-2 bg-green-500 rounded-full pulse-dot"></span>
                         <span id="lastUpdate" class="text-gray-300">等待数据...</span>
                     </div>
-                    <button onclick="triggerScan()" 
-
-
-                <button id="scanBtn" class="btn-primary px-5 py-2.5 rounded-xl font-medium flex items-center gap-2">
+                    <button id="scanBtn" class="btn-primary px-5 py-2.5 rounded-xl font-medium flex items-center gap-2">
                         <i class="fas fa-sync-alt" id="scanIcon"></i>
                         <span>立即扫描</span>
                     </button>
@@ -571,7 +570,7 @@
                         <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">偏离度</div><div id="mpDist" class="font-mono">--%</div></div>
                         <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">看跌/看涨比</div><div id="mpPCR" class="font-mono">--</div></div>
                     </div>
-                    <div id="mmAlert" class="hidden mb-3 p-2 rounded text-xs" id="mmAlertBox"></div>
+                    <div id="mmAlert" class="hidden mb-3 p-2 rounded text-xs"></div>
                     <canvas id="painGexChart" height="180"></canvas>
                     <div id="mpSignal" class="mt-2 text-xs text-center text-gray-400"></div>
                 </div>
@@ -658,6 +657,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=57&t=1775587855&t=1775587065"></script>
-<div style="display:none" data-app-version="v561-t1775586598"></div></body>
+    <script src="/static/app.js?v=572&t=1775659048"></script>
+<div style="display:none" data-app-version="v572"></div></body>
 </html>

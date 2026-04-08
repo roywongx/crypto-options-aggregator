@@ -125,7 +125,12 @@ class QuickScanParams(BaseModel):
     max_delta: float = Field(default=0.4, ge=0.01, le=1.0)
     margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
     option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$")
+    strike: Optional[float] = Field(default=None, gt=0)
     strike_range: Optional[str] = Field(default=None)
+
+    def model_post_init(self, __context):
+        if self.min_dte > self.max_dte:
+            raise ValueError(f"min_dte ({self.min_dte}) must be <= max_dte ({self.max_dte})")
 
 class RecoveryCalcParams(BaseModel):
     currency: str = Field(default="BTC", description="币种")
@@ -148,7 +153,7 @@ def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
                 if response.status_code == 200:
                     data = response.json()
                     return float(data.get("price", 0))
-            except:
+            except Exception:
                 continue
     except Exception as e:
         print(f"获取现货价格失败: {e}", file=sys.stderr)
@@ -826,7 +831,7 @@ async def quick_scan(params: QuickScanParams = None):
         try:
             from scipy.stats import norm
             dvol_pct = round(norm.cdf(dvol_z) * 100, 1)
-        except:
+        except Exception:
             dvol_pct = round(50 + dvol_z * 20, 1)
             dvol_pct = max(1, min(99, dvol_pct))
 
@@ -917,6 +922,7 @@ async def quick_scan(params: QuickScanParams = None):
                 if s['side'] != req_type: continue
                 
                 dte = (s['expiryDate'] - now_ms) / 86400000
+                if dte <= 0: continue
                 if not (use_min_dte <= dte <= use_max_dte): continue
                 
                 mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
@@ -1059,7 +1065,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
 
     try:
         large_trades = json.loads(row[8]) if row[8] else []
-    except:
+    except Exception:
         large_trades = row[8] if isinstance(row[8], list) else []
 
     return {
@@ -1093,7 +1099,7 @@ async def calculate_recovery(params: RecoveryCalcParams):
 
     try:
         contracts = json.loads(row[0]) if row[0] else []
-    except:
+    except Exception:
         contracts = []
 
     spot = row[1] or 0
@@ -1115,7 +1121,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
 
     try:
         contracts = json.loads(row[0])
-    except:
+    except Exception:
         contracts = []
 
     import math
@@ -1440,7 +1446,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
                 meta = None
                 try:
                     meta = _parse_inst_name(inst)
-                except:
+                except Exception:
                     continue
                 if not meta:
                     continue
@@ -1494,7 +1500,7 @@ def _parse_inst_name(inst):
     try:
         exp_date = datetime.strptime(expiry_str, '%d%b%y')
         dte = max(1, (exp_date - datetime.utcnow()).days)
-    except:
+    except Exception:
         dte = 30
     return {"currency": currency, "expiry": expiry_str, "strike": float(strike_str),
             "option_type": opt_type, "dte": dte}
@@ -1512,7 +1518,7 @@ def _estimate_delta(strike, spot, iv, dte, option_type='P'):
     try:
         from scipy.stats import norm
         nd1 = norm.cdf(d1)
-    except:
+    except Exception:
         nd1 = max(0.0, min(1.0, 0.5 + 0.5 * math.tanh(d1 * 0.8)))
     if option_type.upper() in ('P', 'PUT'):
         return round(nd1 - 1, 4)
@@ -1627,14 +1633,14 @@ def _get_spot_from_scan():
                 sp = item.get("spot_price")
                 if sp and sp > 1000:
                     return sp
-    except:
+    except Exception:
         pass
     try:
         import urllib.request
         url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
         resp = urllib.request.urlopen(url, timeout=5)
         return float(json.loads(resp.read())["price"])
-    except:
+    except Exception:
         pass
     return 0
 
@@ -1765,7 +1771,7 @@ async def sandbox_simulate(params: SandboxParams):
         parts = params.current_symbol.rsplit('-', 2)
         base_strike = float(parts[-2]) if len(parts) >= 3 else spot * 0.95
         opt_type = parts[-1] if len(parts) >= 3 else 'P'
-    except:
+    except Exception:
         base_strike = spot * 0.95
         opt_type = 'P'
 
@@ -2192,16 +2198,16 @@ def _get_positions_greeks(currency: str) -> dict:
                 result = book.get("result", {}) if book else {}
                 greeks = result.get("greeks", {}) if result else {}
                 return inst, {"gamma": greeks.get("gamma"), "delta": greeks.get("delta"), "vega": greeks.get("vega"), "theta": greeks.get("theta")}
-            except:
+            except Exception:
                 return inst, {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
             for fut in concurrent.futures.as_completed({ex.submit(fetch_greeks, i): i for i in instruments}, timeout=20):
                 try:
                     inst, gk = fut.result()
                     cache[inst] = gk
-                except:
+                except Exception:
                     pass
-    except:
+    except Exception:
         pass
     return cache
 

@@ -96,20 +96,24 @@ function setupEventListeners() {
 }
 
 function updateParamDisplay() {
-    const currency = document.getElementById('currencySelect').value;
-    const minDte = document.getElementById('minDte').value;
-    const maxDte = document.getElementById('maxDte').value;
-    const maxDelta = document.getElementById('maxDelta').value;
-    const optionType = document.getElementById('optionType').value;
-    const strike = document.getElementById('strikeInput').value;
-    const strikeRange = document.getElementById('strikeRangeInput').value;
+    const currency = document.getElementById('currencySelect')?.value || 'BTC';
+    const minDte = document.getElementById('minDte')?.value || '--';
+    const maxDte = document.getElementById('maxDte')?.value || '--';
+    const maxDelta = document.getElementById('maxDelta')?.value || '--';
+    const optionType = document.getElementById('optionType')?.value || 'PUT';
+    const strike = document.getElementById('strikeInput')?.value || '';
+    const strikeRange = document.getElementById('strikeRangeInput')?.value || '';
+    const presetLabel = {'conservative': '保守', 'standard': '标准', 'aggressive': '进取'}[_currentPreset] || '';
 
     let display = `${currency} | DTE ${minDte}-${maxDte} | Δ≤${maxDelta} | ${optionType === 'PUT' ? 'Sell Put' : 'Covered Call'}`;
     if (strike) display += ` | Strike=${strike}`;
     else if (strikeRange) display += ` | Range=${strikeRange}`;
+    if (presetLabel) display += ` | ${presetLabel}`;
 
-    document.getElementById('currentParams').textContent = display;
-    document.getElementById('currencyLabel').textContent = `${currency}/USDT`;
+    const paramsEl = document.getElementById('currentParams');
+    if (paramsEl) paramsEl.textContent = display;
+    const labelEl = document.getElementById('currencyLabel');
+    if (labelEl) labelEl.textContent = `${currency}/USDT`;
 }
 
 function setAutoRefresh(minutes) {
@@ -488,7 +492,7 @@ function updateOpportunitiesTable(contracts) {
     countEl.textContent = `${contracts.length} 个合约`;
 
     if (contracts.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="16" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="21" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
         updateRiskAlerts([]);
         return;
     }
@@ -568,7 +572,7 @@ function updateOpportunitiesTable(contracts) {
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-orange-400' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-yellow-400' : 'text-gray-300'}">${vega.toFixed(1)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-300">${iv ? (iv >= 80 ? "text-red-400" : iv >= 50 ? "text-yellow-400" : "text-emerald-400") + " " + iv.toFixed(1) + "%" : "-"}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${iv ? (iv >= 80 ? 'text-red-400' : iv >= 50 ? 'text-yellow-400' : 'text-emerald-400') : 'text-gray-300'}">${iv ? iv.toFixed(1) + '%' : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${contract.apr.toFixed(1)}%</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (pop >= 70 ? 'text-emerald-400' : pop >= 50 ? 'text-yellow-300' : 'text-orange-400') : 'text-gray-500'}">${pop ? pop.toFixed(0) + '%' : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${(contract.premium || contract.premium_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
@@ -1025,26 +1029,10 @@ document.getElementById('optionType')?.addEventListener('change', function() {
     applyPreset(_currentPreset);
 });
 
-// 增强版参数显示（含预设名称）
-function updateParamDisplay() {
-    const currency = document.getElementById('currencySelect')?.value || 'BTC';
-    const minDte = document.getElementById('minDte')?.value || '--';
-    const maxDte = document.getElementById('maxDte')?.value || '--';
-    const maxDelta = document.getElementById('maxDelta')?.value || '--';
-    const optType = document.getElementById('optionType')?.value || 'PUT';
-    const optLabel = optType === 'PUT' ? 'Sell Put' : 'Covered Call';
-    const presetLabel = {'conservative': '保守', 'standard': '标准', 'aggressive': '进取'}[_currentPreset] || '';
 
-    const el = document.getElementById('currentParams');
-    if (el) {
-        el.textContent = `${currency} | DTE ${minDte}-${maxDte} | Δ≤${maxDelta} | ${optLabel} | ${presetLabel}`;
-    }
-}
 
-// 参数输入变化时更新显示
 ['minDte', 'maxDte', 'maxDelta', 'currencySelect', 'optionType'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', updateParamDisplay);
-    document.getElementById(id)?.addEventListener('change', updateParamDisplay);
 });
 
 // DVOL自适应建议展示
@@ -1507,11 +1495,11 @@ async function runSandbox() {
             html += '<div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
             html += '<div>恢复合约: <span class="text-white">' + (d.best.symbol || '?') + '</span></div>';
             html += '<div>加仓数量: <span class="text-white">' + (d.best.contracts || 0) + 'x</span></div>';
-            html += '<div>所需保证金: $<span class="text-yellow-400">$' + ((d.best.margin || 0)).toLocaleString() + '</span></div>';
+            html += '<div>所需保证金: <span class="text-yellow-400">$' + ((d.best.margin || 0)).toLocaleString() + '</span></div>';
             var nc = d.best.net >= 0 ? 'text-green-400' : 'text-red-400';
-            html += '<div>净盈亏: $<span class="' + nc + '">$' + ((d.best.net || 0)).toLocaleString() + '</span></div>';
+            html += '<div>净盈亏: <span class="' + nc + '">$' + ((d.best.net || 0)).toLocaleString() + '</span></div>';
             var rc = d.best.reserve >= 0 ? 'text-green-400' : 'text-red-400';
-            html += '<div>剩余后备金: $<span class="' + rc + '">$' + ((d.best.reserve || 0)).toLocaleString() + '</span></div>';
+            html += '<div>剩余后备金: <span class="' + rc + '">$' + ((d.best.reserve || 0)).toLocaleString() + '</span></div>';
             html += '</div></div>';
         }
 
@@ -1568,7 +1556,7 @@ async function submitRollCalc() {
     
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 计算中...';
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-10 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>扫描匹配最优滚仓路径...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-10 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>扫描匹配最优滚仓路径...</td></tr>';
     
     try {
         const payload = {
