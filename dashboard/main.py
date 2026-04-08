@@ -889,6 +889,15 @@ def _quick_scan_sync(params: QuickScanParams = None):
             
             if delta_val > max_delta: continue
             if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
+
+            if _p.strike and abs(strike - _p.strike) / _p.strike > 0.02: continue
+            if _p.strike_range:
+                try:
+                    parts = _p.strike_range.split('-')
+                    lo, hi = float(parts[0]), float(parts[1])
+                    if not (lo <= strike <= hi): continue
+                except Exception: pass
+
             prem_usd = prem * underlying
             
             # 使用正确的 Margin APR 公式 (默认 20% 保证金)
@@ -956,6 +965,15 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 if dte <= 0: continue
                 if not (use_min_dte <= dte <= use_max_dte): continue
                 
+                b_strike = float(s['strikePrice'])
+                if _p.strike and abs(b_strike - _p.strike) / _p.strike > 0.02: continue
+                if _p.strike_range:
+                    try:
+                        parts = _p.strike_range.split('-')
+                        lo, hi = float(parts[0]), float(parts[1])
+                        if not (lo <= b_strike <= hi): continue
+                    except Exception: pass
+
                 mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
                 if not mark or float(mark['markPrice']) <= 0: continue
                 
@@ -1038,12 +1056,19 @@ def _quick_scan_sync(params: QuickScanParams = None):
 
         conn = get_db_connection()
         cursor = conn.cursor()
+        _raw_out = json.dumps({
+            "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
+            "trend_label": dvol_data.get("trend_label", ""),
+            "confidence": dvol_data.get("confidence", ""),
+            "interpretation": dvol_data.get("interpretation", ""),
+            "percentile_7d": dvol_data.get("percentile_7d", 50)
+        }, ensure_ascii=False)
         cursor.execute("""
             INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
                 dvol_signal, large_trades_count, large_trades_details, contracts_data, raw_output)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
-              json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps({})))
+              json.dumps(large_trades[:20]), json.dumps(contracts[:30]), _raw_out))
         conn.commit()
         # conn.close()  # managed by connection pool
 
