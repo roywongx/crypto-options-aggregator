@@ -842,7 +842,7 @@ async def quick_scan(params: QuickScanParams = None):
             if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
             
             # 必须和用户请求的 option_type (PUT/CALL) 匹配
-            req_type = params.get("option_type", "PUT").upper() if params else "PUT"
+            req_type = _p.option_type.upper()
             req_type_short = "P" if req_type == "PUT" else "C"
             if meta["option_type"] != req_type_short: continue
                 
@@ -872,7 +872,7 @@ async def quick_scan(params: QuickScanParams = None):
             prem_usd = prem * underlying
             
             # 使用正确的 Margin APR 公式 (默认 20% 保证金)
-            margin_ratio = params.get("margin_ratio", 0.2) if params else 0.2
+            margin_ratio = _p.margin_ratio
             cv = strike * margin_ratio
             apr = (prem_usd / cv) * (365 / meta["dte"]) * 100 if cv > 0 else 0
             
@@ -908,9 +908,9 @@ async def quick_scan(params: QuickScanParams = None):
             r_ticker = requests.get('https://eapi.binance.com/eapi/v1/ticker', timeout=10).json()
             
             now_ms = time.time() * 1000
-            req_type = params.get("option_type", "PUT").upper() if params else "PUT"
+            req_type = _p.option_type.upper()
             max_delta = _p.max_delta
-            margin_ratio = params.get("margin_ratio", 0.2) if params else 0.2
+            margin_ratio = _p.margin_ratio
 
             for s in r_info.get('optionSymbols', []):
                 if s['underlying'] != f"{currency}USDT": continue
