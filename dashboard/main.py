@@ -233,8 +233,8 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
     try:
         base_params = {
             "currency": currency,
-            "start_timestamp": int((datetime.now() - timedelta(days=7)).timestamp() * 1000),
-            "end_timestamp": int(datetime.now().timestamp() * 1000)
+            "start_timestamp": int((datetime.utcnow() - timedelta(days=7)).timestamp() * 1000),
+            "end_timestamp": int(datetime.utcnow().timestamp() * 1000)
         }
         
         data = None
@@ -528,7 +528,7 @@ def save_scan_record(data: Dict[str, Any]):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
 
     cursor.execute("""
@@ -564,8 +564,9 @@ def save_scan_record(data: Dict[str, Any]):
                 parsed['instrument_name']
             ))
 
-    cursor.execute("DELETE FROM scan_records WHERE timestamp < datetime('now', '-90 days')")
-    cursor.execute("DELETE FROM large_trades_history WHERE timestamp < datetime('now', '-90 days')")
+    _cutoff = (datetime.utcnow() - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute("DELETE FROM scan_records WHERE timestamp < ?", (_cutoff,))
+    cursor.execute("DELETE FROM large_trades_history WHERE timestamp < ?", (_cutoff,))
 
     conn.commit()
     # conn.close()  # managed by connection pool
@@ -888,9 +889,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 max_delta = min(max_delta * 1.2, 0.55)
             
             if delta_val > max_delta: continue
-            if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
-
-            if _p.strike and strike != _p.strike: continue
+            if _p.strike and abs(strike - _p.strike) > 0.5: continue
             if _p.strike_range:
                 try:
                     parts = _p.strike_range.split('-')
@@ -966,7 +965,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 if not (use_min_dte <= dte <= use_max_dte): continue
                 
                 b_strike = float(s['strikePrice'])
-                if _p.strike and b_strike != _p.strike: continue
+                if _p.strike and abs(b_strike - _p.strike) > 0.5: continue
                 if _p.strike_range:
                     try:
                         parts = _p.strike_range.split('-')
@@ -1235,7 +1234,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         new_qty = max(min_qty_for_profit, break_even_qty)
 
         strike = c['strike']
-        margin_req = new_qty * strike * params.margin_ratio if params.option_type == 'PUT' else new_qty * strike
+        margin_req = new_qty * strike * params.margin_ratio if params.option_type == 'PUT' else new_qty * premium_usd * 10
         if margin_req > params.reserve_capital:
             filtered_by_margin += 1
             continue
@@ -1301,7 +1300,8 @@ async def get_stats():
     cursor.execute("SELECT COUNT(*) FROM scan_records")
     total_scans = cursor.fetchone()[0]
 
-    cursor.execute("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = date('now')")
+    _today = datetime.utcnow().strftime('%Y-%m-%d')
+    cursor.execute("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (_today,))
     today_scans = cursor.fetchone()[0]
 
     cursor.execute("SELECT COUNT(*) FROM large_trades_history")
@@ -1401,25 +1401,28 @@ async def get_dvol_advice(currency: str = Query(default="BTC")):
         except Exception:
             pass
 
+    _inner = dvol_raw.get("dvol_raw", dvol_raw)
     dvol_snapshot = {
-        "current": dvol_raw.get("current", 0),
-        "z_score": dvol_raw.get("z_score", 0),
-        "signal": dvol_raw.get("signal", ""),
-        "trend": dvol_raw.get("trend", ""),
-        "trend_label": dvol_raw.get("trend_label", ""),
-        "percentile_7d": dvol_raw.get("percentile_7d", 50),
-        "confidence": dvol_raw.get("confidence", ""),
-        "interpretation": dvol_raw.get("interpretation", "")
+        "current": _inner.get("current", 0),
+        "z_score": _inner.get("z_score", 0),
+        "signal": _inner.get("signal", ""),
+        "trend": dvol_raw.get("trend", _inner.get("trend", "")),
+        "trend_label": dvol_raw.get("trend_label", _inner.get("trend_label", "")),
+        "percentile_7d": dvol_raw.get("percentile_7d", _inner.get("percentile_7d", 50)),
+        "confidence": dvol_raw.get("confidence", _inner.get("confidence", "")),
+        "interpretation": dvol_raw.get("interpretation", _inner.get("interpretation", ""))
     }
 
     base_params = {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15}
     adapted = adapt_params_by_dvol(base_params, dvol_raw)
 
     put_standard = dict(base_params)
+    put_standard["option_type"] = "PUT"
     put_adapted = adapt_params_by_dvol(put_standard, dvol_raw)
 
     call_standard = dict(base_params)
     call_standard["max_delta"] = 0.45
+    call_standard["option_type"] = "CALL"
     call_adapted = adapt_params_by_dvol(call_standard, dvol_raw)
 
     return {
@@ -1474,7 +1477,7 @@ async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query
     import json as _json
     conn = get_db_connection()
     cursor = conn.cursor()
-    since = datetime.now() - timedelta(hours=hours)
+    since = datetime.utcnow() - timedelta(hours=hours)
 
     cursor.execute("""
         SELECT MAX(timestamp) as ts, contracts_data
@@ -1485,54 +1488,92 @@ async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query
     """, (since.strftime('%Y-%m-%d %H:%M:%S'), currency))
 
     raw_rows = cursor.fetchall()
-    # conn.close()  # managed by connection pool
 
+    STD_MAX_DELTA = 0.25
+    STD_MIN_DTE = 14
+    STD_MAX_DTE = 35
+    STD_OPT_TYPE = 'P'
     APR_MIN, APR_MAX = 1.0, 500.0
+
     result = []
     for r in raw_rows:
         ts = r[0]
         cdata = r[1]
-        aprs = []
+        safe_aprs = []
+        all_aprs = []
         try:
             arr = _json.loads(cdata) if isinstance(cdata, str) else cdata
             if isinstance(arr, list):
                 for c in arr:
-                    if isinstance(c, dict):
-                        v = c.get('apr')
-                        if isinstance(v, (int, float)) and APR_MIN <= v <= APR_MAX:
-                            aprs.append(v)
+                    if not isinstance(c, dict):
+                        continue
+                    v = c.get('apr')
+                    if not isinstance(v, (int, float)) or not (APR_MIN <= v <= APR_MAX):
+                        continue
+                    all_aprs.append(v)
+                    ot = str(c.get('option_type', '')).upper()
+                    if ot not in ('P', 'PUT'):
+                        continue
+                    d = c.get('dte')
+                    if not isinstance(d, (int, float)) or not (STD_MIN_DTE <= d <= STD_MAX_DTE):
+                        continue
+                    delta = c.get('delta')
+                    if not isinstance(delta, (int, float)) or abs(delta) > STD_MAX_DELTA:
+                        continue
+                    safe_aprs.append(v)
         except Exception:
             pass
-        if aprs:
-            aprs.sort()
-            n = len(aprs)
-            p75_idx = min(int(n * 0.75), n - 1)
-            p90_idx = min(int(n * 0.90), n - 1)
-            avg_val = sum(aprs) / n
-            result.append({
-                "time": ts,
-                "avg_apr": round(avg_val, 1),
-                "max_apr": round(aprs[p90_idx], 1),
-                "p75_apr": round(aprs[p75_idx], 1),
-                "count": n
-            })
-        else:
-            result.append({
-                "time": ts,
-                "avg_apr": None,
-                "max_apr": None,
-                "p75_apr": None,
-                "count": 0
-            })
 
+        if safe_aprs:
+            safe_aprs.sort()
+            n = len(safe_aprs)
+            p75_idx = min(int(n * 0.75), n - 1)
+            best_safe = round(safe_aprs[-1], 1)
+            p75_safe = round(safe_aprs[p75_idx], 1)
+            avg_safe = round(sum(safe_aprs) / n, 1)
+        elif all_aprs:
+            best_safe = round(max(all_aprs), 1)
+            all_aprs.sort()
+            n_all = len(all_aprs)
+            p75_idx = min(int(n_all * 0.75), n_all - 1)
+            p75_safe = round(all_aprs[p75_idx], 1)
+            avg_safe = round(sum(all_aprs) / n_all, 1)
+        else:
+            best_safe = None
+            p75_safe = None
+            avg_safe = None
+
+        if all_aprs:
+            all_aprs.sort()
+            n_all = len(all_aprs)
+            avg_all = round(sum(all_aprs) / n_all, 1)
+        else:
+            avg_all = None
+
+        result.append({
+            "time": ts,
+            "best_safe_apr": best_safe,
+            "p75_safe_apr": p75_safe,
+            "avg_safe_apr": avg_safe,
+            "avg_apr": avg_all,
+            "safe_count": len(safe_aprs),
+            "total_count": len(all_aprs)
+        })
+
+    _prev_best = None
+    _prev_p75 = None
     _prev_avg = None
     for item in result:
-        if item["avg_apr"] is not None:
-            _prev_avg = item["avg_apr"]
-        elif _prev_avg is not None:
-            item["avg_apr"] = _prev_avg
-            item["max_apr"] = _prev_avg
-            item["p75_apr"] = _prev_avg
+        if item["best_safe_apr"] is not None:
+            _prev_best = item["best_safe_apr"]
+            _prev_p75 = item["p75_safe_apr"]
+            _prev_avg = item["avg_safe_apr"]
+        else:
+            if _prev_best is not None and item["avg_apr"] is not None:
+                ratio = _prev_avg / item["avg_apr"] if item["avg_apr"] else 1
+                item["best_safe_apr"] = round(_prev_best * ratio, 1)
+                item["p75_safe_apr"] = round(_prev_p75 * ratio, 1)
+                item["avg_safe_apr"] = round(_prev_avg * ratio, 1)
 
     return result
 
@@ -1541,7 +1582,7 @@ async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query
 async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
     conn = get_db_connection()
     cursor = conn.cursor()
-    since = datetime.now() - timedelta(hours=hours)
+    since = datetime.utcnow() - timedelta(hours=hours)
 
     if hours <= 24:
         grp = "strftime('%Y-%m-%d %H:00', timestamp)"
@@ -2059,7 +2100,7 @@ async def get_trades_history(
 ):
     conn = get_db_connection()
     cursor = conn.cursor()
-    since = datetime.now() - timedelta(days=days)
+    since = datetime.utcnow() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
 
     query = """
@@ -2101,7 +2142,7 @@ async def get_strike_distribution(
 ):
     conn = get_db_connection()
     cursor = conn.cursor()
-    since = datetime.now() - timedelta(days=days)
+    since = datetime.utcnow() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
     
     spot = get_spot_price(currency)
@@ -2144,7 +2185,7 @@ async def get_wind_analysis(
 ):
     conn = get_db_connection()
     cursor = conn.cursor()
-    since = datetime.now() - timedelta(days=days)
+    since = datetime.utcnow() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
 
     spot = get_spot_price(currency)

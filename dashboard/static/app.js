@@ -135,7 +135,7 @@ function initCharts() {
         data: {
             labels: [],
             datasets: [{
-                label: 'P75 APR(稳健上限)',
+                label: '最佳安全APR (Δ≤0.25)',
                 data: [],
                 borderColor: '#22c55e',
                 backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -145,10 +145,10 @@ function initCharts() {
                 pointRadius: 2,
                 pointHoverRadius: 4
             }, {
-                label: '平均 APR',
+                label: 'P75安全APR',
                 data: [],
-                borderColor: '#f97316',
-                backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 tension: 0.4,
                 fill: true,
                 borderWidth: 2,
@@ -177,6 +177,11 @@ function initCharts() {
                     bodyColor: '#fff',
                     borderColor: 'rgba(255, 255, 255, 0.1)',
                     borderWidth: 1,
+                    callbacks: {
+                        label: function(ctx) {
+                            return ctx.dataset.label + ': ' + (ctx.parsed.y != null ? ctx.parsed.y.toFixed(1) + '%' : 'N/A');
+                        }
+                    },
                     padding: 10
                 }
             },
@@ -434,6 +439,9 @@ async function loadLatestData() {
         if (data.spot_price) currentSpotPrice = data.spot_price;
 
         updateMacroIndicators(data);
+        if (data.dvol_interpretation || data.dvol_trend_label) {
+            showDvolAdvice(data.currency || 'BTC');
+        }
         updateOpportunitiesTable(data.contracts || []);
         updateLargeTrades(data.large_trades_details || [], data.large_trades_count || 0);
         updateLastUpdateTime(data.timestamp);
@@ -801,7 +809,7 @@ function updateLastUpdateTime(timestamp) {
         date = new Date(timestamp);
     } else if (timestamp) {
         const parts=timestamp.split(/[- :]/);
-        date=new Date(Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]));
+        date=new Date(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]);
     } else {
         date = new Date();
     }
@@ -829,10 +837,10 @@ async function loadAprChartData() {
             const date = new Date(d.time || d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
         });
-        const cleanMax = data.map(d => d.p75_apr != null ? d.p75_apr : d.max_apr);
-        const cleanAvg = data.map(d => d.avg_apr != null ? d.avg_apr : null);
-        aprChart.data.datasets[0].data = cleanMax;
-        aprChart.data.datasets[1].data = cleanAvg;
+        const cleanBest = data.map(d => d.best_safe_apr != null ? d.best_safe_apr : null);
+        const cleanP75 = data.map(d => d.p75_safe_apr != null ? d.p75_safe_apr : null);
+        aprChart.data.datasets[0].data = cleanBest;
+        aprChart.data.datasets[1].data = cleanP75;
         aprChart.update();
     } catch (error) {
         console.error('加载APR图表失败:', error);
