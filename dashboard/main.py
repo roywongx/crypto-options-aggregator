@@ -890,7 +890,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
             if delta_val > max_delta: continue
             if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
 
-            if _p.strike and abs(strike - _p.strike) / _p.strike > 0.02: continue
+            if _p.strike and strike != _p.strike: continue
             if _p.strike_range:
                 try:
                     parts = _p.strike_range.split('-')
@@ -966,7 +966,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 if not (use_min_dte <= dte <= use_max_dte): continue
                 
                 b_strike = float(s['strikePrice'])
-                if _p.strike and abs(b_strike - _p.strike) / _p.strike > 0.02: continue
+                if _p.strike and b_strike != _p.strike: continue
                 if _p.strike_range:
                     try:
                         parts = _p.strike_range.split('-')
