@@ -610,7 +610,7 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         
         with ThreadPoolExecutor(max_workers=4) as executor:
             f_dvol = executor.submit(mon.get_dvol_signal, params.currency)
-            f_trades = executor.submit(mon.get_large_trade_alerts, currency=params.currency, min_usd_value=500000)
+            f_trades = executor.submit(mon.get_large_trade_alerts, currency=params.currency, min_usd_value=50000)
             
             def _run_binance():
                 kw = {"currency": params.currency, "min_dte": use_min_dte,
