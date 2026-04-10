@@ -766,7 +766,8 @@ function updateLargeTrades(trades, count) {
         const flowCN = flowNames[flow] || flow || '';
         const notionalStr = notional >= 1000000 ? '$' + (notional / 1000000).toFixed(2) + 'M' : '$' + Math.round(notional).toLocaleString();
         const strikeStr = strike ? '@ $' + strike.toLocaleString() : '';
-        const optTypeTag = optType ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ' + (optType === 'P' ? 'bg-purple-500/30 text-purple-300' : 'bg-green-500/30 text-green-300') + '">' + (optType === 'P' ? 'PUT' : 'CALL') + '</span>' : '';
+        const optIsPut = optType && optType.toUpperCase().startsWith('P');
+        const optTypeTag = optType ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ' + (optIsPut ? 'bg-purple-500/30 text-purple-300' : 'bg-green-500/30 text-green-300') + '">' + (optIsPut ? 'PUT' : 'CALL') + '</span>' : '';
 
         return `<div class="${sev.bg} border-l-4 ${directionClass} rounded-lg p-3 text-xs hover:bg-white/5 transition cursor-default">
             <div class="flex items-start gap-2">
