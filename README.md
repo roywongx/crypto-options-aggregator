@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v5.9-%E5%A4%A7%E5%8D%95%E9%A3%8E%E5%90%91%E6%A0%87+%E6%B5%81%E5%90%91%E5%88%86%E7%B1%BB+MaxPain-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v5.10-BugFix+%E6%B5%81%E5%90%91%E5%88%86%E7%B1%BB+PCR+MaxPain-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -268,6 +268,7 @@ PUT 和 CALL 有独立的预设配置。
 
 | 版本 | 主要变更 |
 |------|---------|
+| **v5.10** | 重大Bug修复：sentiment_score中英文key不匹配；sandbox KeyError/IV单位；roll计算器NameError；PCR月份误匹配；delta缺失导致risk_level恒低；_get_spot_from_scan查错字段 |
 | **v5.9.1** | flow_breakdown聚合为8种核心中文分类；语法错误修复 |
 | **v5.9.0** | 流向分类恢复8种核心类型；Sell PUT ITM阈值修正(0.5→0.7) |
 | **v5.8.11** | Sell PUT分类阈值修正：ITM 0.5→0.7；ATM 0.2→0.4 |

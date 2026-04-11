@@ -1284,7 +1284,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         new_qty = max(min_qty_for_profit, break_even_qty)
 
         strike = c['strike']
-        margin_req = new_qty * strike * params.margin_ratio if params.option_type == 'PUT' else new_qty * premium_usd * 10
+        margin_req = new_qty * strike * params.margin_ratio if params.option_type == 'PUT' else new_qty * prem_usd * 10
         if margin_req > params.reserve_capital:
             filtered_by_margin += 1
             continue
@@ -1387,8 +1387,8 @@ async def get_pcr_chart(currency: str = Query(default="BTC"), hours: int = Query
     for r in rows:
         try:
             trades = json.loads(r[1]) if r[1] else []
-            put_vol = sum(t.get('notional_usd', 0) for t in trades if 'P' in t.get('instrument_name', '') and t.get('notional_usd', 0) > 0)
-            call_vol = sum(t.get('notional_usd', 0) for t in trades if 'C' in t.get('instrument_name', '') and t.get('notional_usd', 0) > 0)
+            put_vol = sum(t.get('notional_usd', 0) for t in trades if t.get('instrument_name', '').endswith('-P') and t.get('notional_usd', 0) > 0)
+            call_vol = sum(t.get('notional_usd', 0) for t in trades if t.get('instrument_name', '').endswith('-C') and t.get('notional_usd', 0) > 0)
             pcr = put_vol / call_vol if call_vol > 0 else None
             if pcr is not None:
                 result.append({"timestamp": r[0], "pcr": round(pcr, 3)})
@@ -1761,7 +1761,8 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
                     "volume": round(trade_amount, 4),
                     "strike": meta["strike"],
                     "option_type": meta["option_type"],
-                    "flow_label": fl
+                    "flow_label": fl,
+                    "delta": delta_val
                 })
                 if len(results) >= limit:
                     break
@@ -1911,15 +1912,10 @@ def _get_spot_from_scan():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT contracts_data FROM scan_records ORDER BY timestamp DESC LIMIT 1")
+        cur.execute("SELECT spot_price FROM scan_records WHERE spot_price > 0 ORDER BY timestamp DESC LIMIT 1")
         row = cur.fetchone()
-        # conn.close()  # managed by connection pool
-        if row and row[0]:
-            data = json.loads(row[0])
-            for item in data:
-                sp = item.get("spot_price")
-                if sp and sp > 1000:
-                    return sp
+        if row and row[0] and row[0] > 1000:
+            return row[0]
     except Exception:
         pass
     try:
@@ -2119,7 +2115,7 @@ async def sandbox_simulate(params: SandboxParams):
         st = "success" if ok and nr >= 0 else ("partial" if ok else "danger")
         plans.append({"symbol": f"{c.get('currency','BTC')}-{c['expiry']}-{int(c['strike'])}-{opt_type}",
             "strike": int(c["strike"]), "dte": c["dte"], "apr": c["apr"],
-            "prem_ct": round(c["premium"], 2), "contracts": nc, "margin": round(tnm, 0),
+            "prem_ct": round(c["premium_usd"], 2), "contracts": nc, "margin": round(tnm, 0),
             "income": round(ei, 0), "net": round(nr, 0), "capital": round(tcn, 0),
             "reserve": round(params.reserve_capital - tnm, 0), "ok": ok, "status": st})
 
@@ -2348,6 +2344,7 @@ async def get_wind_analysis(
         "sell_call_itm": ("改仓操作", "ITM Sell Call，改仓"),
         "buy_call_atm_itm": ("追涨建仓", "ATM Buy Call，顺势追涨"),
         "buy_call_otm": ("看涨投机", "OTM Buy Call，博反弹"),
+        "unknown": ("未知流向", "无法判断交易意图"),
     }
 
     flow_agg = {}
@@ -2407,8 +2404,8 @@ async def get_wind_analysis(
     elif buy_ratio < 0.45:
         sentiment_score = max(-3, int((buy_ratio - 0.5) * 20))
 
-    bullish_flows = ('sell_put_deep_itm', 'sell_put_atm_itm', 'sell_put_otm', 'buy_call_atm_itm', 'buy_call_otm')
-    bearish_flows = ('buy_put_deep_itm', 'buy_put_atm', 'buy_put_otm', 'sell_call_otm', 'sell_call_itm')
+    bullish_flows = ('保护性对冲', '收权利金', '备兑开仓', '追涨建仓', '看涨投机')
+    bearish_flows = ('保护性买入', '看跌投机', '改仓操作')
     if dominant_flow in bullish_flows:
         sentiment_score += 1
     elif dominant_flow in bearish_flows:
