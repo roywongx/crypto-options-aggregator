@@ -2312,6 +2312,20 @@ async def get_wind_analysis(
             max_resist_net = -sf['net']
             resistance_level = sf['strike']
 
+    # 8种核心分类映射
+    CORE_FLOW_MAP = {
+        "sell_put_deep_itm": ("保护性对冲", "深度ITM Sell Put，强烈看涨"),
+        "sell_put_atm_itm": ("收权利金", "ATM Sell Put，温和看涨+收权"),
+        "sell_put_otm": ("备兑开仓", "OTM Sell Put，纯收权"),
+        "buy_put_deep_itm": ("保护性买入", "深度ITM Buy Put，机构对冲"),
+        "buy_put_atm": ("看跌投机", "ATM Buy Put，短线看跌"),
+        "buy_put_otm": ("看跌投机", "OTM Buy Put，投机看跌"),
+        "sell_call_otm": ("备兑开仓", "OTM Sell Call，备兑开仓"),
+        "sell_call_itm": ("改仓操作", "ITM Sell Call，改仓"),
+        "buy_call_atm_itm": ("追涨建仓", "ATM Buy Call，顺势追涨"),
+        "buy_call_otm": ("看涨投机", "OTM Buy Call，博反弹"),
+    }
+
     flow_agg = {}
     for row in flow_rows:
         direction = row[0] or ''
@@ -2319,52 +2333,47 @@ async def get_wind_analysis(
         delta_val = row[2] or 0
         strike = row[3] or 0
         notional = row[4] or 0
-        
+
         fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
         if fl not in flow_agg:
             flow_agg[fl] = {"count": 0, "notional": 0}
         flow_agg[fl]["count"] += 1
         flow_agg[fl]["notional"] += notional
 
+    # 合并为8种核心分类
+    core_agg = {}
+    for fl, agg in flow_agg.items():
+        core_info = CORE_FLOW_MAP.get(fl)
+        if core_info:
+            core_name = core_info[0]
+        else:
+            core_name = fl
+        if core_name not in core_agg:
+            core_agg[core_name] = {"count": 0, "notional": 0, "desc": core_info[1] if core_info else ""}
+        core_agg[core_name]["count"] += agg["count"]
+        core_agg[core_name]["notional"] += agg["notional"]
+
     flow_breakdown = []
     dominant_flow = ""
     max_flow_cnt = 0
-    for fl, agg in sorted(flow_agg.items(), key=lambda x: x[1]["count"], reverse=True):
+    for fl, agg in sorted(core_agg.items(), key=lambda x: x[1]["count"], reverse=True):
         cnt = agg["count"]
         notional = agg["notional"]
         pct = (cnt / total_trades * 100) if total_trades > 0 else 0
-        info = FLOW_LABEL_MAP.get(fl, (fl, ""))
         flow_breakdown.append({
             "label": fl,
-            "label_cn": info[0] if info else fl,
-            "desc": info[1] if info else "",
+            "label_cn": fl,
+            "desc": agg.get("desc", ""),
             "count": cnt,
             "notional": round(notional, 0),
             "pct": round(pct, 1)
         })
-        if fl not in ('unclassified', 'unknown') and cnt > max_flow_cnt:
+        if fl != 'unknown' and cnt > max_flow_cnt:
             max_flow_cnt = cnt
             dominant_flow = fl
-    ALL_FLOW_TYPES = [
-        "sell_put_deep_itm", "sell_put_atm_itm", "sell_put_otm",
-        "buy_put_deep_itm", "buy_put_atm", "buy_put_otm",
-        "sell_call_otm", "sell_call_itm",
-        "buy_call_atm_itm", "buy_call_otm",
-        "unknown"
-    ]
-    existing_labels = {f["label"] for f in flow_breakdown}
-    for fl in ALL_FLOW_TYPES:
-        if fl not in existing_labels:
-            info = FLOW_LABEL_MAP.get(fl, (fl, ""))
-            flow_breakdown.append({
-                "label": fl,
-                "label_cn": info[0] if info else fl,
-                "desc": info[1] if info else "",
-                "count": 0,
-                "notional": 0,
-                "pct": 0.0
-            })
-    flow_breakdown.sort(key=lambda x: (-x["count"], x["label"]))
+
+    if not dominant_flow:
+        dominant_flow = 'unknown
     if not dominant_flow:
         dominant_flow = 'unknown'
 
