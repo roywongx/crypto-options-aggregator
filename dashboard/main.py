@@ -29,6 +29,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import config
 
+# DeribitOptionsMonitor 单例缓存
+_deribit_monitor_cache = {}
+
 class RiskFramework:
     """v6.0: BTC 风险框架 - $55k 常规底, $45k 极限底"""
     REGULAR_FLOOR = config.BTC_REGULAR_FLOOR
@@ -266,11 +269,17 @@ def get_spot_price(currency: str = "BTC") -> float:
     )
 
 
-def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
-    try:
+def _get_deribit_monitor():
+    """获取 DeribitOptionsMonitor 单例"""
+    if 'mon' not in _deribit_monitor_cache:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
         from deribit_options_monitor import DeribitOptionsMonitor
-        mon = DeribitOptionsMonitor()
+        _deribit_monitor_cache['mon'] = DeribitOptionsMonitor()
+    return _deribit_monitor_cache['mon']
+
+def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
+    try:
+        mon = _get_deribit_monitor()
         result = mon.get_dvol_signal(currency)
         if not result:
             return {}
@@ -312,8 +321,8 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
                     z_score = (current - mean_val) / std_val if std_val > 0 else 0
                 else:
                     z_score = 0
-                if z_score > 2: signal = "异常偏高"
-                elif z_score > 1: signal = "偏高"
+                if z_score > config.DVOL_Z_HIGH: signal = "异常偏高"
+                elif z_score > config.DVOL_Z_MID: signal = "偏高"
                 elif z_score < -2: signal = "异常偏低"
                 elif z_score < -1: signal = "偏低"
                 else: signal = "正常区间"
@@ -658,12 +667,11 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     try:
         from options_aggregator import format_report
         from binance_options import scan_binance_options
-        from deribit_options_monitor import DeribitOptionsMonitor
     except ImportError as e:
         return {"success": False, "error": f"Module import failed: {e}"}
 
     try:
-        mon = DeribitOptionsMonitor()
+        mon = _get_deribit_monitor()
         
         with ThreadPoolExecutor(max_workers=4) as executor:
             f_dvol = executor.submit(mon.get_dvol_signal, params.currency)
@@ -1031,10 +1039,10 @@ def _quick_scan_sync(params: QuickScanParams = None):
             bid = float(ticker['bidPrice']) if ticker else 0
             ask = float(ticker['askPrice']) if ticker else 0
             
-            if volume < 5: continue
+            if volume < config.MIN_VOLUME_FILTER: continue
             
             spread_pct = ((ask - bid) / bid) * 100 if bid > 0 and ask > 0 else 0
-            if spread_pct >= 10.0: continue
+            if spread_pct >= config.MAX_SPREAD_PCT: continue
             
             strike = float(s['strikePrice'])
             prem_usd = float(mark['markPrice'])
@@ -1232,6 +1240,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
     import math
 
     from config import config
+
     MIN_NET_CREDIT_USD = config.MIN_NET_CREDIT_USD
     SLIPPAGE_PCT = config.ROLL_SLIPPAGE_PCT
     SAFETY_BUFFER_PCT = config.ROLL_SAFETY_BUFFER_PCT
@@ -1654,10 +1663,7 @@ async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Quer
 
 def _fetch_deribit_summaries(currency="BTC"):
     try:
-        import sys
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
-        from deribit_options_monitor import DeribitOptionsMonitor
-        mon = DeribitOptionsMonitor()
+        mon = _get_deribit_monitor()
         return mon._get_book_summaries(currency)
     except Exception:
         return []
@@ -1770,9 +1776,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
 
 def _parse_inst_name(inst):
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
-        from deribit_options_monitor import DeribitOptionsMonitor
-        mon = DeribitOptionsMonitor()
+        mon = _get_deribit_monitor()
         meta = mon._parse_instrument_name(inst)
         ot = meta.option_type.upper()
         ot = 'C' if ot.startswith('C') else 'P' if ot.startswith('P') else ot
@@ -2471,11 +2475,11 @@ def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
     advice = []
 
     if isinstance(pct_7d, (int, float)):
-        if pct_7d >= 80:
+        if pct_7d >= config.DVOL_PANIC_THRESHOLD:
             adjusted['max_delta'] = round(adjusted['max_delta'] * 0.70, 2)
             adjusted['min_apr'] = adjusted.get('min_apr', 15) + 5
             advice.append("高波动环境: 自动收紧Delta，提高APR门槛")
-        elif pct_7d <= 20:
+        elif pct_7d <= config.DVOL_LOW_THRESHOLD:
             adjusted['max_delta'] = min(round(adjusted['max_delta'] * 1.20, 2), 0.60)
             adjusted['min_apr'] = max(adjusted.get('min_apr', 15) - 5, 8)
             advice.append("低波动环境: 权利金偏薄，适当放宽参数")
@@ -2490,9 +2494,9 @@ def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
 
     adjusted['_dvol_advice'] = advice
     if isinstance(pct_7d, (int, float)):
-        if pct_7d >= 80:
+        if pct_7d >= config.DVOL_PANIC_THRESHOLD:
             adjusted['_adjustment_level'] = 'conservative'
-        elif pct_7d <= 20:
+        elif pct_7d <= config.DVOL_LOW_THRESHOLD:
             adjusted['_adjustment_level'] = 'aggressive'
         else:
             adjusted['_adjustment_level'] = 'none'

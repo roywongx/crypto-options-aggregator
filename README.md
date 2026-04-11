@@ -90,6 +90,7 @@ python -m uvicorn main:app --reload --port 8080
 
 | 版本 | 核心更新内容 |
 |------|---------|
+| **v6.0.2** | **P0**: 实现 `DeribitOptionsMonitor` 单例模式，消除每请求重复实例化；**P1**: Binance Greeks 现在直接使用 API 返回的 delta/gamma/theta/vega；**P2**: 风险阈值统一到 `config.py`（DVOL_PANIC_THRESHOLD=80, DVOL_LOW_THRESHOLD=20 等）。 |
 | **v6.0.1** | 修复 `_parse_inst_name` option_type 返回值不统一问题（'CALL'/'PUT' vs 'C'/'P'）；修复 `get_dvol_from_deribit` DVOL字段名映射错误（current_dvol, z_score_7d, history_points, iv_percentile_7d）。 |
 | **v6.0** | 新增 **BTC动态风险框架** (55k常规底/45k极限底)；新增**抄底建议模块**，结合 Max Pain 与 GEX 生成策略指令；全面启用**并发网络请求**，大幅缩短加载延迟。 |
 | **v5.11** | DVOL实现统一为DeribitOptionsMonitor高级版(动态阈值+置信度+风险笔记)；instrument name解析统一为Monitor版本(缓存+动态DTE) |
