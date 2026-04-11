@@ -324,50 +324,79 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
 
 
 FLOW_LABEL_MAP = {
-    "protective_hedge": ("保护性对冲", "机构买入Put对冲下行风险"),
-    "premium_collect": ("收权利金(看涨)", "卖出Put/Call收取权利金，愿低价接货"),
-    "speculative_put": ("看跌投机", "买入看跌期权投机，看跌后市"),
-    "call_speculative": ("看涨投机", "低Delta Call买入，博反弹"),
-    "call_momentum": ("追涨建仓", "高Delta Call买入，看好上涨"),
-    "covered_call": ("备兑开仓", "卖出Call锁定收益"),
-    "call_overwrite": ("改仓操作", "高Delta Call卖出改仓"),
-    "put_buy_hedge": ("保护性买入", "买入Put对冲，防下跌"),
+    # Sell PUT - 本质是看涨操作（愿意低价接货）
+    "sell_put_atm": ("sell_put收权(ATM)", "卖出ATM Put收权，温和看涨"),
+    "sell_put_itm": ("sell_put收权(ITM)", "卖出ITM Put收权，看涨接货"),
+    "sell_put_otm": ("sell_put收权(OTM)", "卖出OTM Put纯收权，最激进"),
+    # Buy PUT - 看跌/对冲
+    "buy_put_deep_itm": ("买入Put(ITM)", "深度ITM Put，机构对冲防下跌"),
+    "buy_put_atm": ("买入Put(ATM)", "ATM Put，短线看跌或对冲"),
+    "buy_put_otm": ("买入Put(OTM)", "OTM Put，纯粹投机看跌"),
+    # Sell CALL - 看不涨/中性
+    "sell_call_otm": ("卖出Call(OTM)", "卖出OTM Call收权，最常见备兑策略"),
+    "sell_call_itm": ("卖出Call(ITM)", "卖出ITM CallCovered，高行权价接货卖出"),
+    # Buy CALL - 看涨
+    "buy_call_atm_itm": ("买入Call(ATM/ITM)", "买入ATM/ITM Call，顺势看涨"),
+    "buy_call_otm": ("买入Call(OTM)", "买入OTM Call，低成本博反弹"),
     "unknown": ("未知流向", "无法判断交易意图"),
 }
 def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
-    """流向分类 (参考 lianyanshe-ai/deribit-options-monitor 原始逻辑)
-    
-    PUT:
-      buy  + 0.10<=delta<=0.35 + 7<=dte<=60 -> protective_hedge
-      buy  + other                     -> speculative_put
-      sell + delta<=0.35               -> premium_collect  
-      sell + delta>0.35                -> speculative_put
-    
-    CALL:
-      buy  + delta>=0.30               -> call_momentum
-      buy  + delta<0.30                -> call_speculative
-      sell + delta<=0.40               -> covered_call
-      sell + delta>0.40                -> call_overwrite
+    """流向分类 - 基于期权希腊字母和行权价相对现货位置的精确判断
+
+    核心逻辑：
+    - Delta 绝对值反映：|delta|越大 = 越实值 = 资金量越大/方向越确定
+    - Moneyness (strike/spot) 反映：ITM/ATM/OTM 决定合约目的
+      * PUT: strike < spot → ITM, strike ≈ spot → ATM, strike > spot → OTM
+      * CALL: strike > spot → ITM, strike ≈ spot → ATM, strike < spot → OTM
+    - Sell PUT = 永远看涨（愿意在行权价接货）
+      * Deep ITM (|delta|>=0.7): 强烈看涨接货
+      * ATM/ITM (0.4<=|delta|<0.7): 温和看涨接货+收权
+      * OTM (|delta|<0.4): 纯收权激进
+    - Buy PUT = 看跌或对冲
+      * Deep ITM (|delta|>=0.7): 机构对冲
+      * ATM (0.4<=|delta|<0.7): 短线看跌
+      * OTM (|delta|<0.4): 纯投机
+    - Sell CALL = 中性/看不涨
+      * OTM (|delta|<=0.4): 备兑开仓（最常见）
+      * ITM (|delta|>0.4): 改仓操作
+    - Buy CALL = 看涨
+      * ATM/ITM (|delta|>=0.4): 顺势建仓
+      * OTM (|delta|<0.4): 低成本博反弹
     """
     if not direction or direction == "unknown" or not option_type:
         return "unknown"
+
     d = abs(delta or 0)
+    m = (strike or 0) / (spot or 1) if spot else 1
+
     if direction == "buy":
-        if option_type in ("PUT", "P"):
-            if 0.10 <= d <= 0.35:
-                return "put_buy_hedge"
-            return "speculative_put"
-        elif option_type in ("CALL", "C"):
-            if d >= 0.30:
-                return "call_momentum"
-            return "call_speculative"
+        if option_type.upper() in ("PUT", "P"):
+            if d >= 0.70:
+                return "buy_put_deep_itm"
+            elif d >= 0.40:
+                return "buy_put_atm"
+            else:
+                return "buy_put_otm"
+        elif option_type.upper() in ("CALL", "C"):
+            if d >= 0.40:
+                return "buy_call_atm_itm"
+            else:
+                return "buy_call_otm"
+
     elif direction == "sell":
-        if option_type in ("PUT", "P"):
-            return "premium_collect"
-        elif option_type in ("CALL", "C"):
-            if d <= 0.40:
-                return "covered_call"
-            return "call_overwrite"
+        if option_type.upper() in ("PUT", "P"):
+            if d >= 0.70:
+                return "sell_put_itm"
+            elif d >= 0.40:
+                return "sell_put_atm"
+            else:
+                return "sell_put_otm"
+        elif option_type.upper() in ("CALL", "C"):
+            if d >= 0.40:
+                return "sell_call_itm"
+            else:
+                return "sell_call_otm"
+
     return "unknown"
 
 
