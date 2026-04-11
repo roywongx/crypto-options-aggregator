@@ -324,50 +324,52 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
 
 
 FLOW_LABEL_MAP = {
-    # Sell PUT - 本质是看涨操作（愿意低价接货）
-    "sell_put_atm": ("sell_put收权(ATM)", "卖出ATM Put收权，温和看涨"),
-    "sell_put_itm": ("sell_put收权(ITM)", "卖出ITM Put收权，看涨接货"),
-    "sell_put_otm": ("sell_put收权(OTM)", "卖出OTM Put纯收权，最激进"),
-    # Buy PUT - 看跌/对冲
-    "buy_put_deep_itm": ("买入Put(ITM)", "深度ITM Put，机构对冲防下跌"),
-    "buy_put_atm": ("买入Put(ATM)", "ATM Put，短线看跌或对冲"),
-    "buy_put_otm": ("买入Put(OTM)", "OTM Put，纯粹投机看跌"),
-    # Sell CALL - 看不涨/中性
-    "sell_call_otm": ("卖出Call(OTM)", "卖出OTM Call收权，最常见备兑策略"),
-    "sell_call_itm": ("卖出Call(ITM)", "卖出ITM CallCovered，高行权价接货卖出"),
-    # Buy CALL - 看涨
-    "buy_call_atm_itm": ("买入Call(ATM/ITM)", "买入ATM/ITM Call，顺势看涨"),
-    "buy_call_otm": ("买入Call(OTM)", "买入OTM Call，低成本博反弹"),
+    # === Sell PUT = 永远看涨（愿意在行权价接货）===
+    # 深度ITM的Sell PUT = 强烈看涨，愿意接货
+    "sell_put_deep_itm": ("保护性对冲", "深度ITM Sell Put，强烈看涨愿意接货"),
+    # ATM/ITM的Sell PUT = 温和看涨 + 收权
+    "sell_put_atm_itm": ("收权利金", "ATM/ITM Sell Put，温和看涨+稳定收权"),
+    # OTM的Sell PUT = 纯收权，最激进
+    "sell_put_otm": ("备兑开仓", "OTM Sell Put，纯收权利金，最激进"),
+    # === Buy PUT = 看跌或对冲 ===
+    # 深度ITM的Buy PUT = 机构对冲
+    "buy_put_deep_itm": ("保护性买入", "深度ITM Buy Put，机构对冲防下跌"),
+    # ATM的Buy PUT = 短线看跌
+    "buy_put_atm": ("看跌投机", "ATM Buy Put，短线看跌或对冲"),
+    # OTM的Buy PUT = 纯投机
+    "buy_put_otm": ("看跌投机", "OTM Buy Put，纯粹投机看跌"),
+    # === Sell CALL = 中性/看不涨 ===
+    "sell_call_otm": ("备兑开仓", "OTM Sell Call，备兑开仓收权"),
+    "sell_call_itm": ("改仓操作", "ITM Sell Call，改仓操作"),
+    # === Buy CALL = 看涨 ===
+    "buy_call_atm_itm": ("追涨建仓", "ATM/ITM Buy Call，顺势追涨看涨"),
+    "buy_call_otm": ("看涨投机", "OTM Buy Call，低成本博反弹"),
+    # === 未知 ===
     "unknown": ("未知流向", "无法判断交易意图"),
 }
 def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
-    """流向分类 - 基于期权希腊字母和行权价相对现货位置的精确判断
+    """流向分类 - 基于期权希腊字母和行权价相对现货位置
 
     核心逻辑：
-    - Delta 绝对值反映：|delta|越大 = 越实值 = 资金量越大/方向越确定
-    - Moneyness (strike/spot) 反映：ITM/ATM/OTM 决定合约目的
-      * PUT: strike < spot → ITM, strike ≈ spot → ATM, strike > spot → OTM
-      * CALL: strike > spot → ITM, strike ≈ spot → ATM, strike < spot → OTM
     - Sell PUT = 永远看涨（愿意在行权价接货）
-      * Deep ITM (|delta|>=0.7): 强烈看涨接货
-      * ATM/ITM (0.4<=|delta|<0.7): 温和看涨接货+收权
-      * OTM (|delta|<0.4): 纯收权激进
+      * Deep ITM (|delta|>=0.7): 强烈看涨 → 保护性对冲
+      * ATM/ITM (0.4<=|delta|<0.7): 温和看涨 → 收权利金
+      * OTM (|delta|<0.4): 纯收权 → 备兑开仓
     - Buy PUT = 看跌或对冲
-      * Deep ITM (|delta|>=0.7): 机构对冲
-      * ATM (0.4<=|delta|<0.7): 短线看跌
-      * OTM (|delta|<0.4): 纯投机
+      * Deep ITM (|delta|>=0.7): 机构对冲 → 保护性买入
+      * ATM (0.4<=|delta|<0.7): 短线看跌 → 看跌投机
+      * OTM (|delta|<0.4): 纯投机 → 看跌投机
     - Sell CALL = 中性/看不涨
-      * OTM (|delta|<=0.4): 备兑开仓（最常见）
+      * OTM (|delta|<=0.4): 备兑开仓
       * ITM (|delta|>0.4): 改仓操作
     - Buy CALL = 看涨
-      * ATM/ITM (|delta|>=0.4): 顺势建仓
-      * OTM (|delta|<0.4): 低成本博反弹
+      * ATM/ITM (|delta|>=0.4): 追涨建仓
+      * OTM (|delta|<0.4): 看涨投机
     """
     if not direction or direction == "unknown" or not option_type:
         return "unknown"
 
     d = abs(delta or 0)
-    m = (strike or 0) / (spot or 1) if spot else 1
 
     if direction == "buy":
         if option_type.upper() in ("PUT", "P"):
@@ -386,9 +388,9 @@ def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
     elif direction == "sell":
         if option_type.upper() in ("PUT", "P"):
             if d >= 0.70:
-                return "sell_put_itm"
+                return "sell_put_deep_itm"
             elif d >= 0.40:
-                return "sell_put_atm"
+                return "sell_put_atm_itm"
             else:
                 return "sell_put_otm"
         elif option_type.upper() in ("CALL", "C"):
@@ -2344,9 +2346,11 @@ async def get_wind_analysis(
             max_flow_cnt = cnt
             dominant_flow = fl
     ALL_FLOW_TYPES = [
-        "protective_hedge", "premium_collect", "speculative_put",
-        "call_speculative", "call_momentum", "covered_call",
-        "call_overwrite", "unknown"
+        "sell_put_deep_itm", "sell_put_atm_itm", "sell_put_otm",
+        "buy_put_deep_itm", "buy_put_atm", "buy_put_otm",
+        "sell_call_otm", "sell_call_itm",
+        "buy_call_atm_itm", "buy_call_otm",
+        "unknown"
     ]
     existing_labels = {f["label"] for f in flow_breakdown}
     for fl in ALL_FLOW_TYPES:
@@ -2372,9 +2376,11 @@ async def get_wind_analysis(
     elif buy_ratio < 0.45:
         sentiment_score = max(-3, int((buy_ratio - 0.5) * 20))
 
-    if dominant_flow in ('protective_hedge', 'premium_collect'):
+    bullish_flows = ('sell_put_deep_itm', 'sell_put_atm_itm', 'sell_put_otm', 'buy_call_atm_itm', 'buy_call_otm')
+    bearish_flows = ('buy_put_deep_itm', 'buy_put_atm', 'buy_put_otm', 'sell_call_otm', 'sell_call_itm')
+    if dominant_flow in bullish_flows:
         sentiment_score += 1
-    elif dominant_flow in ('speculative_put',):
+    elif dominant_flow in bearish_flows:
         sentiment_score -= 1
 
     summary = {

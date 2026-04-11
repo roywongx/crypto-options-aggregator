@@ -731,20 +731,31 @@ function updateLargeTrades(trades, count) {
     }
 
     const flowNames = {
-        // Sell PUT (bullish)
-        sell_put_itm: 'sell_put收权(ITM)', sell_put_atm: 'sell_put收权(ATM)', sell_put_otm: 'sell_put收权(OTM)',
-        // Buy PUT (bearish)
-        buy_put_deep_itm: '买入Put(ITM)', buy_put_atm: '买入Put(ATM)', buy_put_otm: '买入Put(OTM)',
-        // Sell CALL (neutral/bearish)
-        sell_call_otm: '卖出Call(OTM)', sell_call_itm: '卖出Call(ITM)',
-        // Buy CALL (bullish)
-        buy_call_atm_itm: '买入Call(ATM/ITM)', buy_call_otm: '买入Call(OTM)',
-        // Legacy aliases
-        protective_hedge: '保护性对冲', premium_collect: '收权利金',
-        speculative_put: '看跌投机', call_speculative: '看涨投机',
-        call_momentum: '追涨建仓', covered_call: '备兑开仓',
-        call_overwrite: '改仓操作', put_buy_hedge: '保护性买入',
-        unclassified: '未分类', unknown: '未知流向'
+        // === Sell PUT = 永远看涨 ===
+        sell_put_deep_itm: '保护性对冲',
+        sell_put_atm_itm: '收权利金',
+        sell_put_otm: '备兑开仓',
+        // === Buy PUT = 看跌/对冲 ===
+        buy_put_deep_itm: '保护性买入',
+        buy_put_atm: '看跌投机',
+        buy_put_otm: '看跌投机',
+        // === Sell CALL = 中性/看不涨 ===
+        sell_call_otm: '备兑开仓',
+        sell_call_itm: '改仓操作',
+        // === Buy CALL = 看涨 ===
+        buy_call_atm_itm: '追涨建仓',
+        buy_call_otm: '看涨投机',
+        // === Legacy / Fallback ===
+        protective_hedge: '保护性对冲',
+        premium_collect: '收权利金',
+        speculative_put: '看跌投机',
+        call_speculative: '看涨投机',
+        call_momentum: '追涨建仓',
+        covered_call: '备兑开仓',
+        call_overwrite: '改仓操作',
+        put_buy_hedge: '保护性买入',
+        unclassified: '未分类',
+        unknown: '未知流向'
     };
 
     container.innerHTML = trades.map(trade => {
@@ -1159,21 +1170,21 @@ async function loadWindAnalysis() {
             document.getElementById('windTotalNotional').textContent =
                 `$${(summary.total_notional / 1000000).toFixed(1)}M`;
             const flowNames = {
-                // Sell PUT (bullish)
-                'sell_put_itm': 'sell_put收权(ITM)',
-                'sell_put_atm': 'sell_put收权(ATM)',
-                'sell_put_otm': 'sell_put收权(OTM)',
-                // Buy PUT (bearish)
-                'buy_put_deep_itm': '买入Put(ITM)',
-                'buy_put_atm': '买入Put(ATM)',
-                'buy_put_otm': '买入Put(OTM)',
-                // Sell CALL (neutral/bearish)
-                'sell_call_otm': '卖出Call(OTM)',
-                'sell_call_itm': '卖出Call(ITM)',
-                // Buy CALL (bullish)
-                'buy_call_atm_itm': '买入Call(ATM/ITM)',
-                'buy_call_otm': '买入Call(OTM)',
-                // Legacy aliases
+                // === Sell PUT = 永远看涨 ===
+                'sell_put_deep_itm': '保护性对冲',
+                'sell_put_atm_itm': '收权利金',
+                'sell_put_otm': '备兑开仓',
+                // === Buy PUT = 看跌/对冲 ===
+                'buy_put_deep_itm': '保护性买入',
+                'buy_put_atm': '看跌投机',
+                'buy_put_otm': '看跌投机',
+                // === Sell CALL = 中性/看不涨 ===
+                'sell_call_otm': '备兑开仓',
+                'sell_call_itm': '改仓操作',
+                // === Buy CALL = 看涨 ===
+                'buy_call_atm_itm': '追涨建仓',
+                'buy_call_otm': '看涨投机',
+                // === Legacy / Fallback ===
                 'protective_hedge': '保护性对冲',
                 'premium_collect': '收权利金',
                 'speculative_put': '看跌投机',
