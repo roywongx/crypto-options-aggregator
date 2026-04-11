@@ -114,6 +114,7 @@ def fetch_binance_options(currency, min_dte, max_dte, max_delta, strike=None, st
                     'premium_usdt': round(premium, 2),
                     'delta': round(delta, 4),
                     'gamma': round(float(mark['gamma']), 6),
+                    'theta': round(float(mark.get('theta', 0)), 4),
                     'vega': round(float(mark['vega']), 2),
                     'mark_iv': round(float(mark.get('markIV', mark.get('markIv', mark.get('impliedVolatility', mark.get('iv', 0))))), 4),
                     'oi': 0,

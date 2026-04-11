@@ -1802,6 +1802,7 @@ def _parse_inst_name(inst):
             "option_type": opt_type, "dte": dte}
 
 
+# DEPRECATED: Use mark['delta'] from API instead. Kept for Deribit branch fallback only.
 def _estimate_delta(strike, spot, iv, dte, option_type='P'):
     """估算期权Delta (Deribit book_summaries不返回delta字段)"""
     import math
