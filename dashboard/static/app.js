@@ -432,7 +432,7 @@ async function loadLatestData() {
     try {
         const currency = document.getElementById('currencySelect').value;
         const response = await safeFetch(`${API_BASE}/api/latest?currency=${currency}`);
-        if (response.status === 404) return;
+        // safeFetch already throws on non-2xx, so no need to check response.status
 
         const data = await response.json();
         currentData = data;

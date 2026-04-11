@@ -430,15 +430,21 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
         elif any(w in message.lower() for w in ['sell', '卖出', '出售']):
             direction = 'sell'
 
+    # Extract from instrument_name first (most reliable for Deribit)
+    ins_name = trade.get('instrument_name') or trade.get('symbol') or ''
     strike = trade.get('strike')
-    if not strike:
-        ins_name = trade.get('instrument_name') or trade.get('symbol') or ''
-        ins_match = re.search(r'-(\d+)-[PC]$', str(ins_name))
+    option_type = None
+
+    if ins_name:
+        # Parse instrument_name like BTC-24APR26-65000-P
+        ins_match = re.search(r'-(\d+)-([PC])$', str(ins_name))
         if ins_match:
             try:
                 strike = float(ins_match.group(1))
+                option_type = 'PUT' if ins_match.group(2) == 'P' else 'CALL'
             except ValueError:
                 pass
+
     if not strike:
         msg_match = re.search(r'(?:strike|行权价)?[:\s]*(\d{3}(?:,\d{3})*)\s*(?:PUT|CALL|-[PC])', message, re.IGNORECASE)
         if msg_match:
@@ -446,6 +452,13 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
                 strike = float(msg_match.group(1).replace(',', ''))
             except ValueError:
                 pass
+
+    # Extract option_type from message if not found in instrument_name
+    if not option_type:
+        if 'PUT' in message.upper() or 'put' in message.lower():
+            option_type = 'PUT'
+        elif 'CALL' in message.upper() or 'call' in message.lower():
+            option_type = 'CALL'
 
     volume = trade.get('amount', 0) or trade.get('volume', 0) or 0
     if not volume or volume == 0:
@@ -462,16 +475,24 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
                 except ValueError:
                     continue
 
-    option_type = None
-    if 'PUT' in message.upper() or 'put' in message.lower():
-        option_type = 'PUT'
-    elif 'CALL' in message.upper() or 'call' in message.lower():
-        option_type = 'CALL'
-
-    flow_label = trade.get('flow_label', '')
+    # Extract notional_usd - prefer underlying_notional_usd, but also try to parse $amount from message
     notional_usd = trade.get('underlying_notional_usd', 0) or 0
+    if not notional_usd or notional_usd == 0:
+        # Try to parse $250,000 or $2.5M format from message
+        notional_match = re.search(r'\$([\d,]+(?:\.\d+)?)\s*(?:USD|usd)?', message)
+        if notional_match:
+            try:
+                notional_usd = float(notional_match.group(1).replace(',', ''))
+                # Check for M/K suffix
+                if 'M' in message.upper():
+                    notional_usd *= 1_000_000
+                elif 'K' in message.upper():
+                    notional_usd *= 1_000
+            except ValueError:
+                pass
+
     delta = trade.get('delta', 0) or 0
-    instrument_name = trade.get('instrument_name', '') or trade.get('symbol', '') or ''
+    flow_label = trade.get('flow_label', '')
 
     return {
         'timestamp': timestamp,
@@ -486,7 +507,7 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
         'flow_label': flow_label,
         'notional_usd': float(notional_usd) if notional_usd else 0,
         'delta': float(delta) if delta else 0,
-        'instrument_name': instrument_name,
+        'instrument_name': ins_name,
     }
 
 
@@ -790,10 +811,9 @@ def generate_wind_sentiment(summary: Dict, spot: float) -> str:
         parts.append(f"支撑${support/1000:.0f}K({spct_s:+.1f}%)/阻力${resistance/1000:.0f}K({spct_r:+.1f}%)")
 
     top_flow = summary.get('dominant_flow')
-    if top_flow:
-        label_info = FLOW_LABEL_MAP.get(top_flow)
-        if label_info:
-            parts.append(f"主流行为:{label_info[0]}")
+    if top_flow and top_flow != 'unknown':
+        # dominant_flow is now already the Chinese label (from v5.9 aggregation)
+        parts.append(f"主流行为:{top_flow}")
 
     if not parts:
         return "数据不足，暂无法判断"
@@ -1691,7 +1711,8 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
         results.append({
             "instrument_name": inst, "direction": direction,
             "notional_usd": r[2] or 0, "volume": r[3] or 0,
-            "strike": strike, "option_type": opt_type, "flow_label": fl
+            "strike": strike, "option_type": opt_type, "flow_label": fl,
+            "delta": delta_val
         })
 
     # Step 2: If DB has < limit/2 records, fetch live from Deribit API
@@ -2047,6 +2068,7 @@ async def sandbox_simulate(params: SandboxParams):
     old_margin = old_cv * params.num_contracts
 
     summaries = _fetch_derivit_summaries("BTC" if "BTC" in params.current_symbol else "ETH")
+    index_price = spot  # fallback to spot if index not available
     cands = []
     for s in summaries:
         meta = _parse_inst_name(s.get("instrument_name", ""))
@@ -2056,18 +2078,20 @@ async def sandbox_simulate(params: SandboxParams):
             continue
         if opt_type.upper() == 'P' and meta["strike"] >= params.crash_price * 0.85:
             continue
-        iv = float(s.get("mark_iv") or 0)
+        # mark_iv is in percentage (e.g., 47.5), convert to decimal (0.475)
+        iv = float(s.get("mark_iv") or 0) / 100.0
         if iv <= 0.05 or iv > 3:
             continue
-        prem = float(s.get("mark_price") or 0)
+        # mark_price is per unit, multiply by index_price to get USD value
+        prem_usd = float(s.get("mark_price") or 0) * index_price
         oi = float(s.get("open_interest") or 0)
-        if prem <= 0 or oi < 10:
+        if prem_usd <= 0 or oi < 10:
             continue
         ncv = meta["strike"] * params.margin_ratio
-        apr_e = (prem / ncv) * (365 / meta["dte"]) * 100 if ncv > 0 else 0
+        apr_e = (prem_usd / ncv) * (365 / meta["dte"]) * 100 if ncv > 0 else 0
         if apr_e < 5:
             continue
-        cands.append({**meta, "premium": prem, "apr": round(apr_e, 1), "oi": oi, "cv": round(ncv, 2)})
+        cands.append({**meta, "premium_usd": prem_usd, "apr": round(apr_e, 1), "oi": oi, "cv": round(ncv, 2)})
     cands.sort(key=lambda x: x["apr"], reverse=True)
 
     s1_loss = intrinsic * params.num_contracts
