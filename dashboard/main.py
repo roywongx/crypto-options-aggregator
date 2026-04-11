@@ -270,7 +270,7 @@ def get_spot_price(currency: str = "BTC") -> float:
 
 
 def _get_deribit_monitor():
-    """获取 DeribitOptionsMonitor 单例"""
+    """获取 DeribitOptionsMonitor 单例（单进程安全，多 worker 各自独立）"""
     if 'mon' not in _deribit_monitor_cache:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
         from deribit_options_monitor import DeribitOptionsMonitor
@@ -1078,12 +1078,22 @@ def _quick_scan_sync(params: QuickScanParams = None):
             })
 
     # Scoring and Filtering
+    def _normalize_liquidity(ct):
+        """按平台归一化流动性分数 - Binance OI 量级比 Deribit 小 1-2 个数量级"""
+        platform = ct.get("platform", "")
+        base = ct.get("liquidity_score", 0)
+        if platform == "Binance":
+            oi_factor = min(2.0, 1.0 + (ct.get("open_interest", 0) / 200))
+            spread_penalty = max(0.5, 1.0 - ct.get("spread_pct", 0) / 20)
+            return min(100, int(base * oi_factor * spread_penalty))
+        return base
+
     def _weighted_score(ct):
         score = CalculationEngine.weighted_score(
             apr=ct.get("apr", 0),
             pop=ct.get("pop", 50),
             breakeven_pct=ct.get("breakeven_pct", 0),
-            liquidity_score=ct.get("liquidity_score", 0),
+            liquidity_score=_normalize_liquidity(ct),
             iv_rank=ct.get("iv_rank", 50),
             strike=ct.get("strike", 0),
             spot=spot
