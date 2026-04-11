@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v5.10-BugFix+%E6%B5%81%E5%90%91%E5%88%86%E7%B1%BB+PCR+MaxPain-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v6.0-BTC%E9%A3%8E%E9%99%A9%E6%A1%86%E6%9E%B6+%E5%B9%B6%E8%A1%8C%E6%89%AB%E6%8F%8F+%E6%8A%84%E5%BA%95%E5%BB%BA%E8%AE%AE-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
