@@ -325,12 +325,13 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
 
 FLOW_LABEL_MAP = {
     "protective_hedge": ("保护性对冲", "机构买入Put对冲下行风险"),
-    "premium_collect": ("收权利金", "卖出Put/Call收取权利金"),
-    "speculative_put": ("看跌投机", "投机性买入看跌期权"),
+    "premium_collect": ("收权利金(看涨)", "卖出Put/Call收取权利金，愿低价接货"),
+    "speculative_put": ("看跌投机", "买入看跌期权投机，看跌后市"),
     "call_speculative": ("看涨投机", "低Delta Call买入，博反弹"),
     "call_momentum": ("追涨建仓", "高Delta Call买入，看好上涨"),
     "covered_call": ("备兑开仓", "卖出Call锁定收益"),
     "call_overwrite": ("改仓操作", "高Delta Call卖出改仓"),
+    "put_buy_hedge": ("保护性买入", "买入Put对冲，防下跌"),
     "unknown": ("未知流向", "无法判断交易意图"),
 }
 def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
@@ -354,7 +355,7 @@ def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
     if direction == "buy":
         if option_type in ("PUT", "P"):
             if 0.10 <= d <= 0.35:
-                return "protective_hedge"
+                return "put_buy_hedge"
             return "speculative_put"
         elif option_type in ("CALL", "C"):
             if d >= 0.30:
@@ -362,9 +363,7 @@ def _classify_flow_heuristic(direction, option_type, delta, strike, spot):
             return "call_speculative"
     elif direction == "sell":
         if option_type in ("PUT", "P"):
-            if d <= 0.35:
-                return "premium_collect"
-            return "speculative_put"
+            return "premium_collect"
         elif option_type in ("CALL", "C"):
             if d <= 0.40:
                 return "covered_call"
