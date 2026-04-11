@@ -6,299 +6,110 @@
   <img src="https://img.shields.io/badge/v6.0-BTC%E9%A3%8E%E9%99%A9%E6%A1%86%E6%9E%B6+%E5%B9%B6%E8%A1%8C%E6%89%AB%E6%8F%8F+%E6%8A%84%E5%BA%95%E5%BB%BA%E8%AE%AE-blueviolet" alt="Version">
 </p>
 
-<h1 align="center">Crypto Options Aggregator</h1>
+<h1 align="center">Crypto Options Aggregator (期权监控聚合面板)</h1>
 
 <p align="center">
-  <b>双平台加密期权扫描器 + 实时监控面板 + 大单风向标</b><br>
-  Binance (USDT本位) × Deribit (币本位) 联合分析<br>
-  面向 Sell Put / Covered Call 策略的专业工具
+  <b>专业级双平台期权扫描器 + 动态风险框架 + 抄底建议引擎</b><br>
+  实时聚合 Binance (USDT本位) 与 Deribit (币本位) 深度期权数据<br>
+  专为进阶 <b>Sell Put / Covered Call</b> 策略及滚仓(Rolling)交易者打造
 </p>
 
 ---
 
-## ✨ 核心亮点
+## 🌟 核心特性与优势
 
-| 能力 | 说明 |
+| 功能模块 | 详细说明 |
 |------|------|
-| 🔄 **双平台聚合** | 同时扫描 Binance + Deribit，统一排序对比 |
-| 📊 **Margin-APR** | 基于保证金占用计算真实年化收益率（默认20%） |
-| ⚡ **DVOL 深度分析** | Z-Score、趋势方向(↑↓→)、置信度(高/中/低)、7d分位、动态参数自适应 |
-| 🐋 **大单风向标** | 机构流向标签（8类核心分类）+ 三级严重程度(大单⚠️/中单🟡/普通✅) + 情绪评分 |
-| 💥 **压力测试** | Delta-Gamma 近似公式，估算 -10% 跌幅亏损，Martingale 沙盒模拟 |
-| 🛡️ **风险预警** | 自动检测高风险合约，滚仓建议弹窗 |
-| 🧮 **倍投修复计算器** | 输入浮亏金额，自动推荐最优修复方案（含净信用/保证金检查） |
-| 📈 **趋势图表** | APR(P75稳健上限+均值) / DVOL / PCR 比率 历史 24H / 7天 / 30天 可视化 |
-| 🎯 **加权评分排序** | APR(25%) + POP(25%) + 安全垫(20%) + 流动性(15%) + IV中性(15%) 五维综合评分 |
-| 📉 **IV期限结构** | 7D/14D/30D/60D/90D 隐含波动率曲面 + Backwardation倒挂检测 |
-| 💔 **最大痛点/ Gamma Flip** | Max Pain计算 + GEX(Gamma Exposure)分布图 + Flip点风险预警 |
-| 🎛️ **DVOL自适应参数** | 高波动自动收紧Delta/APR阈值，低波动适当放宽 |
+| 🔗 **双平台统一视图** | 消除 Binance + Deribit 之间的差异，在同一面板对比真实收益。 |
+| 💰 **真实 Margin-APR** | 摒弃传统面值收益率，采用真实**保证金占用回报率**（如锁定20%资金计算APR），反映资金真实效率。 |
+| 🌊 **DVOL 波动率引擎** | 基于 Deribit 波动率指数，自动计算 Z-Score 和历史分位数。高波收紧参数，低波放宽，实现策略自动适配。 |
+| 🛡️ **动态风险框架(v6.0)** | 引入 BTC 风险阶梯（如 55k 常规底，45k 极限底），为不同市场阶段提供精确的参数权重修正。 |
+| 💡 **智能抄底助手(v6.0)** | 融合当前水位、Max Pain (最大痛点)、GEX (Gamma Exposure)，输出实时的建仓/滚仓/平仓操作指令。 |
+| 🔄 **正收益滚仓计算器** | 当持仓遇险时，自动寻找更低行权价、更远到期日的新合约，并测算所需保证金，确保净信用(Net Credit)大于零。 |
+| 🌊 **大单风向标 & 资金流** | 监控百万级大单，基于 Delta 深度解析真实交易意图（备兑、保护性买入、追涨等），透视主力底牌。 |
+| 📊 **多维数据图表分析** | 实时生成 APR 分位图、DVOL 趋势图、波动率曲面(Term Structure) 以及 PCR (Put/Call Ratio) 面板。 |
 
 ---
 
-## 🖥️ Web 监控面板
+## 🚀 快速开始
 
-基于 FastAPI + 原生 JS 构建，开箱即用。
+本项目采用 FastAPI 后端与纯原生 JS + TailwindCSS 前端，轻量且高效。
 
-### 启动方式
+### 1. 环境准备
+请确保已安装 Python 3.10 及以上版本。
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
-pip install -r dashboard/requirements.txt
+# 克隆仓库
+git clone https://github.com/roywongx/crypto-options-aggregator.git
+cd crypto-options-aggregator
 
-# 启动面板
-cd dashboard && python -m uvicorn main:app --reload --port 8080
-# 访问 http://localhost:8080
-```
-
-### 功能全景
-
-#### 📊 实时监控大屏
-
-- **宏观指标卡片**：现货价格（多源动态获取）/ DVOL指数+信号 / 大宗交易数 / 最佳APR
-- **合约列表**：21列数据，支持点击表头排序
-  - 平台 | 合约 | DTE | Strike | Delta | Gamma | Vega | **IV** | **APR**
-  - **POP**(胜率) | **Premium$** | 流动性 | **-10%亏损** | **BE$** | **安全垫%** | **OI** | Spread%
-  - **IV Rank** | **⭐评分(_score)** | 风险状态(emoji)
-- **自动刷新**：5/10/30 分钟可选，后台静默监控
-
-#### 🎯 加权评分系统 (v5.3)
-
-五维综合评分，帮助快速识别最佳 Sell Put/Call 机会：
-
-| 维度 | 权重 | 说明 |
-|------|------|------|
-| APR | 25% | 年化收益率（归一化到200%上限）|
-| POP | 25% | 概率获利 ≈ 1-\|delta\|（OTM sold options）|
-| 安全垫距离% | 20% | (spot-breakeven)/spot（归一化到20%上限）|
-| 流动性 | 15% | 综合OI和Spread的流动性评分 |
-| IV Rank中性 | 15% | 当前IV在历史分布中的位置，越接近50越好 |
-
-#### 🔥 倍投修复计算器
-
-输入浮亏金额 → 系统自动筛选高 APR 合约 → 计算所需张数和预期净利润 → 推荐最优方案
-
-#### ⚠️ 三级风险预警系统
-
-- **Delta > 0.45** → 高风险红框闪烁 + 浏览器通知
-- **价格接近Strike 2%** → 中风险橙色标记
-- **点击合约行** → 弹出滚仓建议（推荐更低行权价远期替代）
-
-#### 🐋 大单风向标 (v5.9)
-
-近30天大单实时展示与深度分析：
-
-**大单列表**
-- 标题 + 严重程度badge + 方向箭头 + flow emoji
-- 🔴 **大单⚠️**: notional ≥ $2M
-- 🟡 **中单🟡**: notional ≥ $500K
-- 🟢 **普通✅**: notional < $500K
-
-**情绪总览卡**
-- 五档情绪评分 (🐂偏多 / 📈温和看多 / ➡️中性 / 📉温和看空 / 🐻偏空)
-- 自然语言总结（支撑/阻力位 + 主流行为判断）
-- 买卖比例 / 总名义金额 / 主流行为类型
-
-**净头寸 Strike 分布图**
-- 每个行权价的净头寸(buy-sell)横向柱状图
-- 现价锚点标记 + 支撑位(黄)/阻力位(橙)自动识别 + 距现价百分比
-
-**流向分类网格 — 8类核心分类**
-
-| 中文名 | 含义 | 触发条件 |
-|--------|------|---------|
-| 保护性对冲 | Deep ITM Sell Put，强烈看涨愿意接货 | \|Δ\|≥0.7 |
-| 收权利金 | ATM Sell Put，温和看涨+稳定收权 | 0.4≤\|Δ\|<0.7 |
-| 备兑开仓 | OTM Sell Put/Call，纯收权利金 | \|Δ\|<0.4 |
-| 保护性买入 | Deep ITM Buy Put，机构对冲防下跌 | \|Δ\|≥0.7 |
-| 看跌投机 | Buy Put，短线看跌或投机 | \|Δ\|<0.7 |
-| 改仓操作 | ITM Sell Call，改仓操作 | \|Δ\|>0.4 |
-| 追涨建仓 | ATM Buy Call，顺势追涨 | \|Δ\|≥0.4 |
-| 看涨投机 | OTM Call，低成本博反弹 | \|Δ\|<0.4 |
-
-支持按币种(BTC/ETH/SOL/XRP)和时间范围(7/30/90天)筛选。
-
-#### 📉 DVOL 分析面板
-
-- 当前值 + Z-Score + 信号等级（异常偏高/偏高/正常/偏低/异常偏低）
-- **趋势箭头**: ↑上升 / ↓下降 / →震荡
-- **置信度**: 高(>70) / 中(40-70) / 低(<40)
-- **动态参数建议**: DVOL自适应调整Delta/APR/DTE阈值
-- 趋势图表：24H / 7天 / 30天 切换
-
-#### 📈 APR 趋势图表 (v5.4.5+)
-
-- **标准化APR**: 固定参数(delta≤0.25, DTE 14-35, PUT only)，确保跨时间可比
-- **P75 APR(稳健上限)**: 第75百分位数线，过滤极端异常值
-- **平均 APR**: 全量合约均值
-- **异常值过滤**: 自动排除 APR<1% 或 >500% 的失真数据
-- **前值填充**: 数据缺失时使用前一有效值按比例填补
-
-#### 📉 IV 期限结构面板 (v5.5+)
-
-- **5个到期节点**: 7D / 14D / 30D / 60D / 90D 的平均隐含波动率
-- **IV曲面图**: Chart.js 渲染的期限结构折线图
-- **Backwardation检测**: 近期IV > 远期IV时显示倒挂警告
-- **颜色编码**: ≤14D红色(短期高风险), >14D青色
-
-#### 💔 最大痛点 / Gamma Flip (Max Pain & GEX) (v5.5+)
-
-- **现货价 vs 最大痛点**: 直观对比 + 距离百分比
-- **PCR (Put/Call Ratio)**: 多空持仓比
-- **情绪信号**: 中性/看多/看空
-- **Pain Curve + GEX 双轴图**:
-  - 归一化痛点曲线（橙色线）— 标记最大痛点位置
-  - OI净敞口柱状图（绿红双色）— 正=Call主导, 负=Put主导
-- **Gamma Flip 预警**: 当现货进入空头Gamma区时显示危险警告
-- **多到期日支持**: 展示最近4个到期日的Max Pain和GEX
-
-#### 🎮 Martingale 沙盒模拟器
-
-输入当前持仓和假设崩盘价格：
-- 自动估算内在价值亏损 + Vega膨胀
-- 从Deribit筛选可用修复合约
-- 计算最优张数、保证金占用、预期净利润
-- 判断方案可行性（VIABLE/PARTIAL/DANGER）
-
-#### 📊 统计信息 & 导出
-
-- 总扫描次数 / 今日扫描数 / 大宗交易总数 / 数据库大小
-- CSV导出：支持自定义时间范围和币种
-
----
-
-## 🛠️ API 接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/api/quick-scan` | 快速期权扫描（推荐）|
-| `POST` | `/api/scan` | 完整期权扫描（已弃用）|
-| `GET` | `/api/latest?currency=BTC` | 获取最新扫描结果 |
-| `GET` | `/api/stats` | 统计概览 |
-| `GET` | `/api/health` | **健康检查**（DB WAL模式 + 各API可达性）|
-| `POST` | `/api/recovery-calculate` | 倍投修复计算 |
-| `POST` | `/api/calculator/roll` | 净信用滚仓计算器 |
-| `POST` | `/api/sandbox/simulate` | Martingale沙盒模拟 |
-| `GET` | `/api/charts/apr?hours=168` | APR 趋势数据（标准化参数）|
-| `GET` | `/api/charts/dvol?hours=168` | DVOL 趋势数据 |
-| `GET` | `/api/charts/vol-surface?currency=BTC` | **IV期限结构** |
-| `GET` | `/api/charts/pcr?currency=BTC&hours=168` | PCR (Put/Call Ratio) 趋势 |
-| `GET` | `/api/metrics/max-pain?currency=BTC` | **最大痛点/GEX** |
-| `GET` | `/api/dvol-advice?currency=BTC` | DVOL自适应参数建议 |
-| `GET` | `/api/export/csv?currency=BTC&hours=168` | CSV 数据导出 |
-| `GET` | `/api/trades/history?days=7` | 大宗交易历史 |
-| `GET` | `/api/trades/strike-distribution?days=30` | Strike 分布数据 |
-| `GET` | `/api/trades/wind-analysis?currency=BTC&days=30` | **风向分析**（8类流向分类）|
-
-### 快速扫描参数 (POST /api/quick-scan)
-
-```json
-{
-  "currency": "BTC",
-  "min_dte": 14,
-  "max_dte": 35,
-  "max_delta": 0.4,
-  "margin_ratio": 0.2,
-  "option_type": "PUT",
-  "strike": null,
-  "strike_range": null
-}
-```
-
----
-
-## 🏗️ 项目架构
-
-```
-crypto-options-aggregator/
-├── dashboard/                        # Web 监控面板 (FastAPI)
-│   ├── main.py                      # 后端 API + SQLite(WAL)
-│   ├── config.py                    # 统一配置管理
-│   ├── static/
-│   │   ├── index.html               # 前端 (TailwindCSS + Chart.js)
-│   │   └── app.js                   # 前端逻辑
-│   └── data/monitor.db              # SQLite (WAL模式)
-├── deribit-options-monitor/          # Deribit 引擎
-├── options_aggregator.py            # 双平台聚合入口
-├── binance_options.py               # Binance E-API 封装
-├── requirements.txt                 # 核心依赖
-└── dashboard/requirements.txt       # 面板依赖
-```
-
----
-
-## 🧪 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| **后端** | Python 3.13+ / FastAPI / Pydantic / SQLite (WAL) |
-| **前端** | 原生 JavaScript / TailwindCSS CDN / Chart.js |
-| **数据源** | Deribit Public API / Binance E-API / Binance Spot API |
-| **并发** | ThreadPoolExecutor (4线程并行请求) |
-| **统计** | SciPy (norm.cdf for DVOL percentile) |
-
----
-
-## 📦 依赖安装
-
-```bash
+# 安装依赖项
 pip install -r requirements.txt
 pip install -r dashboard/requirements.txt
 ```
 
-无需 Node.js / Webpack — 前端全部使用 CDN 引入。
+### 2. 启动服务
+```bash
+# 进入 dashboard 目录并启动
+cd dashboard
+python -m uvicorn main:app --reload --port 8080
+```
+启动成功后，浏览器访问 👉 `http://localhost:8080` 即可进入监控面板。
 
 ---
 
-## 🎛️ 策略预设系统
+## 🏗️ 核心架构与 API
 
-内置三档策略预设：
-
-| 策略 | max_delta | min_dte | max_dte | margin_ratio |
-|------|----------|---------|---------|-------------|
-| **Conservative** | 0.20 | 30 | 45 | 0.18 |
-| **Standard** | 0.30 | 14 | 35 | 0.20 |
-| **Aggressive** | 0.40 | 7 | 28 | 0.22 |
-
-PUT 和 CALL 有独立的预设配置。
+| 请求方式 | 路由 | 描述 |
+|------|------|------|
+| `POST` | `/api/quick-scan` | 核心扫描接口，多线程并行获取盘口、现货价、期权链 |
+| `GET` | `/api/latest` | 获取数据库中缓存的最后一次有效扫描结果 |
+| `GET` | `/api/bottom-fishing/advice` | **(New)** 基于动态风险框架的抄底建议 |
+| `POST` | `/api/calculator/roll` | 持仓遇险时的正收益滚仓计算器 |
+| `POST` | `/api/sandbox/simulate` | 极端行情(如闪崩)下的保证金压力测试沙盒 |
+| `GET` | `/api/metrics/max-pain` | 获取当月最大痛点及 Gamma Flip 关键点位 |
+| `GET` | `/api/charts/vol-surface` | 获取波动率曲面及升贴水状态 |
 
 ---
 
-## 📋 版本历史 (v5.x)
+## ⚙️ 策略预设参考
 
-| 版本 | 主要变更 |
+系统内置的三种默认过滤预设（支持在界面自由微调）：
+
+| 风格 | Max Delta | DTE (到期天数) | 目标 APR |
+|------|----------|---------|-------------|
+| **保守 (Conservative)** | 0.20 | 30 - 45 天 | 15%+ |
+| **标准 (Standard)** | 0.30 | 14 - 35 天 | 20%+ |
+| **激进 (Aggressive)** | 0.40 | 7 - 28 天 | 25%+ |
+
+*(注：系统会自动根据 DVOL 波动率指数，对上述预设进行动态微调。)*
+
+---
+
+## 💡 更新日志
+
+| 版本 | 核心更新内容 |
 |------|---------|
-| **v5.10** | 重大Bug修复：sentiment_score中英文key不匹配；sandbox KeyError/IV单位；roll计算器NameError；PCR月份误匹配；delta缺失导致risk_level恒低；_get_spot_from_scan查错字段 |
-| **v5.9.1** | flow_breakdown聚合为8种核心中文分类；语法错误修复 |
-| **v5.9.0** | 流向分类恢复8种核心类型；Sell PUT ITM阈值修正(0.5→0.7) |
-| **v5.8.11** | Sell PUT分类阈值修正：ITM 0.5→0.7；ATM 0.2→0.4 |
-| **v5.8.10** | 全面重构流向分类逻辑：基于Delta/Moneyness精确判断 |
-| **v5.8.9** | 修复Sell PUT误判为"看跌投机"；Sell PUT本质是看涨操作 |
-| **v5.7** | 统一Config配置管理 |
-| **v5.6** | CalculationEngine统一计算引擎 |
-| **v5.5** | IV期限结构曲面；Max Pain/GEX/Flip点检测 |
-| **v5.4.5** | APR趋势标准化(P75)；固定参数确保跨时间可比 |
-| **v5.3** | POP概率获利；Breakeven%安全垫；IV Rank；Weighted Score五维评分 |
+| **v6.0** | 新增 **BTC动态风险框架** (55k常规底/45k极限底)；新增**抄底建议模块**，结合 Max Pain 与 GEX 生成策略指令；全面启用**并发网络请求**，大幅缩短加载延迟。 |
+| **v5.10** | 修复现货价抓取 Bug，新增大单流向深度分类、PCR 分析指标及最大痛点数据源优化。 |
+| **v5.9** | 重构大单监控系统，引入交易意图智能判定（如识别“深度ITM保护性买入”）。 |
+| **v5.7** | 重构配置引擎，抽离全局 `config.py`，彻底消除硬编码散落。 |
+| **v5.3** | 引入 `Calculation Engine` 和加权评分系统 (POP, Breakeven, Liquidity)。 |
 
 ---
 
-## ⚠️ 免责声明
+## 🙏 致谢 (Acknowledgments)
 
-> 期权交易有风险，本工具仅供信息参考，不构成投资建议。
-> Margin-APR 基于 20% 保证金估算。压力测试使用 Delta-Gamma 一阶近似，实际盈亏可能因波动率变化而偏离。
-> 加权评分仅供参考，不保证收益。请根据自身风险承受能力谨慎操作。
+本项目并非从零开始，其底层核心逻辑得益于开源社区的无私奉献。在此特别感谢：
 
----
-
-## 🙏 致谢
-
-- [Deribit](https://www.deribit.com/) — 公共 API 数据源
-- [Binance](https://www.binance.com/) — 期权与现货数据源
-- [ccxt](https://github.com/ccxt/ccxt) — 统一交易所 API 库
+- **[lianyanshe-ai/deribit-options-monitor](https://github.com/lianyanshe-ai/deribit-options-monitor)** 
+  本项目最初的灵感与核心根基来源于此库。原作者为其提供了极其健壮的 Deribit API 封装、Greeks 期权希腊字母推算以及 DVOL/大单提醒的基础框架。正是基于这一出色的开源工作，我们才得以扩展支持 Binance、重构风险模型并打造统一的双平台监控面板。
+- **[ccxt](https://github.com/ccxt/ccxt)** 
+  为极端行情下现货价格的 Fallback 获取提供了稳定的跨交易所 API 方案。
 
 ---
 
-<p align="center">
-  <b>Made with coffee for crypto options traders</b><br>
-  <i>Sell puts like a pro</i>
-</p>
+## ⚠️ 风险免责声明
+
+期权交易（尤其是裸卖期权 / Sell Puts）具有极高的资金风险，可能导致本金完全损失。
+本工具所有数据、建议、压力测试及滚仓计算**仅供学习与量化分析参考，绝不构成任何投资建议**。在进行实盘交易前，请务必充分理解期权规则并严格做好资金与仓位管理。
