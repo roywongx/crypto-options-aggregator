@@ -2373,8 +2373,6 @@ async def get_wind_analysis(
             dominant_flow = fl
 
     if not dominant_flow:
-        dominant_flow = 'unknown
-    if not dominant_flow:
         dominant_flow = 'unknown'
 
     buy_ratio = total_buys / total_trades if total_trades > 0 else 0.5
