@@ -27,6 +27,10 @@ class Config:
     ROLL_SLIPPAGE_PCT = 0.05
     ROLL_SAFETY_BUFFER_PCT = 0.10
 
+    # v6.0: BTC Risk Floors
+    BTC_REGULAR_FLOOR = 55000.0
+    BTC_EXTREME_FLOOR = 45000.0
+
     DB_PATH_ENV = os.getenv("DASHBOARD_DB_PATH", "")
     API_KEY = os.getenv("DASHBOARD_API_KEY", "")
 

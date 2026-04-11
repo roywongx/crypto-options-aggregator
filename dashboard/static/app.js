@@ -447,8 +447,84 @@ async function loadLatestData() {
         updateLastUpdateTime(data.timestamp);
         loadAprChartData();
         loadDvolChartData();
+        
+        // v6.0: Load bottom fishing advice for BTC
+        if (currency === 'BTC') {
+            loadBottomFishingAdvice('BTC');
+        } else {
+            const section = document.getElementById('bottomFishingSection');
+            if (section) section.classList.add('hidden');
+        }
     } catch (error) {
         console.error('加载数据失败:', error);
+    }
+}
+
+async function loadBottomFishingAdvice(currency = 'BTC') {
+    try {
+        const res = await safeFetch(`${API_BASE}/api/bottom-fishing/advice?currency=${currency}`);
+        const data = await res.json();
+        
+        const section = document.getElementById('bottomFishingSection');
+        if (!section) return;
+        
+        if (!data || data.status === undefined) {
+            section.classList.add('hidden');
+            return;
+        }
+        
+        section.classList.remove('hidden');
+        
+        // Status Badge
+        const badge = document.getElementById('rfStatusBadge');
+        badge.innerText = data.status;
+        badge.className = 'px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ';
+        
+        if (data.status === 'NORMAL') {
+            badge.classList.add('bg-green-500/20', 'text-green-400');
+        } else if (data.status === 'NEAR_FLOOR') {
+            badge.classList.add('bg-blue-500/20', 'text-blue-400');
+        } else if (data.status === 'ADVERSE') {
+            badge.classList.add('bg-orange-500/20', 'text-orange-400', 'animate-pulse');
+        } else if (data.status === 'PANIC') {
+            badge.classList.add('bg-red-500/20', 'text-red-400', 'animate-bounce');
+        }
+        
+        // Advice List
+        const adviceList = document.getElementById('rfAdviceList');
+        adviceList.innerHTML = data.advice.map(a => `<li>${safeHTML(a)}</li>`).join('');
+        
+        // Action List
+        const actionList = document.getElementById('rfActionList');
+        actionList.innerHTML = data.recommended_actions.map(a => 
+            `<span class="px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full text-xs text-green-300 font-medium">
+                <i class="fas fa-check mr-1"></i> ${safeHTML(a)}
+            </span>`
+        ).join('');
+        
+        // Market Pain
+        const mpEl = document.getElementById('rfMaxPain');
+        mpEl.innerText = data.max_pain ? `$${data.max_pain.toLocaleString()}` : '--';
+        
+        const distEl = document.getElementById('rfPainDist');
+        if (data.max_pain && data.spot) {
+            const diff = data.max_pain - data.spot;
+            const pct = (diff / data.spot * 100).toFixed(1);
+            const color = diff > 0 ? 'text-green-400' : 'text-red-400';
+            const icon = diff > 0 ? '↑' : '↓';
+            distEl.innerHTML = `<span class="${color}">${icon} ${Math.abs(diff).toLocaleString()} (${pct}%)</span>`;
+        } else {
+            distEl.innerText = '--';
+        }
+        
+        // MM Signal
+        const mmEl = document.getElementById('rfMmSignal');
+        mmEl.innerHTML = data.mm_signal ? `<i class="fas fa-info-circle mr-2"></i> ${safeHTML(data.mm_signal)}` : '暂无做市商对冲信号';
+        
+    } catch (e) {
+        console.error('Failed to load bottom fishing advice:', e);
+        const section = document.getElementById('bottomFishingSection');
+        if (section) section.classList.add('hidden');
     }
 }
 
@@ -1265,7 +1341,8 @@ async function loadTermStructure() {
     const statusEl = document.getElementById('ts7');
     if (!statusEl) { console.warn('TS: container not found'); return; }
     try {
-        const resp = await safeFetch(API_BASE + '/api/charts/vol-surface?currency=BTC');
+        const currency = document.getElementById('currencySelect')?.value || 'BTC';
+        const resp = await safeFetch(API_BASE + '/api/charts/vol-surface?currency=' + currency);
         const d = await resp.json();
         if (d.error) { console.warn('TS:', d.error); return; }
 
@@ -1338,7 +1415,8 @@ async function loadMaxPain() {
     const spotEl = document.getElementById('mpSpot');
     if (!spotEl) { console.warn('MP: container not found'); return; }
     try {
-        const resp = await safeFetch(API_BASE + '/api/metrics/max-pain?currency=BTC');
+        const currency = document.getElementById('currencySelect')?.value || 'BTC';
+        const resp = await safeFetch(API_BASE + '/api/metrics/max-pain?currency=' + currency);
         const d = await resp.json();
         if (d.error || !d.expiries) { console.warn('MP:', d.error || 'no expiries'); return; }
 

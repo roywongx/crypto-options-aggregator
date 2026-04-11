@@ -27,6 +27,35 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 
+from config import config
+
+class RiskFramework:
+    """v6.0: BTC 风险框架 - $55k 常规底, $45k 极限底"""
+    REGULAR_FLOOR = config.BTC_REGULAR_FLOOR
+    EXTREME_FLOOR = config.BTC_EXTREME_FLOOR
+    
+    @classmethod
+    def get_status(cls, spot: float) -> str:
+        if spot > cls.REGULAR_FLOOR * 1.1:
+            return "NORMAL"
+        elif spot > cls.REGULAR_FLOOR:
+            return "NEAR_FLOOR"
+        elif spot > cls.EXTREME_FLOOR:
+            return "ADVERSE"  # 逆境
+        else:
+            return "PANIC"   # 极恐/止损区
+            
+    @classmethod
+    def get_score_modifier(cls, strike: float, spot: float) -> float:
+        """根据行权价在风险框架中的位置给出评分修正"""
+        if strike <= cls.EXTREME_FLOOR:
+            return 1.2  # 极度安全，加分
+        elif strike <= cls.REGULAR_FLOOR:
+            return 1.1  # 相对安全，小加分
+        elif strike > spot:
+            return 0.8  # ITM 风险高，减分
+        return 1.0
+
 class CalculationEngine:
     """v5.6: 统一计算引擎 - 消除 main.py 和 options_aggregator.py 的公式不一致"""
     
@@ -64,13 +93,21 @@ class CalculationEngine:
     
     @staticmethod
     def weighted_score(apr: float, pop: float, breakeven_pct: float,
-                       liquidity_score: float, iv_rank: float) -> float:
+                       liquidity_score: float, iv_rank: float, 
+                       strike: float = 0, spot: float = 0) -> float:
         a = min(max(apr, 0) / 200.0, 1.0)
         p = min(max(pop, 0) / 100.0, 1.0)
         b = min(max(breakeven_pct, 0) / 20.0, 1.0)
         l = min(max(liquidity_score, 0) / 100.0, 1.0)
         ir = max(iv_rank, 0); iv = 1.0 - abs(ir - 50) / 50.0
-        return round(a*0.25 + p*0.25 + b*0.20 + l*0.15 + iv*0.15, 4)
+        
+        score = a*0.25 + p*0.25 + b*0.20 + l*0.15 + iv*0.15
+        
+        # 应用风险框架修正
+        if spot > 0 and strike > 0:
+            score *= RiskFramework.get_score_modifier(strike, spot)
+            
+        return round(score, 4)
 
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
 DB_PATH.parent.mkdir(exist_ok=True)
@@ -870,20 +907,50 @@ async def quick_scan(params: QuickScanParams = None):
 def _quick_scan_sync(params: QuickScanParams = None):
     """快速扫描：直接获取Deribit数据，不依赖options_aggregator.py"""
     from datetime import datetime
+    from concurrent.futures import ThreadPoolExecutor
     _p = params or QuickScanParams()
     currency = _p.currency
-    spot = get_spot_price(currency)
-    _min_spot = {"BTC": 1000, "ETH": 100, "SOL": 10, "XRP": 0.5}.get(currency, 100)
-    if spot < _min_spot:
-        try:
-            spot = get_spot_price_deribit(currency) or get_spot_price_binance(currency)
-            if not spot or spot < _min_spot * 0.1:
-                raise ValueError("No valid spot price")
-        except Exception:
-            raise RuntimeError("[CRITICAL] quick_scan: cannot obtain spot price, scan aborted")
 
-    # 获取DVOL数据
-    dvol_data = get_dvol_from_deribit(currency)
+    # Step 1: Parallel Fetching
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        f_spot = executor.submit(get_spot_price, currency)
+        f_dvol = executor.submit(get_dvol_from_deribit, currency)
+        f_deribit = executor.submit(_fetch_deribit_summaries, currency)
+        f_trades = executor.submit(_fetch_large_trades, currency, days=7, limit=50)
+        
+        # Parallel fetch Binance data components
+        def _fetch_bin(url):
+            try:
+                resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception: return {}
+            
+        f_bin_mark = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/mark')
+        f_bin_info = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/exchangeInfo')
+        f_bin_ticker = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/ticker')
+
+        # Collect results
+        try:
+            spot = f_spot.result(timeout=15)
+            dvol_data = f_dvol.result(timeout=15)
+            summaries = f_deribit.result(timeout=15)
+            large_trades = f_trades.result(timeout=15)
+            r_mark = f_bin_mark.result(timeout=15)
+            r_info = f_bin_info.result(timeout=15)
+            r_ticker = f_bin_ticker.result(timeout=15)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error("Parallel fetch failed: %s", str(e))
+            # Fallback spot price if possible, or raise
+            try: spot = get_spot_price(currency)
+            except: raise HTTPException(status_code=500, detail=f"数据抓取失败: {str(e)}")
+
+    _min_spot = {"BTC": 1000, "ETH": 100, "SOL": 10, "XRP": 0.5}.get(currency, 100)
+    if not spot or spot < _min_spot:
+        raise RuntimeError("[CRITICAL] quick_scan: cannot obtain spot price, scan aborted")
+
+    # 处理DVOL数据
     dvol_current = dvol_data.get('current', 0) or 0
     dvol_z = dvol_data.get('z_score', 0) or 0
     dvol_signal = dvol_data.get('signal', '正常区间')
@@ -891,7 +958,6 @@ def _quick_scan_sync(params: QuickScanParams = None):
     use_min_dte = _p.min_dte
     use_max_dte = _p.max_dte
     
-    import math
     dvol_pct = 50
     if abs(dvol_z) > 0:
         try:
@@ -901,18 +967,15 @@ def _quick_scan_sync(params: QuickScanParams = None):
             dvol_pct = round(50 + dvol_z * 20, 1)
             dvol_pct = max(1, min(99, dvol_pct))
 
-    try:
-        summaries = _fetch_derivit_summaries(currency)
-        if not summaries:
-            return {"success": False, "error": "无法获取Deribit数据"}
-
-        contracts = []
+    contracts = []
+    
+    # Process Deribit
+    if summaries:
         for s in summaries:
             meta = _parse_inst_name(s.get("instrument_name", ""))
             if not meta: continue
             if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
             
-            # 必须和用户请求的 option_type (PUT/CALL) 匹配
             req_type = _p.option_type.upper()
             req_type_short = "P" if req_type == "PUT" else "C"
             if meta["option_type"] != req_type_short: continue
@@ -925,14 +988,13 @@ def _quick_scan_sync(params: QuickScanParams = None):
             strike = meta["strike"]
             underlying = float(s.get("underlying_price", spot)) or spot
 
-            # Delta 过滤 (使用估算值，Deribit summaries不返回delta字段)
             raw_delta = s.get("delta")
             if raw_delta is None or float(raw_delta or 0) == 0:
                 delta_val = abs(_estimate_delta(strike, underlying, iv, meta["dte"], meta["option_type"]))
             else:
                 delta_val = abs(float(raw_delta))
-            max_delta = _p.max_delta
             
+            max_delta = _p.max_delta
             if isinstance(dvol_pct, (int, float)) and dvol_pct >= 80:
                 max_delta = max_delta * 0.7
             elif isinstance(dvol_pct, (int, float)) and dvol_pct <= 20:
@@ -940,16 +1002,8 @@ def _quick_scan_sync(params: QuickScanParams = None):
             
             if delta_val > max_delta: continue
             if _p.strike and abs(strike - _p.strike) > 0.5: continue
-            if _p.strike_range:
-                try:
-                    parts = _p.strike_range.split('-')
-                    lo, hi = float(parts[0]), float(parts[1])
-                    if not (lo <= strike <= hi): continue
-                except Exception: pass
-
-            prem_usd = prem * underlying
             
-            # 使用正确的 Margin APR 公式 (默认 20% 保证金)
+            prem_usd = prem * underlying
             margin_ratio = _p.margin_ratio
             cv = strike * margin_ratio
             apr = (prem_usd / cv) * (365 / meta["dte"]) * 100 if cv > 0 else 0
@@ -975,173 +1029,135 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, meta["option_type"]),
                 "pop": _calc_pop(delta_val, meta["option_type"], spot, strike, iv, meta["dte"]),
                 "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
-                "liquidity_score": min(100, int((oi / 500) * 100)) # 给 Deribit 一个基于 OI 的动态评分
+                "liquidity_score": min(100, int((oi / 500) * 100))
             })
 
-        # 抓取 Binance 数据
-        try:
-            import requests, time
-            from concurrent.futures import ThreadPoolExecutor
-            def _fetch_bin(url):
-                try:
-                    resp = requests.get(url, timeout=10)
-                    resp.raise_for_status()
-                    return resp.json()
-                except Exception as e:
-                    return {}
-            with ThreadPoolExecutor(max_workers=3) as _tp:
-                _f_mark = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/mark')
-                _f_info = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/exchangeInfo')
-                _f_ticker = _tp.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/ticker')
-                r_mark = r_info = r_ticker = {}
-                try:
-                    r_mark = _f_mark.result(timeout=15)
-                    r_info = _f_info.result(timeout=15)
-                    r_ticker = _f_ticker.result(timeout=15)
-                except Exception:
-                    pass
+    # Process Binance
+    if r_info and r_info.get('optionSymbols'):
+        import time
+        now_ms = time.time() * 1000
+        req_type = _p.option_type.upper()
+        max_delta = _p.max_delta
+        margin_ratio = _p.margin_ratio
+
+        for s in r_info.get('optionSymbols', []):
+            if s['underlying'] != f"{currency}USDT": continue
+            if s['side'] != req_type: continue
             
-            now_ms = time.time() * 1000
-            req_type = _p.option_type.upper()
-            max_delta = _p.max_delta
-            margin_ratio = _p.margin_ratio
+            dte = (s['expiryDate'] - now_ms) / 86400000
+            if dte <= 0: continue
+            if not (use_min_dte <= dte <= use_max_dte): continue
+            
+            b_strike = float(s['strikePrice'])
+            if _p.strike and abs(b_strike - _p.strike) > 0.5: continue
 
-            for s in r_info.get('optionSymbols', []):
-                if s['underlying'] != f"{currency}USDT": continue
-                if s['side'] != req_type: continue
-                
-                dte = (s['expiryDate'] - now_ms) / 86400000
-                if dte <= 0: continue
-                if not (use_min_dte <= dte <= use_max_dte): continue
-                
-                b_strike = float(s['strikePrice'])
-                if _p.strike and abs(b_strike - _p.strike) > 0.5: continue
-                if _p.strike_range:
-                    try:
-                        parts = _p.strike_range.split('-')
-                        lo, hi = float(parts[0]), float(parts[1])
-                        if not (lo <= b_strike <= hi): continue
-                    except Exception: pass
+            mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
+            if not mark or float(mark['markPrice']) <= 0: continue
+            
+            delta_val = abs(float(mark['delta']))
+            if delta_val > max_delta: continue
+            
+            ticker = next((t for t in r_ticker if t['symbol'] == s['symbol']), None)
+            volume = float(ticker['volume']) if ticker else 0
+            bid = float(ticker['bidPrice']) if ticker else 0
+            ask = float(ticker['askPrice']) if ticker else 0
+            
+            if volume < 5: continue
+            
+            spread_pct = ((ask - bid) / bid) * 100 if bid > 0 and ask > 0 else 0
+            if spread_pct >= 10.0: continue
+            
+            strike = float(s['strikePrice'])
+            prem_usd = float(mark['markPrice'])
+            cv = strike * margin_ratio
+            apr = (prem_usd / cv) * (365 / dte) * 100 if cv > 0 else 0
+            iv = float(mark['markIV']) * 100
+            opt_type = 'P' if s['side'] == 'PUT' else 'C'
+            liq_score = min(50, (volume / 100) * 50) + max(0, 50 - (spread_pct * 5))
 
-                mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
-                if not mark or float(mark['markPrice']) <= 0: continue
-                
-                delta_val = abs(float(mark['delta']))
-                if delta_val > max_delta: continue
-                
-                ticker = next((t for t in r_ticker if t['symbol'] == s['symbol']), None)
-                volume = float(ticker['volume']) if ticker else 0
-                bid = float(ticker['bidPrice']) if ticker else 0
-                ask = float(ticker['askPrice']) if ticker else 0
-                
-                if volume < 5: continue
-                
-                spread_pct = 0.0
-                if bid > 0 and ask > 0:
-                    spread_pct = ((ask - bid) / bid) * 100
-                if spread_pct >= 10.0: continue
-                
-                strike = float(s['strikePrice'])
-                prem_usd = float(mark['markPrice'])
-                cv = strike * margin_ratio
-                apr = (prem_usd / cv) * (365 / dte) * 100 if cv > 0 else 0
-                iv = float(mark['markIV']) * 100
-                opt_type = 'P' if s['side'] == 'PUT' else 'C'
-                liq_score = min(50, (volume / 100) * 50) + max(0, 50 - (spread_pct * 5))
+            contracts.append({
+                "symbol": s['symbol'],
+                "platform": "Binance",
+                "expiry": s['symbol'].split('-')[1],
+                "dte": round(dte, 1),
+                "option_type": opt_type,
+                "strike": strike,
+                "apr": round(apr, 1),
+                "premium_usd": round(prem_usd, 2),
+                "delta": round(delta_val, 3),
+                "iv": round(iv, 1),
+                "open_interest": volume,
+                "loss_at_10pct": round(max(0, (strike - spot * 0.9) if opt_type == "P" else (spot * 1.1 - strike)), 2),
+                "breakeven": round(strike - prem_usd if opt_type == 'P' else strike + prem_usd, 0),
+                "distance_spot_pct": round(abs(strike - spot) / spot * 100, 1),
+                "spread_pct": round(spread_pct, 2),
+                "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, opt_type),
+                "pop": _calc_pop(abs(delta_val or 0), opt_type, spot, strike, float(mark.get("markIV", 47) if mark.get("markIV") else 47) / 100.0, int(dte)),
+                "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
+                "liquidity_score": int(liq_score)
+            })
 
-                dist = abs(strike - spot) / spot * 100
-                breakeven = strike - prem_usd if opt_type == 'P' else strike + prem_usd
-                
-                contracts.append({
-                    "symbol": s['symbol'],
-                    "platform": "Binance",
-                    "expiry": s['symbol'].split('-')[1],
-                    "dte": round(dte, 1),
-                    "option_type": opt_type,
-                    "strike": strike,
-                    "apr": round(apr, 1),
-                    "premium_usd": round(prem_usd, 2),
-                    "delta": round(delta_val, 3),
-                    "iv": round(iv, 1),
-                    "open_interest": volume,
-                    "loss_at_10pct": round(max(0, (strike - spot * 0.9) if opt_type == "P" else (spot * 1.1 - strike)), 2),
-                    "breakeven": round(breakeven, 0),
-                    "distance_spot_pct": round(dist, 1),
-                    "spread_pct": round(spread_pct, 2),
-                    "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, opt_type),
-                    "pop": _calc_pop(abs(delta_val or 0), opt_type, spot, strike, float(mark.get("markIV", 47) if mark.get("markIV") else 47) / 100.0, int(dte)),
-                    "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
-                    "liquidity_score": int(liq_score)
-                })
-        except Exception as e:
-            print(f"Binance fetch error in quick_scan: {e}")
+    # Scoring and Filtering
+    def _weighted_score(ct):
+        score = CalculationEngine.weighted_score(
+            apr=ct.get("apr", 0),
+            pop=ct.get("pop", 50),
+            breakeven_pct=ct.get("breakeven_pct", 0),
+            liquidity_score=ct.get("liquidity_score", 0),
+            iv_rank=ct.get("iv_rank", 50),
+            strike=ct.get("strike", 0),
+            spot=spot
+        )
+        ct["_score"] = score
+        return score
 
-        # 按平台分组排序，确保 Deribit 和 Binance 都有展示
-        def _weighted_score(ct):
-            a = min((ct.get("apr", 0) or 0) / 200.0, 1.0)
-            p = (ct.get("pop", 50) or 50) / 100.0
-            b = min((ct.get("breakeven_pct", 0) or 0) / 20.0, 1.0)
-            l = min((ct.get("liquidity_score", 0) or 0) / 100.0, 1.0)
-            ir = (ct.get("iv_rank", 50) or 50)
-            iv = 1.0 - abs(ir - 50) / 50.0
-            ct["_score"] = round(a*0.25 + p*0.25 + b*0.20 + l*0.15 + iv*0.15, 4)
-            return ct["_score"]
+    all_c = sorted(contracts, key=_weighted_score, reverse=True)
+    deribit_list = [c for c in all_c if c.get("platform") == "Deribit"][:15]
+    binance_list = [c for c in all_c if c.get("platform") == "Binance"][:15]
+    
+    contracts = []
+    for i in range(max(len(deribit_list), len(binance_list))):
+        if i < len(deribit_list): contracts.append(deribit_list[i])
+        if i < len(binance_list): contracts.append(binance_list[i])
 
-        all_c = sorted(contracts, key=_weighted_score, reverse=True)
-        deribit_list = [c for c in all_c if c.get("platform") == "Deribit"][:15]
-        binance_list = [c for c in all_c if c.get("platform") == "Binance"][:15]
-        # 各取前15个，交替合并
-        contracts = []
-        for i in range(max(len(deribit_list), len(binance_list))):
-            if i < len(deribit_list):
-                contracts.append(deribit_list[i])
-            if i < len(binance_list):
-                contracts.append(binance_list[i])
+    large_trades_count = len(large_trades)
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-        large_trades = _fetch_large_trades(currency, days=7, limit=50)
-        large_trades_count = len(large_trades)
+    # DB persistence
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    _raw_out = json.dumps({
+        "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
+        "trend_label": dvol_data.get("trend_label", ""),
+        "confidence": dvol_data.get("confidence", ""),
+        "interpretation": dvol_data.get("interpretation", ""),
+        "percentile_7d": dvol_data.get("percentile_7d", 50)
+    }, ensure_ascii=False)
+    cursor.execute("""
+        INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
+            dvol_signal, large_trades_count, large_trades_details, contracts_data, raw_output)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
+          json.dumps(large_trades[:20]), json.dumps(contracts[:30]), _raw_out))
+    conn.commit()
 
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        _raw_out = json.dumps({
-            "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
-            "trend_label": dvol_data.get("trend_label", ""),
-            "confidence": dvol_data.get("confidence", ""),
-            "interpretation": dvol_data.get("interpretation", ""),
-            "percentile_7d": dvol_data.get("percentile_7d", 50)
-        }, ensure_ascii=False)
-        cursor.execute("""
-            INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
-                dvol_signal, large_trades_count, large_trades_details, contracts_data, raw_output)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
-              json.dumps(large_trades[:20]), json.dumps(contracts[:30]), _raw_out))
-        conn.commit()
-        # conn.close()  # managed by connection pool
-
-        return {
-            "success": True,
-            "contracts_count": len(contracts),
-            "spot_price": spot,
-            "timestamp": timestamp,
-            "contracts": contracts[:30],
-            "dvol_current": dvol_current,
-            "dvol_z_score": dvol_z,
-            "dvol_signal": dvol_signal,
-            "dvol_trend": dvol_data.get("trend", ""),
-            "dvol_trend_label": dvol_data.get("trend_label", ""),
-            "dvol_confidence": dvol_data.get("confidence", ""),
-            "dvol_interpretation": dvol_data.get("interpretation", ""),
-            "dvol_percentile_7d": dvol_data.get("percentile_7d", None),
-            "large_trades_count": large_trades_count,
-            "large_trades_details": large_trades[:20]
-        }
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("quick_scan failed: %s", str(e), exc_info=True)
-        return {"success": False, "error": "扫描失败，请稍后重试或检查日志"}
+    return {
+        "success": True,
+        "contracts_count": len(contracts),
+        "spot_price": spot,
+        "timestamp": timestamp,
+        "contracts": contracts[:30],
+        "dvol_current": dvol_current,
+        "dvol_z_score": dvol_z,
+        "dvol_signal": dvol_signal,
+        "dvol_trend": dvol_data.get("trend", ""),
+        "dvol_trend_label": dvol_data.get("trend_label", ""),
+        "dvol_confidence": dvol_data.get("confidence", ""),
+        "dvol_interpretation": dvol_data.get("interpretation", ""),
+        "dvol_percentile_7d": dvol_data.get("percentile_7d", None),
+        "large_trades_count": large_trades_count,
+        "large_trades_details": large_trades[:20]
+    }
 
 
 @app.get("/api/latest")
@@ -1303,7 +1319,12 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         capital_efficiency = net_credit / margin_req if margin_req > 0 else 0
         delta_penalty = max(0, (delta_val - 0.25) * 2)
         dte_weight = min(1.0, dte_val / 45.0)
-        risk_adjusted_score = capital_efficiency * (1 - delta_penalty) * (0.5 + 0.5 * dte_weight)
+        
+        # 应用风险框架修正
+        spot = get_spot_price(params.currency)
+        rf_modifier = RiskFramework.get_score_modifier(strike, spot)
+        
+        risk_adjusted_score = capital_efficiency * (1 - delta_penalty) * (0.5 + 0.5 * dte_weight) * rf_modifier
         annualized_roi = (net_credit / margin_req * 365 / max(dte_val, 1)) if margin_req > 0 else 0
 
         plans.append({
@@ -1662,7 +1683,7 @@ async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Quer
 # Module 1: Volatility Surface & Term Structure
 # ============================================================
 
-def _fetch_derivit_summaries(currency="BTC"):
+def _fetch_deribit_summaries(currency="BTC"):
     try:
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
@@ -1815,7 +1836,7 @@ def _estimate_delta(strike, spot, iv, dte, option_type='P'):
 
 @app.get("/api/charts/vol-surface")
 async def get_vol_surface(currency: str = Query(default="BTC")):
-    summaries = _fetch_derivit_summaries(currency)
+    summaries = _fetch_deribit_summaries(currency)
     if not summaries:
         return {"error": "Cannot fetch Deribit", "surface": [], "term_structure": [], "backwardation": False}
 
@@ -1907,25 +1928,25 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
         "term_structure": term_structure, "backwardation": backwardation,
         "alert": alert_msg, "total": len(surface)}
 
-
-def _get_spot_from_scan():
+def _get_spot_from_scan(currency: str = "BTC"):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT spot_price FROM scan_records WHERE spot_price > 0 ORDER BY timestamp DESC LIMIT 1")
+        cur.execute("SELECT spot_price FROM scan_records WHERE currency=? AND spot_price > 0 ORDER BY timestamp DESC LIMIT 1", (currency,))
         row = cur.fetchone()
-        if row and row[0] and row[0] > 1000:
-            return row[0]
+        if row and float(row[0]) > 0:
+            return float(row[0])
     except Exception:
         pass
     try:
         import urllib.request
-        url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={currency}USDT"
         resp = urllib.request.urlopen(url, timeout=5)
         return float(json.loads(resp.read())["price"])
     except Exception:
         pass
     return 0
+
 
 
 # ============================================================
@@ -1934,7 +1955,7 @@ def _get_spot_from_scan():
 
 @app.get("/api/metrics/max-pain")
 async def get_max_pain(currency: str = Query(default="BTC")):
-    summaries = _fetch_derivit_summaries(currency)
+    summaries = _fetch_deribit_summaries(currency)
     if not summaries:
         return {"error": "No data"}
 
@@ -1954,9 +1975,12 @@ async def get_max_pain(currency: str = Query(default="BTC")):
 
     strikes = sorted(set(p["strike"] for p in parsed))
     expiries = sorted(set((p["expiry"], p["dte"]) for p in parsed))
-    deribit_spot = float(summaries[0].get('underlying_price', 0)) if summaries else 0
-    db_spot = _get_spot_from_scan()
-    spot = deribit_spot if deribit_spot > 1000 else (db_spot if db_spot > 1000 else strikes[len(strikes)//2])
+    
+    try:
+        spot = get_spot_price(currency)
+    except Exception:
+        db_spot = _get_spot_from_scan()
+        spot = db_spot if db_spot > 1000 else (strikes[len(strikes)//2] if strikes else 0)
 
     results = []
     for exp_name, exp_dte in expiries[:4]:
@@ -2063,7 +2087,7 @@ async def sandbox_simulate(params: SandboxParams):
     old_cv = base_strike * params.margin_ratio
     old_margin = old_cv * params.num_contracts
 
-    summaries = _fetch_derivit_summaries("BTC" if "BTC" in params.current_symbol else "ETH")
+    summaries = _fetch_deribit_summaries("BTC" if "BTC" in params.current_symbol else "ETH")
     index_price = spot  # fallback to spot if index not available
     cands = []
     for s in summaries:
@@ -2512,3 +2536,60 @@ def _calc_breakeven_pct(spot, strike, premium_usd, option_type):
     else:
         safety = ((strike + premium_per_unit) - spot) / spot * 100
     return round(max(0, safety), 1)
+
+
+@app.get("/api/bottom-fishing/advice")
+async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
+    """v6.0: 抄底建议 API - 结合风险框架、最大痛点和 GEX"""
+    spot = get_spot_price(currency)
+    status = RiskFramework.get_status(spot)
+    
+    # 获取最大痛点和 GEX
+    try:
+        pain_data = await get_max_pain(currency)
+        nearest_mp = pain_data.get("nearest_mp")
+        mm_signal = pain_data.get("mm_overview", "")
+    except Exception:
+        nearest_mp = None
+        mm_signal = ""
+        
+    advice = []
+    actions = []
+    
+    if status == "NORMAL":
+        advice.append(f"当前价格 ${spot:,.0f} 处于常规区间（高于 $55k）。")
+        advice.append("建议：以获取 200% APR 为目标，保持低杠杆。")
+        actions.append("卖出 OTM Put (Delta 0.15-0.25)")
+    elif status == "NEAR_FLOOR":
+        advice.append(f"当前价格 ${spot:,.0f} 接近常规底 ($55k)。")
+        advice.append("建议：可适当增加仓位，博取高 Theta 收益。")
+        actions.append("卖出 ATM/ITM Put 并在跌破时准备滚仓")
+    elif status == "ADVERSE":
+        advice.append(f"市场处于逆境区 (${spot:,.0f} < $55k)。")
+        advice.append("建议：启用后备资金 ($50k)，高杠杆快平仓，积极执行 Rolling Down & Out。")
+        actions.append("将持仓滚动至 $45k - $50k 区间")
+    elif status == "PANIC":
+        advice.append(f"⚠️ 警告：价格已破极限底 $45k！")
+        advice.append("核心指令：止损并承认失败，保留剩余本金。不要在此区域接货。")
+        actions.append("平掉所有 Put 仓位，保持现金")
+
+    if nearest_mp:
+        advice.append(f"当前最大痛点在 ${nearest_mp:,.0f}。")
+        if spot < nearest_mp:
+            advice.append("价格低于痛点，存在向上吸引力。")
+        else:
+            advice.append("价格高于痛点，存在向下回归压力。")
+
+    return {
+        "currency": currency,
+        "spot": spot,
+        "status": status,
+        "max_pain": nearest_mp,
+        "mm_signal": mm_signal,
+        "advice": advice,
+        "recommended_actions": actions,
+        "floors": {
+            "regular": RiskFramework.REGULAR_FLOOR,
+            "extreme": RiskFramework.EXTREME_FLOOR
+        }
+    }
