@@ -91,7 +91,8 @@ python -m uvicorn main:app --reload --port 8080
 | 版本 | 核心更新内容 |
 |------|---------|
 | **v6.0** | 新增 **BTC动态风险框架** (55k常规底/45k极限底)；新增**抄底建议模块**，结合 Max Pain 与 GEX 生成策略指令；全面启用**并发网络请求**，大幅缩短加载延迟。 |
-| **v5.10** | 修复现货价抓取 Bug，新增大单流向深度分类、PCR 分析指标及最大痛点数据源优化。 |
+| **v5.11** | DVOL实现统一为DeribitOptionsMonitor高级版(动态阈值+置信度+风险笔记)；instrument name解析统一为Monitor版本(缓存+动态DTE) |
+| **v5.10** | 修复sentiment_score中英文key不匹配；sandbox KeyError；roll计算器NameError；PCR月份误匹配；delta缺失导致risk_level恒低；_get_spot_from_scan查错字段 |
 | **v5.9** | 重构大单监控系统，引入交易意图智能判定（如识别“深度ITM保护性买入”）。 |
 | **v5.7** | 重构配置引擎，抽离全局 `config.py`，彻底消除硬编码散落。 |
 | **v5.3** | 引入 `Calculation Engine` 和加权评分系统 (POP, Breakeven, Liquidity)。 |
