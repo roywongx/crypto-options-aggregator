@@ -906,7 +906,8 @@ function updateLastUpdateTime(timestamp) {
         date = new Date(timestamp);
     } else if (timestamp) {
         const parts=timestamp.split(/[- :]/);
-        date=new Date(parts[0],parts[1]-1,parts[2],parts[3],parts[4],parts[5]);
+        const [year, month, day, hour, minute, second] = parts.map(Number);
+        date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
     } else {
         date = new Date();
     }
