@@ -276,15 +276,15 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
             return {}
         trend_arrow = "↑" if result.get("trend") == "上涨" else ("↓" if result.get("trend") == "下跌" else "→")
         return {
-            "current": result.get("current", 0),
-            "z_score": result.get("z_score", 0),
+            "current": result.get("current_dvol", 0),
+            "z_score": result.get("z_score_7d", 0),
             "signal": result.get("signal", "正常区间"),
             "trend": trend_arrow,
             "trend_label": result.get("trend", "震荡"),
             "confidence": result.get("confidence_label", "中"),
             "interpretation": result.get("recommendation", ""),
-            "data_points": result.get("data_points", 0),
-            "percentile_7d": result.get("percentile_7d", 50.0),
+            "data_points": result.get("history_points", 0),
+            "percentile_7d": result.get("iv_percentile_7d", 50.0),
         }
     except Exception as e:
         print(f"获取DVOL失败(高级版): {e}, 回退简单版", file=sys.stderr)
@@ -1774,8 +1774,10 @@ def _parse_inst_name(inst):
         from deribit_options_monitor import DeribitOptionsMonitor
         mon = DeribitOptionsMonitor()
         meta = mon._parse_instrument_name(inst)
+        ot = meta.option_type.upper()
+        ot = 'C' if ot.startswith('C') else 'P' if ot.startswith('P') else ot
         return {"currency": meta.currency, "expiry": inst.split("-")[1],
-                "strike": float(meta.strike), "option_type": meta.option_type, "dte": meta.dte}
+                "strike": float(meta.strike), "option_type": ot, "dte": meta.dte}
     except Exception:
         pass
     import re
@@ -1933,6 +1935,10 @@ def _get_spot_from_scan(currency: str = "BTC"):
 
 @app.get("/api/metrics/max-pain")
 async def get_max_pain(currency: str = Query(default="BTC")):
+    return await _calc_max_pain_internal(currency)
+
+async def _calc_max_pain_internal(currency: str):
+    """内部函数：计算最大痛点"""
     summaries = _fetch_deribit_summaries(currency)
     if not summaries:
         return {"error": "No data"}
@@ -1949,11 +1955,15 @@ async def get_max_pain(currency: str = Query(default="BTC")):
         parsed.append({**meta, "oi": oi, "gamma": gamma})
 
     if not parsed:
-        return {"error": "No OI data"}
+        # Debug: count how many items were filtered
+        total = len(summaries)
+        no_meta = sum(1 for s in summaries if not _parse_inst_name(s.get("instrument_name", "")))
+        oi_zero = sum(1 for s in summaries if float(s.get("open_interest") or 0) < 1)
+        return {"error": "No OI data", "debug": {"total": total, "no_meta": no_meta, "oi_zero": oi_zero, "oi_values": [float(s.get("open_interest") or 0) for s in summaries[:10]]}}
 
     strikes = sorted(set(p["strike"] for p in parsed))
     expiries = sorted(set((p["expiry"], p["dte"]) for p in parsed))
-    
+
     try:
         spot = get_spot_price(currency)
     except Exception:
@@ -2524,7 +2534,7 @@ async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
     
     # 获取最大痛点和 GEX
     try:
-        pain_data = await get_max_pain(currency)
+        pain_data = await _calc_max_pain_internal(currency)
         nearest_mp = pain_data.get("nearest_mp")
         mm_signal = pain_data.get("mm_overview", "")
     except Exception:
