@@ -268,34 +268,39 @@ def get_spot_price(currency: str = "BTC") -> float:
 
 def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
     try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
+        from deribit_options_monitor import DeribitOptionsMonitor
+        mon = DeribitOptionsMonitor()
+        result = mon.get_dvol_signal(currency)
+        if not result:
+            return {}
+        trend_arrow = "↑" if result.get("trend") == "上涨" else ("↓" if result.get("trend") == "下跌" else "→")
+        return {
+            "current": result.get("current", 0),
+            "z_score": result.get("z_score", 0),
+            "signal": result.get("signal", "正常区间"),
+            "trend": trend_arrow,
+            "trend_label": result.get("trend", "震荡"),
+            "confidence": result.get("confidence_label", "中"),
+            "interpretation": result.get("recommendation", ""),
+            "data_points": result.get("data_points", 0),
+            "percentile_7d": result.get("percentile_7d", 50.0),
+        }
+    except Exception as e:
+        print(f"获取DVOL失败(高级版): {e}, 回退简单版", file=sys.stderr)
+        return _get_dvol_simple_fallback(currency)
+def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
+    try:
         base_params = {
             "currency": currency,
             "start_timestamp": int((datetime.utcnow() - timedelta(days=7)).timestamp() * 1000),
             "end_timestamp": int(datetime.utcnow().timestamp() * 1000)
         }
-        
-        data = None
-        for res in ["60", "300", "3600"]:
-            try:
-                p = dict(base_params); p["resolution"] = res
-                response = requests.get(
-                    "https://www.deribit.com/api/v2/public/get_volatility_index_data",
-                    params=p, timeout=10
-                )
-                raw = response.json()
-                pts = raw.get("result", {}).get("data", [])
-                if len(pts) >= 24:
-                    data = raw; break
-            except Exception:
-                continue
-        
-        if data is None:
-            response = requests.get(
-                "https://www.deribit.com/api/v2/public/get_volatility_index_data",
-                params={**base_params, "resolution": "3600"}, timeout=10
-            )
-            data = response.json()
-
+        response = requests.get(
+            "https://www.deribit.com/api/v2/public/get_volatility_index_data",
+            params={**base_params, "resolution": "3600"}, timeout=10
+        )
+        data = response.json()
         if data.get("result") and data["result"].get("data"):
             points = data["result"]["data"]
             if len(points) > 0:
@@ -307,56 +312,20 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
                     z_score = (current - mean_val) / std_val if std_val > 0 else 0
                 else:
                     z_score = 0
-
-                if z_score > 2:
-                    signal = "异常偏高"
-                elif z_score > 1:
-                    signal = "偏高"
-                elif z_score < -2:
-                    signal = "异常偏低"
-                elif z_score < -1:
-                    signal = "偏低"
-                else:
-                    signal = "正常区间"
-
-                # Calculate trend from recent data points
-                trend = "→"
-                trend_label = "震荡"
-                confidence = "中"
-                if len(closes) >= 6:
-                    recent_avg = sum(closes[-3:]) / 3
-                    prev_avg = sum(closes[-6:-3]) / 3
-                    diff_pct = (recent_avg - prev_avg) / prev_avg * 100 if prev_avg > 0 else 0
-                    if diff_pct > 1.5:
-                        trend = "↑"
-                        trend_label = "上涨"
-                    elif diff_pct < -1.5:
-                        trend = "↓"
-                        trend_label = "下跌"
-                
-                # Confidence based on data quality
-                n_points = len(closes)
-                if n_points >= 100:
-                    confidence = "高"
-                elif n_points >= 30:
-                    confidence = "中"
-                else:
-                    confidence = "低"
-
+                if z_score > 2: signal = "异常偏高"
+                elif z_score > 1: signal = "偏高"
+                elif z_score < -2: signal = "异常偏低"
+                elif z_score < -1: signal = "偏低"
+                else: signal = "正常区间"
                 return {
-                    "current": round(current, 2),
-                    "z_score": round(z_score, 2),
-                    "signal": signal,
-                    "trend": trend,
-                    "trend_label": trend_label,
-                    "confidence": confidence,
-                    "interpretation": f"DVOL {round(current,1)}% (Z={round(z_score,2)}), {trend_label}趋势, 置信度{confidence}",
-                    "data_points": n_points,
+                    "current": round(current, 2), "z_score": round(z_score, 2),
+                    "signal": signal, "trend": "→", "trend_label": "震荡",
+                    "confidence": "低", "interpretation": f"DVOL {round(current,1)}% (Z={round(z_score,2)})",
+                    "data_points": len(closes),
                     "percentile_7d": round(sum(1 for x in closes if x <= current) / len(closes) * 100, 1) if closes else 50.0
                 }
         return {}
-    except Exception as e:
-        print(f"获取DVOL失败: {e}", file=sys.stderr)
+    except Exception:
         return {}
 
 
@@ -1800,6 +1769,15 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
 
 
 def _parse_inst_name(inst):
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
+        from deribit_options_monitor import DeribitOptionsMonitor
+        mon = DeribitOptionsMonitor()
+        meta = mon._parse_instrument_name(inst)
+        return {"currency": meta.currency, "expiry": inst.split("-")[1],
+                "strike": float(meta.strike), "option_type": meta.option_type, "dte": meta.dte}
+    except Exception:
+        pass
     import re
     from datetime import datetime
     m = re.match(r'([A-Z]+)-(\d+[A-Z]{3}\d+)-(\d+)-([PC])', inst)
