@@ -506,6 +506,15 @@
                     <h2 class="text-lg font-semibold flex items-center gap-2">
                         <i class="fas fa-list-ol text-orange-500"></i>
                         实时机会列表
+                        <div class="relative ml-4">
+                            <button id="columnToggleBtn" onclick="toggleColumnMenu()" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs flex items-center gap-1">
+                                <i class="fas fa-columns"></i> 列
+                            </button>
+                            <div id="columnMenu" class="hidden absolute left-0 top-full mt-2 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl p-3 min-w-56 z-[99999]" style="z-index: 99999 !important;">
+                                <div class="text-xs text-gray-400 mb-2 px-2">显示/隐藏列</div>
+                                <div id="columnList" class="space-y-1 max-h-64 overflow-y-auto"></div>
+                            </div>
+                        </div>
                     </h2>
                     <div class="flex items-center gap-3">
                         <div class="flex items-center gap-2 text-xs">
@@ -514,16 +523,6 @@
                         </div>
                         <span class="text-xs text-gray-400">按流动性评分排序</span>
                         <span id="contractCount" class="bg-gray-700 px-2 py-0.5 rounded text-xs">0 个合约</span>
-                        <div class="relative">
-                            <button id="columnToggleBtn" onclick="toggleColumnMenu()" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs flex items-center gap-1">
-                                <i class="fas fa-columns"></i> 列
-                                <i class="fas fa-chevron-down text-xs"></i>
-                            </button>
-                            <div id="columnMenu" class="hidden absolute right-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl p-2 min-w-48" style="z-index: 99999 !important;">
-                                <div class="text-xs text-gray-400 mb-2 px-2">显示/隐藏列</div>
-                                <div id="columnList" class="space-y-1"></div>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 <div class="overflow-hidden rounded-lg border border-gray-700/50">
