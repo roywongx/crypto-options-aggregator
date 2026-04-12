@@ -38,6 +38,10 @@ from services.flow_classifier import _classify_flow_heuristic, parse_trade_alert
 from services.spot_price import get_spot_price, get_spot_price_binance, get_spot_price_deribit, _get_spot_from_scan
 from services.strategy_calc import calc_roll_plan, calc_new_plan
 from services.trades import generate_wind_sentiment, fetch_large_trades, fetch_deribit_summaries
+from routers.charts import router as charts_router
+from routers.trades_api import router as trades_router
+from routers.status import router as status_router
+from routers.maxpain import router as maxpain_router
 from db.connection import get_db_connection as _db_conn
 from db.schema import init_database_schema
 
@@ -47,10 +51,6 @@ def get_db_connection():
 _deribit_monitor_cache = {}
 
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
-
-
-
-from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
 
 def _get_deribit_monitor():
@@ -230,6 +230,10 @@ def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):
 app = FastAPI(title="期权监控面板", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 app.include_router(grid_router)
+app.include_router(charts_router)
+app.include_router(trades_router)
+app.include_router(status_router)
+app.include_router(maxpain_router)
 
 
 # CORS middleware for cross-origin requests
@@ -284,7 +288,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
         f_spot = executor.submit(get_spot_price, currency)
         f_dvol = executor.submit(get_dvol_from_deribit, currency)
         f_deribit = executor.submit(_fetch_deribit_summaries, currency)
-        f_trades = executor.submit(_fetch_large_trades, currency, days=7, limit=50)
+        f_trades = executor.submit(_fetch_large_trades, currency, days=1, limit=40)
         
         # Parallel fetch Binance data components
         def _fetch_bin(url):
@@ -520,6 +524,23 @@ def _quick_scan_sync(params: QuickScanParams = None):
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
           json.dumps(large_trades[:20]), json.dumps(contracts[:30]), _raw_out))
+
+    if large_trades and isinstance(large_trades, list):
+        for trade in large_trades:
+            parsed = parse_trade_alert(trade, currency, timestamp)
+            cursor.execute("""
+                INSERT INTO large_trades_history
+                (timestamp, currency, source, title, message, direction, strike, volume,
+                 option_type, flow_label, notional_usd, delta, instrument_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                parsed['timestamp'], parsed['currency'], parsed['source'],
+                parsed['title'], parsed['message'], parsed['direction'],
+                parsed['strike'], parsed['volume'], parsed['option_type'],
+                parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
+                parsed['instrument_name']
+            ))
+
     conn.commit()
 
     return {
@@ -538,62 +559,6 @@ def _quick_scan_sync(params: QuickScanParams = None):
         "dvol_percentile_7d": dvol_data.get("percentile_7d", None),
         "large_trades_count": large_trades_count,
         "large_trades_details": large_trades[:20]
-    }
-
-
-@app.get("/api/latest")
-async def get_latest_scan(currency: str = Query(default="BTC")):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT * FROM scan_records 
-        WHERE currency = ? 
-        ORDER BY timestamp DESC 
-        LIMIT 1
-    """, (currency,))
-
-    row = cursor.fetchone()
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
-
-    if not row:
-        raise HTTPException(status_code=404, detail="暂无数据")
-
-    col_names = [desc[0] for desc in cursor.description] if cursor.description else []
-    rd = dict(zip(col_names, row)) if row and col_names else {}
-
-    _dvol_raw = {}
-    if rd.get('raw_output'):
-        try: _dvol_raw = json.loads(rd['raw_output'])
-        except Exception as e:
-            print(f"[WARN] Fallback failed: {e}")
-
-    try:
-        _ltd = rd.get('large_trades_details', '')
-        large_trades = json.loads(_ltd) if _ltd else []
-    except Exception:
-        large_trades = rd.get('large_trades_details', []) if isinstance(rd.get('large_trades_details'), list) else []
-
-    dvol_trend = _dvol_raw.get('trend', '') if _dvol_raw else ''
-    dvol_trend_label = _dvol_raw.get('trend_label', '') if _dvol_raw else ''
-    dvol_confidence = _dvol_raw.get('confidence', '') if _dvol_raw else ''
-    dvol_interpretation = _dvol_raw.get('interpretation', '') if _dvol_raw else ''
-
-    return {
-        "timestamp": rd.get('timestamp'),
-        "currency": rd.get('currency'),
-        "spot_price": rd.get('spot_price'),
-        "dvol_current": rd.get('dvol_current'),
-        "dvol_z_score": rd.get('dvol_z_score'),
-        "dvol_signal": rd.get('dvol_signal', ''),
-        "dvol_trend": dvol_trend,
-        "dvol_trend_label": dvol_trend_label,
-        "dvol_confidence": dvol_confidence,
-        "dvol_interpretation": dvol_interpretation,
-        "large_trades_count": rd.get('large_trades_count', 0),
-        "large_trades_details": large_trades,
-        "contracts": json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else [],
-        "dvol_raw": _dvol_raw
     }
 
 
@@ -740,326 +705,6 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         }
     }
 
-@app.get("/api/stats")
-async def get_stats():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT COUNT(*) FROM scan_records")
-    total_scans = cursor.fetchone()[0]
-
-    _today = datetime.utcnow().strftime('%Y-%m-%d')
-    cursor.execute("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (_today,))
-    today_scans = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM large_trades_history")
-    total_trades = cursor.fetchone()[0]
-
-    db_size = os.path.getsize(DB_PATH)
-
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
-
-    return {
-        "total_scans": total_scans,
-        "today_scans": today_scans,
-        "total_large_trades": total_trades,
-        "db_size_mb": round(db_size / (1024 * 1024), 2)
-    }
-
-
-
-
-
-
-@app.get("/api/charts/pcr")
-async def get_pcr_chart(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT timestamp, large_trades_details FROM scan_records
-        WHERE currency = ? AND timestamp > datetime('now', ?||' hours')
-        ORDER BY timestamp ASC
-    """, (currency, -hours))
-    rows = cursor.fetchall()
-    result = []
-    for r in rows:
-        try:
-            trades = json.loads(r[1]) if r[1] else []
-            put_vol = sum(t.get('notional_usd', 0) for t in trades if t.get('instrument_name', '').endswith('-P') and t.get('notional_usd', 0) > 0)
-            call_vol = sum(t.get('notional_usd', 0) for t in trades if t.get('instrument_name', '').endswith('-C') and t.get('notional_usd', 0) > 0)
-            pcr = put_vol / call_vol if call_vol > 0 else None
-            if pcr is not None:
-                result.append({"timestamp": r[0], "pcr": round(pcr, 3)})
-        except Exception:
-            pass
-    return {"currency": currency, "data": result}
-
-@app.get("/api/export/csv")
-async def export_csv(currency: str = "BTC", hours: int = 168):
-    import csv, io
-    conn = get_db_connection()
-    all_contracts = []
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT contracts_data FROM scan_records
-            WHERE currency = ? AND timestamp > datetime('now', ?||' hours')
-        """, (currency, -hours))
-        for row in cursor.fetchall():
-            try:
-                contracts = json.loads(row[0]) if row[0] else []
-                all_contracts.extend(contracts)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    headers = ["合约","平台","类型","行权价","DTE","Delta","Gamma","Vega","IV%","APR%","POP%",
-               "权利金$","流动性","-10%亏损","盈亏平衡$","安全垫%","持仓量","价差%","IV_Rank","评分"]
-    writer.writerow(headers)
-    for c in all_contracts:
-        writer.writerow([
-            c.get('instrument_name', ''), c.get('platform', ''), c.get('option_type', ''),
-            c.get('strike', ''), c.get('dte', ''), c.get('delta', ''), c.get('gamma', ''),
-            c.get('vega', ''), c.get('iv', ''), c.get('apr', ''), c.get('pop', ''),
-            c.get('premium_usd', ''), c.get('liquidity_score', ''), c.get('loss_at_10pct', ''),
-            c.get('breakeven_usd', ''), c.get('breakeven_pct', ''), c.get('open_interest', ''),
-            c.get('spread_pct', ''), c.get('iv_rank', ''), c.get('_score', '')
-        ])
-
-    from fastapi.responses import Response
-    return Response(
-        content=output.getvalue(),
-        media_type="text/csv; charset=utf-8-sig",
-        headers={"Content-Disposition": f"attachment; filename=options_{currency}_{hours}h.csv"}
-    )
-
-@app.get("/api/dvol-advice")
-async def get_dvol_advice(currency: str = Query(default="BTC")):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT raw_output FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
-    row = cursor.fetchone()
-    dvol_raw = {}
-    if row and row[0]:
-        try:
-            dvol_raw = json.loads(row[0])
-        except Exception:
-            pass
-
-    _inner = dvol_raw.get("dvol_raw", dvol_raw)
-    dvol_snapshot = {
-        "current": _inner.get("current", 0),
-        "z_score": _inner.get("z_score", 0),
-        "signal": _inner.get("signal", ""),
-        "trend": dvol_raw.get("trend", _inner.get("trend", "")),
-        "trend_label": dvol_raw.get("trend_label", _inner.get("trend_label", "")),
-        "percentile_7d": dvol_raw.get("percentile_7d", _inner.get("percentile_7d", 50)),
-        "confidence": dvol_raw.get("confidence", _inner.get("confidence", "")),
-        "interpretation": dvol_raw.get("interpretation", _inner.get("interpretation", ""))
-    }
-
-    base_params = {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15}
-    adapted = adapt_params_by_dvol(base_params, dvol_raw)
-
-    put_standard = dict(base_params)
-    put_standard["option_type"] = "PUT"
-    put_adapted = adapt_params_by_dvol(put_standard, dvol_raw)
-
-    call_standard = dict(base_params)
-    call_standard["max_delta"] = 0.45
-    call_standard["option_type"] = "CALL"
-    call_adapted = adapt_params_by_dvol(call_standard, dvol_raw)
-
-    return {
-        "dvol_snapshot": dvol_snapshot,
-        "adapted_presets": {
-            "PUT_standard": {
-                "adjustment_level": put_adapted.get("_adjustment_level", "none"),
-                "advice": put_adapted.get("_dvol_advice", []),
-                "params": {k: v for k, v in put_adapted.items() if not k.startswith("_")}
-            },
-            "CALL_standard": {
-                "adjustment_level": call_adapted.get("_adjustment_level", "none"),
-                "advice": call_adapted.get("_dvol_advice", []),
-                "params": {k: v for k, v in call_adapted.items() if not k.startswith("_")}
-            }
-        }
-    }
-
-
-@app.get("/api/health")
-async def health_check():
-    checks = {}
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode")
-        mode = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM scan_records")
-        count = cursor.fetchone()[0]
-        # conn.close()  # threading.local() manages per-thread connection lifecycle
-        checks["database"] = {"status": "ok", "mode": mode, "records": count}
-    except Exception as e:
-        checks["database"] = {"status": "error", "message": str(e)}
-
-    for name, url in [
-        ("deribit_api", "https://www.deribit.com/api/v2/public/get_time"),
-        ("binance_api", "https://api.binance.com/api/v3/ping"),
-    ]:
-        try:
-            r = requests.get(url, timeout=5)
-            checks[name] = {"status": "ok" if r.status_code == 200 else "error", "code": r.status_code}
-        except Exception as e:
-            checks[name] = {"status": "error", "message": str(e)[:100]}
-
-    all_ok = all(c.get("status") == "ok" for c in checks.values())
-    return {"status": "healthy" if all_ok else "degraded", "checks": checks}
-
-
-@app.get("/api/charts/apr")
-async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
-    import json as _json
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(hours=hours)
-
-    cursor.execute("""
-        SELECT MAX(timestamp) as ts, contracts_data
-        FROM scan_records 
-        WHERE timestamp > ? AND currency = ?
-        GROUP BY strftime('%Y-%m-%d %H:00', timestamp)
-        ORDER BY ts ASC
-    """, (since.strftime('%Y-%m-%d %H:%M:%S'), currency))
-
-    raw_rows = cursor.fetchall()
-
-    STD_MAX_DELTA = 0.25
-    STD_MIN_DTE = 14
-    STD_MAX_DTE = 35
-    STD_OPT_TYPE = 'P'
-    APR_MIN, APR_MAX = 1.0, 500.0
-
-    result = []
-    for r in raw_rows:
-        ts = r[0]
-        cdata = r[1]
-        safe_aprs = []
-        all_aprs = []
-        try:
-            arr = _json.loads(cdata) if isinstance(cdata, str) else cdata
-            if isinstance(arr, list):
-                for c in arr:
-                    if not isinstance(c, dict):
-                        continue
-                    v = c.get('apr')
-                    if not isinstance(v, (int, float)) or not (APR_MIN <= v <= APR_MAX):
-                        continue
-                    all_aprs.append(v)
-                    ot = str(c.get('option_type', '')).upper()
-                    if ot not in ('P', 'PUT'):
-                        continue
-                    d = c.get('dte')
-                    if not isinstance(d, (int, float)) or not (STD_MIN_DTE <= d <= STD_MAX_DTE):
-                        continue
-                    delta = c.get('delta')
-                    if not isinstance(delta, (int, float)) or abs(delta) > STD_MAX_DELTA:
-                        continue
-                    safe_aprs.append(v)
-        except Exception:
-            pass
-
-        if safe_aprs:
-            safe_aprs.sort()
-            n = len(safe_aprs)
-            p75_idx = min(int(n * 0.75), n - 1)
-            best_safe = round(safe_aprs[-1], 1)
-            p75_safe = round(safe_aprs[p75_idx], 1)
-            avg_safe = round(sum(safe_aprs) / n, 1)
-        elif all_aprs:
-            best_safe = round(max(all_aprs), 1)
-            all_aprs.sort()
-            n_all = len(all_aprs)
-            p75_idx = min(int(n_all * 0.75), n_all - 1)
-            p75_safe = round(all_aprs[p75_idx], 1)
-            avg_safe = round(sum(all_aprs) / n_all, 1)
-        else:
-            best_safe = None
-            p75_safe = None
-            avg_safe = None
-
-        if all_aprs:
-            all_aprs.sort()
-            n_all = len(all_aprs)
-            avg_all = round(sum(all_aprs) / n_all, 1)
-        else:
-            avg_all = None
-
-        result.append({
-            "time": ts,
-            "best_safe_apr": best_safe,
-            "p75_safe_apr": p75_safe,
-            "avg_safe_apr": avg_safe,
-            "avg_apr": avg_all,
-            "safe_count": len(safe_aprs),
-            "total_count": len(all_aprs)
-        })
-
-    _prev_best = None
-    _prev_p75 = None
-    _prev_avg = None
-    for item in result:
-        if item["best_safe_apr"] is not None:
-            _prev_best = item["best_safe_apr"]
-            _prev_p75 = item["p75_safe_apr"]
-            _prev_avg = item["avg_safe_apr"]
-        else:
-            if _prev_best is not None and item["avg_apr"] is not None:
-                ratio = _prev_avg / item["avg_apr"] if item["avg_apr"] else 1
-                item["best_safe_apr"] = round(_prev_best * ratio, 1)
-                item["p75_safe_apr"] = round(_prev_p75 * ratio, 1)
-                item["avg_safe_apr"] = round(_prev_avg * ratio, 1)
-
-    return result
-
-
-@app.get("/api/charts/dvol")
-async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(hours=hours)
-
-    if hours <= 24:
-        grp = "strftime('%Y-%m-%d %H:00', timestamp)"
-    elif hours <= 168:
-        grp = "strftime('%Y-%m-%d %H:00', timestamp)"
-    else:
-        grp = "strftime('%Y-%m-%d', timestamp)"
-
-    cursor.execute(f"""
-        SELECT {grp} as ts,
-               AVG(dvol_current) as dvol,
-               AVG(dvol_z_score) as z_score,
-               MAX(dvol_signal) as signal
-        FROM scan_records 
-        WHERE timestamp > ? AND currency = ? AND dvol_current IS NOT NULL
-        GROUP BY ts
-        ORDER BY ts ASC
-    """, (since.strftime('%Y-%m-%d %H:%M:%S'), currency))
-
-    rows = cursor.fetchall()
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
-
-    return [{"time": r[0], "dvol": round(r[1], 2) if r[1] else 0, "z_score": round(r[2], 2) if r[2] else 0, "signal": r[3]} for r in rows]
-
-
-# ============================================================
-# Module 1: Volatility Surface & Term Structure
-# ============================================================
-
 def _fetch_deribit_summaries(currency="BTC"):
     try:
         mon = _get_deribit_monitor()
@@ -1174,228 +819,6 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
 
 
 # DEPRECATED: Use mark['delta'] from API instead. Kept for Deribit branch fallback only.
-@app.get("/api/charts/vol-surface")
-async def get_vol_surface(currency: str = Query(default="BTC")):
-    summaries = _fetch_deribit_summaries(currency)
-    if not summaries:
-        return {"error": "Cannot fetch Deribit", "surface": [], "term_structure": [], "backwardation": False}
-
-    dte_buckets = [7, 14, 30, 60, 90]
-    delta_levels = [-0.4, -0.2, 0.0, 0.2, 0.4]
-    delta_labels = ["-40D", "-20D", "ATM", "+20D", "+40D"]
-    surface = []
-    term_data = {d: [] for d in dte_buckets}
-
-    deribit_sp = float(summaries[0].get('underlying_price', 0)) if summaries else 0
-    spot = deribit_sp if deribit_sp > 1000 else (_get_spot_from_scan() or 70000)
-
-    for s in summaries:
-        meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta.dte < 1 or meta.dte > 180:
-            continue
-        iv_pct = float(s.get("mark_iv") or 0)
-        if iv_pct <= 5 or iv_pct > 500:
-            continue
-        oi = float(s.get("open_interest") or 0)
-        strike = meta.strike
-        moneyness = (strike - spot) / spot if spot > 0 else 0
-
-        bucket = "ATM"
-        if meta.option_type == "P":
-            if moneyness < -0.08: bucket = "-40D"
-            elif moneyness < -0.03: bucket = "-20D"
-            elif moneyness > 0.03: bucket = "+20D"
-            elif moneyness > 0.08: bucket = "+40D"
-        else:
-            if moneyness > 0.08: bucket = "+40D"
-            elif moneyness > 0.03: bucket = "+20D"
-            elif moneyness < -0.03: bucket = "-20D"
-            elif moneyness < -0.08: bucket = "-40D"
-
-        surface.append({"dte": meta.dte, "strike": strike,
-            "type": meta.option_type, "iv": round(iv_pct, 1),
-            "bucket": bucket, "oi": round(oi, 1), "moneyness": round(moneyness, 3)})
-
-        for db in dte_buckets:
-            window = max(5, int(db * 0.6))
-            if abs(meta.dte - db) <= window:
-                term_data[db].append(iv_pct)
-                break
-        else:
-            nearest = min(dte_buckets, key=lambda x: abs(meta.dte - x))
-            term_data[nearest].append(iv_pct)
-
-    term_structure = []
-    for d in dte_buckets:
-        ivs = term_data[d]
-        avg_iv = sum(ivs) / len(ivs) if ivs else None
-        term_structure.append({"dte": d, "avg_iv": round(avg_iv, 1) if avg_iv else None,
-            "count": len(ivs), "min_iv": round(min(ivs), 1) if ivs else None,
-            "max_iv": round(max(ivs), 1) if ivs else None})
-
-    for i, ts in enumerate(term_structure):
-        if ts["avg_iv"] is None:
-            left = right = None
-            for j in range(i-1, -1, -1):
-                if term_structure[j]["avg_iv"] is not None: left = j; break
-            for j in range(i+1, len(term_structure)):
-                if term_structure[j]["avg_iv"] is not None: right = j; break
-            if left is not None and right is not None:
-                t_l, t_r, t_c = term_structure[left]["dte"], term_structure[right]["dte"], ts["dte"]
-                v_l, v_r = term_structure[left]["avg_iv"], term_structure[right]["avg_iv"]
-                ts["avg_iv"] = round(v_l + (v_r - v_l) * (t_c - t_l) / (t_r - t_l), 1)
-                ts["interpolated"] = True
-            elif left is not None:
-                ts["avg_iv"] = term_structure[left]["avg_iv"]; ts["interpolated"] = True
-            elif right is not None:
-                ts["avg_iv"] = term_structure[right]["avg_iv"]; ts["interpolated"] = True
-
-    backwardation = False
-    alert_msg = ""
-    valid_ts = [t for t in term_structure if t["avg_iv"] is not None]
-    if len(valid_ts) >= 2:
-        near = [t for t in valid_ts if t["dte"] <= 14]
-        far = [t for t in valid_ts if t["dte"] >= 30]
-        if near and far:
-            na = sum(t["avg_iv"] for t in near) / len(near)
-            fa = sum(t["avg_iv"] for t in far) / len(far)
-            backwardation = na > fa * 1.02
-            if backwardation:
-                alert_msg = f"BACKWARDATION! Near={na:.1f}% > Far={fa:.1f}%"
-
-    return {"currency": currency, "spot_price": _get_spot_from_scan(),
-        "surface": sorted(surface, key=lambda x: (x["dte"], x["strike"]))[:500],
-        "term_structure": term_structure, "backwardation": backwardation,
-        "alert": alert_msg, "total": len(surface)}
-
-
-
-# ============================================================
-# Module 2: Max Pain & Gamma Exposure (GEX)
-# ============================================================
-
-@app.get("/api/metrics/max-pain")
-async def get_max_pain(currency: str = Query(default="BTC")):
-    return await _calc_max_pain_internal(currency)
-
-async def _calc_max_pain_internal(currency: str):
-    """内部函数：计算最大痛点"""
-    summaries = _fetch_deribit_summaries(currency)
-    if not summaries:
-        return {"error": "No data"}
-
-    parsed = []
-    for s in summaries:
-        meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta.dte < 1:
-            continue
-        oi = float(s.get("open_interest") or 0)
-        gamma = float(s.get("gamma") or 0)
-        if oi < 1:
-            continue
-        parsed.append({"strike": meta.strike, "expiry": meta.expiry, "dte": meta.dte, "option_type": meta.option_type, "oi": oi, "gamma": gamma})
-
-    if not parsed:
-        # Debug: count how many items were filtered
-        total = len(summaries)
-        no_meta = sum(1 for s in summaries if not _parse_inst_name(s.get("instrument_name", "")))
-        oi_zero = sum(1 for s in summaries if float(s.get("open_interest") or 0) < 1)
-        return {"error": "No OI data", "debug": {"total": total, "no_meta": no_meta, "oi_zero": oi_zero, "oi_values": [float(s.get("open_interest") or 0) for s in summaries[:10]]}}
-
-    strikes = sorted(set(p["strike"] for p in parsed))
-    expiries = sorted(set((p["expiry"], p["dte"]) for p in parsed))
-
-    try:
-        spot = get_spot_price(currency)
-    except Exception:
-        db_spot = _get_spot_from_scan()
-        spot = db_spot if db_spot > 1000 else (strikes[len(strikes)//2] if strikes else 0)
-
-    results = []
-    for exp_name, exp_dte in expiries[:4]:
-        calls = [p for p in parsed if p["expiry"] == exp_name and p["option_type"] == "C"]
-        puts = [p for p in parsed if p["expiry"] == exp_name and p["option_type"] == "P"]
-        if not calls and not puts:
-            continue
-        co_map = {p["strike"]: p["oi"] for p in calls}
-        po_map = {p["strike"]: p["oi"] for p in puts}
-        cg_map = {p["strike"]: p["gamma"] * p["oi"] for p in calls}
-        pg_map = {p["strike"]: p["gamma"] * p["oi"] for p in puts}
-
-        mp_strike = strikes[0]
-        min_pain = float('inf')
-        pain_at_s = 0
-        pc = []
-        gc = []
-        flip = None
-        prev_sign = None
-
-        for ts in strikes:
-            cp = sum(max(0, ts - k) * v for k, v in co_map.items())
-            pp = sum(max(0, k - ts) * v for k, v in po_map.items())
-            tp = cp + pp
-            pc.append({"strike": ts, "pain": round(tp, 0), "call_pain": round(cp, 0), "put_pain": round(pp, 0)})
-            if tp < min_pain:
-                min_pain = tp
-                mp_strike = ts
-            if int(round(ts)) == int(round(spot)):
-                pain_at_s = tp
-            ng = sum(g for k, g in cg_map.items() if k >= ts) + sum(-g for k, g in pg_map.items() if k <= ts)
-            call_oi_above = sum(v for k, v in co_map.items() if k >= ts)
-            put_oi_below = sum(v for k, v in po_map.items() if k <= ts)
-            net_oi_exposure = call_oi_above - put_oi_below
-            if ng != 0:
-                ngex = ng * spot * spot / 100
-            else:
-                ngex = net_oi_exposure * 100
-            gc.append({"strike": ts, "gex": round(ngex, 0), "net_gamma": round(ng, 2),
-                       "net_oi_exposure": round(net_oi_exposure, 0),
-                       "call_oi_above": round(call_oi_above, 0), "put_oi_below": round(put_oi_below, 0)})
-            cs = 1 if net_oi_exposure >= 0 else -1
-            if prev_sign is not None and cs != prev_sign:
-                flip = ts
-            prev_sign = cs
-
-        dist = ((mp_strike - spot) / spot * 100) if spot > 0 else 0
-        tco = sum(co_map.values())
-        tpo = sum(po_map.values())
-        pcr = tpo / tco if tco > 0 else 0
-        sig = "中性"
-        if dist > 3:
-            sig = "偏多: 价格在最大痛点下方"
-        elif dist < -3:
-            sig = "偏空: 价格在最大痛点上方"
-        mm = ""
-        if flip:
-            if spot < flip:
-                mm = f"⚠️ 危险: 现货 ${spot:,.0f} < Flip点 ${flip:,.0f} | 空头Gamma区，波动放大风险"
-            else:
-                mm = f"✅ 安全: 现货 ${spot:,.0f} > Flip点 ${flip:,.0f} | 多头Gamma区，波动受抑"
-
-        results.append({"expiry": exp_name, "dte": exp_dte, "max_pain": round(mp_strike, 0),
-            "dist_pct": round(dist, 2), "pain_at_spot": round(pain_at_s, 0),
-            "pcr": round(pcr, 3), "call_oi": round(tco, 0), "put_oi": round(tpo, 0),
-            "signal": sig, "pain_curve": pc, "gex_curve": gc,
-            "flip_point": flip, "mm_signal": mm})
-
-    best = results[0] if results else {}
-    return {"currency": currency, "spot": round(spot, 0), "expiries": results,
-        "nearest_mp": best.get("max_pain"), "nearest_dist": best.get("dist_pct"),
-        "signal": best.get("signal", ""), "mm_overview": best.get("mm_signal", "")}
-
-
-# ============================================================
-# Module 3: Martingale Sandbox Simulation Engine
-# ============================================================
-
-class SandboxParams(BaseModel):
-    current_symbol: str = Field(default="BTC-26APR26-65000-P")
-    crash_price: float = Field(default=45000.0, gt=1000)
-    reserve_capital: float = Field(default=50000.0, ge=1000)
-    num_contracts: int = Field(default=1)
-    margin_ratio: float = Field(default=0.20, ge=0.05, le=1.0)
-
-
 @app.post("/api/sandbox/simulate")
 async def sandbox_simulate(params: SandboxParams):
     spot = _get_spot_from_scan()
@@ -1494,326 +917,23 @@ async def sandbox_simulate(params: SandboxParams):
         "status": bp.get("status", "none") if bp else "no_candidates", "n_cands": len(plans)}
 
 
-
-@app.get("/api/trades/history")
-async def get_trades_history(
-    days: int = Query(default=7),
-    direction: str = Query(default=""),
-    source: str = Query(default="")
-):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(days=days)
-    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
-
-    query = """
-        SELECT * FROM large_trades_history 
-        WHERE timestamp > ?
-    """
-    params = [since_str]
-
-    if direction:
-        query += " AND direction = ?"
-        params.append(direction)
-    if source:
-        query += " AND source = ?"
-        params.append(source)
-
-    query += " ORDER BY timestamp DESC LIMIT 100"
-
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    cols = [desc[0] for desc in cursor.description]
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
-
-    result = []
-    for row in rows:
-        item = dict(zip(cols, row))
-        flow = item.get('flow_label', '')
-        if flow and flow in FLOW_LABEL_MAP:
-            item['flow_label_cn'] = FLOW_LABEL_MAP[flow][0]
-            item['flow_desc'] = FLOW_LABEL_MAP[flow][1]
-        result.append(item)
-
-    return result
-
-
-@app.get("/api/trades/strike-distribution")
-async def get_strike_distribution(
-    currency: str = Query(default="BTC"),
-    days: int = Query(default=30)
-):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(days=days)
-    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
-    
-    spot = get_spot_price(currency)
-
-    cursor.execute("""
-        SELECT strike, direction, COUNT(*) as count, SUM(volume) as total_volume,
-               SUM(notional_usd) as total_notional,
-               SUM(CASE WHEN direction='buy' THEN 1 ELSE 0 END) as buys,
-               SUM(CASE WHEN direction='sell' THEN 1 ELSE 0 END) as sells
-        FROM large_trades_history 
-        WHERE currency = ? AND timestamp > ?
-              AND strike IS NOT NULL AND strike > ? AND strike < ?
-        GROUP BY strike, direction
-        ORDER BY count DESC
-        LIMIT 50
-    """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
-
-    rows = cursor.fetchall()
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
-
-    distribution = []
-    for row in rows:
-        distribution.append({
-            "strike": row[0],
-            "direction": row[1],
-            "count": row[2],
-            "total_volume": row[3] or 0,
-            "total_notional": row[4] or 0,
-            "buys": row[5] or 0,
-            "sells": row[6] or 0
-        })
-
-    return distribution
-
-
-@app.get("/api/trades/wind-analysis")
-async def get_wind_analysis(
-    currency: str = Query(default="BTC"),
-    days: int = Query(default=30)
-):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(days=days)
-    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
-
-    spot = get_spot_price(currency)
-
-    cursor.execute("""
-        SELECT strike, option_type, direction, COUNT(*) as cnt,
-               SUM(notional_usd) as total_notional,
-               SUM(CASE WHEN direction='buy' THEN 1 ELSE 0 END) as buys,
-               SUM(CASE WHEN direction='sell' THEN 1 ELSE 0 END) as sells,
-               SUM(volume) as total_volume,
-               MAX(instrument_name) as last_inst,
-               MAX(flow_label) as flow_label
-        FROM large_trades_history
-        WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
-              AND strike > ? AND strike < ?
-              AND option_type IS NOT NULL AND option_type != ''
-        GROUP BY strike, option_type
-        ORDER BY strike ASC
-    """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
-
-    strike_rows = cursor.fetchall()
-
-    cursor.execute("""
-        SELECT direction, option_type, delta, strike, notional_usd
-        FROM large_trades_history 
-        WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
-              AND strike > ? AND strike < ?
-        ORDER BY notional_usd DESC
-    """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
-
-    flow_rows = cursor.fetchall()
-
-    cursor.execute("""
-        SELECT COUNT(*), 
-               SUM(CASE WHEN direction='buy' THEN 1 ELSE 0 END),
-               SUM(CASE WHEN direction='sell' THEN 1 ELSE 0 END),
-               SUM(notional_usd)
-        FROM large_trades_history 
-        WHERE currency = ? AND timestamp > ?
-    """, (currency, since_str))
-    totals = cursor.fetchone()
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
-
-    total_trades = totals[0] or 0
-    total_buys = totals[1] or 0
-    total_sells = totals[2] or 0
-    total_notional = totals[3] or 0
-
-    strike_flows = []
-    max_abs_net = 1
-    for row in strike_rows:
-        strike = float(row[0] or 0)
-        option_type = row[1] or ''
-        buys = int(row[5] or 0)
-        sells = int(row[6] or 0)
-        net = buys - sells
-        notional = row[4] or 0
-        vol = row[7] or 0
-        flow = row[9] or ''
-        max_abs_net = max(max_abs_net, abs(net))
-
-        dist_pct = ((strike - spot) / spot * 100) if spot > 0 else 0
-
-        strike_flows.append({
-            "strike": strike,
-            "option_type": option_type,
-            "buys": buys,
-            "sells": sells,
-            "net": net,
-            "count": buys + sells,
-            "notional": notional,
-            "volume": vol,
-            "dominant_flow": flow,
-            "dist_from_spot_pct": round(dist_pct, 1)
-        })
-
-    strike_flows.sort(key=lambda x: x['strike'])
-
-    support_level = None
-    resistance_level = None
-    heaviest_strike = None
-    max_support_net = -99999
-    max_resist_net = -99999
-    max_count = 0
-
-    for sf in strike_flows:
-        if sf['count'] > max_count:
-            max_count = sf['count']
-            heaviest_strike = sf['strike']
-        if sf['strike'] < spot and sf['net'] > max_support_net:
-            max_support_net = sf['net']
-            support_level = sf['strike']
-        if sf['strike'] > spot and (-sf['net']) > max_resist_net:
-            max_resist_net = -sf['net']
-            resistance_level = sf['strike']
-
-    # 8种核心分类映射
-    CORE_FLOW_MAP = {
-        "sell_put_deep_itm": ("保护性对冲", "深度ITM Sell Put，强烈看涨"),
-        "sell_put_atm_itm": ("收权利金", "ATM Sell Put，温和看涨+收权"),
-        "sell_put_otm": ("备兑开仓", "OTM Sell Put，纯收权"),
-        "buy_put_deep_itm": ("保护性买入", "深度ITM Buy Put，机构对冲"),
-        "buy_put_atm": ("看跌投机", "ATM Buy Put，短线看跌"),
-        "buy_put_otm": ("看跌投机", "OTM Buy Put，投机看跌"),
-        "sell_call_otm": ("备兑开仓", "OTM Sell Call，备兑开仓"),
-        "sell_call_itm": ("改仓操作", "ITM Sell Call，改仓"),
-        "buy_call_atm_itm": ("追涨建仓", "ATM Buy Call，顺势追涨"),
-        "buy_call_otm": ("看涨投机", "OTM Buy Call，博反弹"),
-        "unknown": ("未知流向", "无法判断交易意图"),
-    }
-
-    flow_agg = {}
-    for row in flow_rows:
-        direction = row[0] or ''
-        opt_type = row[1] or ''
-        delta_val = row[2] or 0
-        strike = row[3] or 0
-        notional = row[4] or 0
-
-        fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
-        if fl not in flow_agg:
-            flow_agg[fl] = {"count": 0, "notional": 0}
-        flow_agg[fl]["count"] += 1
-        flow_agg[fl]["notional"] += notional
-
-    # 合并为8种核心分类
-    core_agg = {}
-    for fl, agg in flow_agg.items():
-        core_info = CORE_FLOW_MAP.get(fl)
-        if core_info:
-            core_name = core_info[0]
-        else:
-            core_name = fl
-        if core_name not in core_agg:
-            core_agg[core_name] = {"count": 0, "notional": 0, "desc": core_info[1] if core_info else ""}
-        core_agg[core_name]["count"] += agg["count"]
-        core_agg[core_name]["notional"] += agg["notional"]
-
-    flow_breakdown = []
-    dominant_flow = ""
-    max_flow_cnt = 0
-    for fl, agg in sorted(core_agg.items(), key=lambda x: x[1]["count"], reverse=True):
-        cnt = agg["count"]
-        notional = agg["notional"]
-        pct = (cnt / total_trades * 100) if total_trades > 0 else 0
-        flow_breakdown.append({
-            "label": fl,
-            "label_cn": fl,
-            "desc": agg.get("desc", ""),
-            "count": cnt,
-            "notional": round(notional, 0),
-            "pct": round(pct, 1)
-        })
-        if fl != 'unknown' and cnt > max_flow_cnt:
-            max_flow_cnt = cnt
-            dominant_flow = fl
-
-    if not dominant_flow:
-        dominant_flow = 'unknown'
-
-    buy_ratio = total_buys / total_trades if total_trades > 0 else 0.5
-
-    sentiment_score = 0
-    if buy_ratio > 0.55:
-        sentiment_score = min(3, int((buy_ratio - 0.5) * 20))
-    elif buy_ratio < 0.45:
-        sentiment_score = max(-3, int((buy_ratio - 0.5) * 20))
-
-    bullish_flows = ('保护性对冲', '收权利金', '备兑开仓', '追涨建仓', '看涨投机')
-    bearish_flows = ('保护性买入', '看跌投机', '改仓操作')
-    if dominant_flow in bullish_flows:
-        sentiment_score += 1
-    elif dominant_flow in bearish_flows:
-        sentiment_score -= 1
-
-    summary = {
-        "total_trades": total_trades,
-        "total_notional": round(total_notional, 0),
-        "buy_ratio": round(buy_ratio, 2),
-        "sell_ratio": round(1 - buy_ratio, 2),
-        "sentiment_score": sentiment_score,
-        "dominant_flow": dominant_flow,
-        "key_levels": {
-            "heaviest_strike": heaviest_strike,
-            "net_support": support_level,
-            "net_resistance": resistance_level,
-        },
-        "spot_price": round(spot, 0) if spot else 0,
-        "time_range": f"近{days}天",
-    }
-
-    sentiment_text = generate_wind_sentiment(summary, spot)
-
-    return {
-        "summary": summary,
-        "sentiment_text": sentiment_text,
-        "strike_flows": strike_flows,
-        "flow_breakdown": flow_breakdown,
-    }
-
-
-# STRATEGY_PRESETS moved to config.py
-# adapt_params_by_dvol moved to services/dvol_analyzer.py
-# _calc_pop moved to services/dvol_analyzer.py
-# _calc_breakeven_pct moved to services/risk_framework.py
-
-
 @app.get("/api/bottom-fishing/advice")
 async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
-    """v6.0: 抄底建议 API - 结合风险框架、最大痛点和 GEX"""
     spot = get_spot_price(currency)
     status = RiskFramework.get_status(spot)
-    
-    # 获取最大痛点和 GEX
+
     try:
+        from routers.maxpain import _calc_max_pain_internal
         pain_data = await _calc_max_pain_internal(currency)
         nearest_mp = pain_data.get("nearest_mp")
         mm_signal = pain_data.get("mm_overview", "")
     except Exception:
         nearest_mp = None
         mm_signal = ""
-        
+
     advice = []
     actions = []
-    
+
     if status == "NORMAL":
         advice.append(f"当前价格 ${spot:,.0f} 处于常规区间（高于 $55k）。")
         advice.append("建议：以获取 200% APR 为目标，保持低杠杆。")
@@ -1851,3 +971,15 @@ async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
             "extreme": RiskFramework.EXTREME_FLOOR
         }
     }
+
+
+# v7.0: 综合风险评估API
+@app.get("/api/risk/assess")
+async def get_risk_assessment(currency: str = Query(default="BTC")):
+    """获取综合风险评估"""
+    from services.unified_risk_assessor import UnifiedRiskAssessor
+    
+    spot = get_spot_price(currency)
+    assessor = UnifiedRiskAssessor()
+    
+    return assessor.assess_comprehensive_risk(spot, currency)

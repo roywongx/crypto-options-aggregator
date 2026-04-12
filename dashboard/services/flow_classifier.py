@@ -106,19 +106,24 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
             option_type = 'CALL'
 
     volume = trade.get('amount', 0) or trade.get('volume', 0) or 0
+    # Only parse from message if volume is still 0 and message contains contract count
     if not volume or volume == 0:
-        for pattern in [
-            r'(\d+(?:\.\d+)?)\s*(?:BTC|ETH|SOL)\s*(?:worth|价值)',
-            r'\$([\d,]+(?:\.\d+)?)',
-            r'(\d+(?:,\d{3})*)\s*(?:contracts?|张)',
-        ]:
-            match = re.search(pattern, message)
-            if match:
+        # First try to find explicit contract count (e.g., "100 contracts", "100张")
+        contract_match = re.search(r'(\d+(?:,\d{3})*)\s*(?:contracts?|张)', message, re.IGNORECASE)
+        if contract_match:
+            try:
+                volume = float(contract_match.group(1).replace(',', ''))
+            except ValueError:
+                pass
+        # If no contract count found, try to extract from crypto amount (e.g., "5.2 BTC worth")
+        if not volume:
+            crypto_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:BTC|ETH|SOL)\s*(?:worth|价值)', message, re.IGNORECASE)
+            if crypto_match:
                 try:
-                    volume = float(match.group(1).replace(',', ''))
-                    break
+                    volume = float(crypto_match.group(1))
                 except ValueError:
-                    continue
+                    pass
+        # Note: We intentionally do NOT parse $ amounts as volume, since that's notional value
 
     notional_usd = trade.get('underlying_notional_usd', 0) or 0
     if not notional_usd or notional_usd == 0:

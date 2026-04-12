@@ -1,28 +1,77 @@
 # Services - Risk Framework
 from config import config
+from datetime import datetime
 
 class RiskFramework:
-    """v6.0: BTC 风险框架 - $55k 常规底, $45k 极限底"""
+    """v7.0: 动态风险框架 - 支持动态支撑位"""
 
+    # 静态回退值
     REGULAR_FLOOR = config.BTC_REGULAR_FLOOR
     EXTREME_FLOOR = config.BTC_EXTREME_FLOOR
+    
+    # 动态支撑位计算器实例
+    _support_calculator = None
+    _cached_floors = None
+    _cache_timestamp = None
+
+    @classmethod
+    def _get_support_calculator(cls):
+        """获取支撑位计算器实例"""
+        if cls._support_calculator is None:
+            from services.support_calculator import DynamicSupportCalculator
+            cls._support_calculator = DynamicSupportCalculator()
+        return cls._support_calculator
+
+    @classmethod
+    def _get_floors(cls) -> dict:
+        """获取支撑位，带缓存"""
+        now = datetime.now()
+        
+        # 缓存1小时
+        if (cls._cached_floors and cls._cache_timestamp and 
+            (now - cls._cache_timestamp).seconds < 3600):
+            return cls._cached_floors
+        
+        # 重新计算
+        try:
+            calculator = cls._get_support_calculator()
+            cls._cached_floors = calculator.get_dynamic_floors()
+            cls._cache_timestamp = now
+            return cls._cached_floors
+        except Exception as e:
+            print(f"获取动态支撑位失败: {e}")
+            # 回退到静态值
+            return {
+                "regular": cls.REGULAR_FLOOR,
+                "extreme": cls.EXTREME_FLOOR,
+                "fallback": True
+            }
 
     @classmethod
     def get_status(cls, spot: float) -> str:
-        if spot > cls.REGULAR_FLOOR * 1.1:
+        """动态风险状态判断"""
+        floors = cls._get_floors()
+        regular = floors["regular"]
+        extreme = floors["extreme"]
+        
+        if spot > regular * 1.1:
             return "NORMAL"
-        elif spot > cls.REGULAR_FLOOR:
+        elif spot > regular:
             return "NEAR_FLOOR"
-        elif spot > cls.EXTREME_FLOOR:
+        elif spot > extreme:
             return "ADVERSE"
         else:
             return "PANIC"
 
     @classmethod
     def get_score_modifier(cls, strike: float, spot: float) -> float:
-        if strike <= cls.EXTREME_FLOOR:
+        floors = cls._get_floors()
+        extreme = floors["extreme"]
+        regular = floors["regular"]
+        
+        if strike <= extreme:
             return 1.2
-        elif strike <= cls.REGULAR_FLOOR:
+        elif strike <= regular:
             return 1.1
         elif strike > spot:
             return 0.8
@@ -52,15 +101,35 @@ class CalculationEngine:
 
     @staticmethod
     def calc_margin_put(strike: float, spot: float, premium_usd: float, margin_ratio: float = 0.2) -> float:
-        if strike >= spot:
-            return strike * margin_ratio - premium_usd + max(0, (spot - strike * 0.9) * 0.1)
-        return max(strike * 0.1, strike * margin_ratio - premium_usd)
+        """
+        修正后的 Put 保证金计算
+        基于：最大潜在亏损 * 风险系数
+        """
+        # 计算最大潜在亏损 (假设价格跌到0)
+        max_loss = strike - premium_usd
+        
+        # 基础保证金 = 最大亏损 * 保证金比例
+        base_margin = max_loss * margin_ratio
+        
+        # 最小保证金要求 = 行权价 * 10%
+        min_margin = strike * 0.1
+        
+        # 取较大值，确保保证金为正数
+        return max(min_margin, base_margin)
 
     @staticmethod
     def calc_margin_call(strike: float, spot: float, premium_usd: float, margin_ratio: float = 0.2) -> float:
-        if strike <= spot:
-            return spot * margin_ratio - premium_usd + max(0, (spot * 1.1 - strike) * 0.1)
-        return max(strike * 0.1, strike * margin_ratio - premium_usd)
+        """
+        修正后的 Call 保证金计算
+        """
+        # Call 的最大亏损理论上无限，使用行权价作为基准
+        base_margin = strike * margin_ratio - premium_usd
+        
+        # 最小保证金要求
+        min_margin = strike * 0.1
+        
+        # 确保为正数
+        return max(min_margin, base_margin)
 
     @staticmethod
     def calc_breakeven_pct(strike: float, premium_usd: float, option_type: str, spot: float) -> float:

@@ -29,7 +29,7 @@ let currentData = null;
 let autoRefreshInterval = null;
 let aprChart = null;
 let dvolChart = null;
-let chartPeriods = { apr: 168, dvol: 168 };
+let chartPeriods = { apr: 168, dvol: 168, pcr: 168 };
 let currentSpotPrice = null;
 let scanStatusInterval = null;
 
@@ -92,9 +92,12 @@ function setupEventListeners() {
     document.getElementById('strikeRangeInput').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') triggerScan();
     });
-    document.getElementById('recoveryLoss').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') calculateRecovery();
-    });
+    const recoveryLossEl = document.getElementById('recoveryLoss');
+    if (recoveryLossEl) {
+        recoveryLossEl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') calculateRecovery();
+        });
+    }
 }
 
 function updateParamDisplay() {
@@ -124,7 +127,7 @@ function setAutoRefresh(minutes) {
         autoRefreshInterval = null;
     }
     if (minutes > 0) {
-        autoRefreshInterval = setInterval(() => { loadDashboardData(true); showAlert('数据已刷新（缓存）', 'info'); }, minutes * 60 * 1000);
+        autoRefreshInterval = setInterval(() => { loadLatestData(); showAlert('数据已刷新（缓存）', 'info'); }, minutes * 60 * 1000);
     }
 }
 
@@ -281,6 +284,7 @@ function setChartPeriod(chartType, hours) {
     });
     if (chartType === 'apr') loadAprChartData();
     else if (chartType === 'dvol') loadDvolChartData();
+    else if (chartType === 'pcr') loadPcrChart(document.getElementById('currencySelect').value, hours);
 }
 
 let _scanLock = false;
@@ -514,7 +518,6 @@ async function loadLatestData() {
     try {
         const currency = document.getElementById('currencySelect').value;
         const response = await safeFetch(`${API_BASE}/api/latest?currency=${currency}`);
-        // safeFetch already throws on non-2xx, so no need to check response.status
 
         const data = await response.json();
         currentData = data;
@@ -529,6 +532,7 @@ async function loadLatestData() {
         updateLastUpdateTime(data.timestamp);
         loadAprChartData();
         loadDvolChartData();
+        loadPcrChart(currency, chartPeriods.pcr || 168);
         
         // v6.0: Load bottom fishing advice for BTC
         if (currency === 'BTC') {
@@ -537,6 +541,9 @@ async function loadLatestData() {
             const section = document.getElementById('bottomFishingSection');
             if (section) section.classList.add('hidden');
         }
+        
+        // v7.0: Load risk dashboard
+        loadRiskDashboard(currency);
     } catch (error) {
         console.error('加载数据失败:', error);
     }
@@ -608,6 +615,116 @@ async function loadBottomFishingAdvice(currency = 'BTC') {
         const section = document.getElementById('bottomFishingSection');
         if (section) section.classList.add('hidden');
     }
+}
+
+// v7.0: 加载风险仪表板
+async function loadRiskDashboard(currency = 'BTC') {
+    try {
+        const res = await safeFetch(`${API_BASE}/api/risk/assess?currency=${currency}`);
+        const data = await res.json();
+        
+        updateRiskDashboardUI(data);
+    } catch (e) {
+        console.error('Failed to load risk dashboard:', e);
+    }
+}
+
+function updateRiskDashboardUI(data) {
+    // 更新综合分数徽章
+    const scoreBadge = document.getElementById('riskScoreBadge');
+    if (scoreBadge) {
+        scoreBadge.textContent = `综合风险: ${data.composite_score}`;
+        
+        // 根据风险等级设置颜色
+        scoreBadge.className = 'px-3 py-1 rounded-full text-sm font-bold ';
+        if (data.risk_level === 'LOW') {
+            scoreBadge.classList.add('bg-green-500/20', 'text-green-400');
+        } else if (data.risk_level === 'MEDIUM') {
+            scoreBadge.classList.add('bg-yellow-500/20', 'text-yellow-400');
+        } else if (data.risk_level === 'HIGH') {
+            scoreBadge.classList.add('bg-orange-500/20', 'text-orange-400');
+        } else {
+            scoreBadge.classList.add('bg-red-500/20', 'text-red-400', 'animate-pulse');
+        }
+    }
+    
+    // 更新各风险组件
+    const components = data.components;
+    
+    // 价格风险
+    const priceScore = document.getElementById('priceRiskScore');
+    const priceLevel = document.getElementById('priceRiskLevel');
+    if (priceScore && components.price_risk) {
+        priceScore.textContent = components.price_risk.score;
+        priceScore.className = 'text-2xl font-bold ' + getRiskColor(components.price_risk.score);
+        priceLevel.textContent = components.price_risk.status;
+    }
+    
+    // 波动率风险
+    const volScore = document.getElementById('volRiskScore');
+    const volLevel = document.getElementById('volRiskLevel');
+    if (volScore && components.volatility_risk) {
+        volScore.textContent = components.volatility_risk.score;
+        volScore.className = 'text-2xl font-bold ' + getRiskColor(components.volatility_risk.score);
+        volLevel.textContent = components.volatility_risk.signal || '正常';
+    }
+    
+    // 情绪风险
+    const sentScore = document.getElementById('sentimentRiskScore');
+    const sentLevel = document.getElementById('sentimentRiskLevel');
+    if (sentScore && components.sentiment_risk) {
+        sentScore.textContent = components.sentiment_risk.score;
+        sentScore.className = 'text-2xl font-bold ' + getRiskColor(components.sentiment_risk.score);
+        sentLevel.textContent = '基于价格';
+    }
+    
+    // 流动性风险
+    const liqScore = document.getElementById('liquidityRiskScore');
+    const liqLevel = document.getElementById('liquidityRiskLevel');
+    if (liqScore && components.liquidity_risk) {
+        liqScore.textContent = components.liquidity_risk.score;
+        liqScore.className = 'text-2xl font-bold ' + getRiskColor(components.liquidity_risk.score);
+        liqLevel.textContent = '正常';
+    }
+    
+    // 更新建议
+    const recList = document.getElementById('riskRecommendations');
+    if (recList && data.recommendations) {
+        recList.innerHTML = data.recommendations.map(rec => 
+            `<li class="flex items-start gap-2"><span class="text-yellow-500">•</span><span>${rec}</span></li>`
+        ).join('');
+    }
+    
+    // 更新支撑位信息
+    if (components.price_risk && components.price_risk.factors) {
+        const factors = components.price_risk.factors;
+        // 从factors中提取支撑位信息
+        const regularMatch = factors.find(f => f.includes('常规支撑'));
+        const extremeMatch = factors.find(f => f.includes('极端支撑'));
+        
+        if (regularMatch) {
+            const regularEl = document.getElementById('regularFloor');
+            if (regularEl) {
+                const value = regularMatch.split(':')[1].trim();
+                regularEl.textContent = value;
+            }
+        }
+        
+        if (extremeMatch) {
+            const extremeEl = document.getElementById('extremeFloor');
+            if (extremeEl) {
+                const value = extremeMatch.split(':')[1].trim();
+                extremeEl.textContent = value;
+            }
+        }
+    }
+}
+
+function getRiskColor(score) {
+    if (score < 30) return 'text-green-400';
+    if (score < 60) return 'text-yellow-400';
+    if (score < 80) return 'text-orange-400';
+    return 'text-red-400';
 }
 
 function updateMacroIndicators(data) {
@@ -928,9 +1045,12 @@ function updateLargeTrades(trades, count) {
         const inst = trade.instrument_name || trade.symbol || '';
         const dir = (trade.direction || '').toLowerCase();
         const flow = trade.flow_label || '';
-        const notional = trade.notional_usd || 0;
+        const volume = trade.volume || 0;
         const strike = trade.strike || 0;
         const optType = trade.option_type || '';
+        
+        // Estimate notional value from volume and strike (volume is in BTC/ETH, strike is in USD)
+        const notional = trade.notional_usd || (volume * strike) || 0;
 
         let directionIcon, directionClass, dirLabel;
         if (dir === 'buy') {
@@ -1021,14 +1141,18 @@ async function loadAprChartData() {
             return;
         }
 
-        aprChart.data.labels = data.map(d => {
+        // Filter outliers: APR should be between 1 and 500%
+        const filtered = data.filter(d => {
+            const apr = d.best_safe_apr || d.avg_apr || 0;
+            return apr >= 1 && apr < 500;
+        });
+
+        aprChart.data.labels = filtered.map(d => {
             const date = new Date(d.time || d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
         });
-        const cleanBest = data.map(d => d.best_safe_apr != null ? d.best_safe_apr : null);
-        const cleanP75 = data.map(d => d.p75_safe_apr != null ? d.p75_safe_apr : null);
-        aprChart.data.datasets[0].data = cleanBest;
-        aprChart.data.datasets[1].data = cleanP75;
+        aprChart.data.datasets[0].data = filtered.map(d => d.best_safe_apr || d.avg_apr || null);
+        aprChart.data.datasets[1].data = filtered.map(d => d.p75_safe_apr || (d.avg_apr ? d.avg_apr * 0.85 : null));
         aprChart.update();
     } catch (error) {
         console.error('加载APR图表失败:', error);
@@ -1049,11 +1173,14 @@ async function loadDvolChartData() {
             return;
         }
 
-        dvolChart.data.labels = data.map(d => {
+        // Filter out zero/invalid dvol values
+        const filtered = data.filter(d => d.dvol && d.dvol > 0);
+
+        dvolChart.data.labels = filtered.map(d => {
             const date = new Date(d.time || d.timestamp);
             return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
         });
-        dvolChart.data.datasets[0].data = data.map(d => d.dvol);
+        dvolChart.data.datasets[0].data = filtered.map(d => d.dvol);
         dvolChart.update();
     } catch (error) {
         console.error('加载DVOL图表失败:', error);
@@ -1457,127 +1584,111 @@ async function showDvolAdvice(currency) {
 
 async function loadWindAnalysis() {
     try {
-        const currency = document.getElementById('tradesCurrency').value;
-        const days = document.getElementById('tradesDays').value;
+        const currency = document.getElementById('tradesCurrency')?.value || 'BTC';
+        const days = document.getElementById('tradesDays')?.value || 7;
 
         const response = await safeFetch(`${API_BASE}/api/trades/wind-analysis?currency=${currency}&days=${days}`);
         const data = await response.json();
         const summary = data.summary || {};
-        const strikes = data.strike_flows || [];
-        const flows = data.flow_breakdown || [];
 
         const countEl = document.getElementById('tradesStatsCount');
-        countEl.textContent = `${summary.total_trades || 0} 笔`;
-        countEl.classList.remove('hidden');
+        if (countEl) {
+            countEl.textContent = `${summary.total_trades || 0} 笔`;
+            countEl.classList.remove('hidden');
+        }
 
         const summaryCard = document.getElementById('windSummaryCard');
         if (summary.total_trades > 0) {
-            summaryCard.classList.remove('hidden');
-            const score = summary.sentiment_score || 0;
+            summaryCard?.classList.remove('hidden');
+            const score = data.sentiment_score || 0;
             let icon, scoreLabel, scoreClass;
             if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-green-500/20 text-green-300'; }
             else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-green-900/30 text-green-400'; }
             else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
             else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-red-900/30 text-red-400'; }
             else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-red-500/20 text-red-300'; }
-            document.getElementById('windSentimentIcon').textContent = icon;
+
+            const iconEl = document.getElementById('windSentimentIcon');
+            if (iconEl) iconEl.textContent = icon;
+
             const scEl = document.getElementById('windSentimentScore');
-            scEl.textContent = scoreLabel;
-            scEl.className = `text-xs font-mono px-2 py-0.5 rounded ${scoreClass}`;
-            document.getElementById('windSentimentText').textContent = data.sentiment_text || '';
-            document.getElementById('windBuySellRatio').textContent =
-                `${(summary.buy_ratio * 100).toFixed(0)}% / ${(summary.sell_ratio * 100).toFixed(0)}%`;
-            document.getElementById('windTotalNotional').textContent =
-                `$${(summary.total_notional / 1000000).toFixed(1)}M`;
-            const flowNames = {
-                // === Sell PUT = 永远看涨 ===
-                'sell_put_deep_itm': '保护性对冲',
-                'sell_put_atm_itm': '收权利金',
-                'sell_put_otm': '备兑开仓',
-                // === Buy PUT = 看跌/对冲 ===
-                'buy_put_deep_itm': '保护性买入',
-                'buy_put_atm': '看跌投机',
-                'buy_put_otm': '看跌投机',
-                // === Sell CALL = 中性/看不涨 ===
-                'sell_call_otm': '备兑开仓',
-                'sell_call_itm': '改仓操作',
-                // === Buy CALL = 看涨 ===
-                'buy_call_atm_itm': '追涨建仓',
-                'buy_call_otm': '看涨投机',
-                // === Legacy / Fallback ===
-                'protective_hedge': '保护性对冲',
-                'premium_collect': '收权利金',
-                'speculative_put': '看跌投机',
-                'speculative_call': '看涨投机',
-                'call_momentum': '追涨建仓',
-                'covered_call': '备兑开仓',
-                'call_overwrite': '改仓操作',
-                'put_buy_hedge': '保护性买入',
-                'unclassified': '未分类',
-                'unknown': '未知流向'
-            };
-            document.getElementById('windDominantFlow').textContent =
-                flowNames[summary.dominant_flow] || summary.dominant_flow || '-';
+            if (scEl) { scEl.textContent = scoreLabel; scEl.className = `text-xs font-mono px-2 py-0.5 rounded ${scoreClass}`; }
+
+            const sentimentTextEl = document.getElementById('windSentimentText');
+            if (sentimentTextEl) sentimentTextEl.textContent = data.sentiment_text || data.dominant_flow || '';
+
+            const buySellRatioEl = document.getElementById('windBuySellRatio');
+            if (buySellRatioEl) buySellRatioEl.textContent = `${(data.buy_ratio * 100 || 0).toFixed(0)}% / ${((1 - data.buy_ratio) * 100 || 0).toFixed(0)}%`;
+
+            const totalNotionalEl = document.getElementById('windTotalNotional');
+            if (totalNotionalEl) {
+                const dist = data.distribution || [];
+                const totalNotional = dist.reduce((sum, d) => sum + (d.total || 0), 0);
+                totalNotionalEl.textContent = totalNotional > 0 ? `$${(totalNotional / 1000000).toFixed(1)}M` : '-';
+            }
+
+            const dominantFlowEl = document.getElementById('windDominantFlow');
+            if (dominantFlowEl) dominantFlowEl.textContent = data.dominant_flow || '-';
+
+            // Update flow breakdown display
+            const flowBreakdownEl = document.getElementById('flowBreakdown');
+            if (flowBreakdownEl && data.flow_breakdown) {
+                flowBreakdownEl.innerHTML = data.flow_breakdown.map(f => {
+                    const pct = f.count > 0 ? Math.round(f.count / (summary.total_trades || 1) * 100) : 0;
+                    const colorClass = f.type.includes('protective') || f.type.includes('put_buy') ? 'text-green-400' :
+                                      f.type.includes('speculative') || f.type.includes('call_momentum') ? 'text-blue-400' :
+                                      f.type.includes('covered') || f.type.includes('overwrite') ? 'text-yellow-400' :
+                                      f.type.includes('premium') ? 'text-purple-400' : 'text-gray-400';
+                    return `<div class="flex justify-between items-center text-xs">
+                        <span class="${colorClass}">${f.label}</span>
+                        <span class="text-gray-300 font-mono">${f.count} <span class="text-gray-500">(${pct}%)</span></span>
+                    </div>`;
+                }).join('');
+            }
         } else {
-            summaryCard.classList.add('hidden');
+            summaryCard?.classList.add('hidden');
         }
 
         const spotEl = document.getElementById('windSpotMarker');
-        if (summary.spot_price > 0) {
-            spotEl.textContent = `● 现价 $${summary.spot_price.toLocaleString()}`;
+        if (spotEl && data.spot > 0) {
+            spotEl.textContent = `● 现价 $${data.spot.toLocaleString()}`;
             spotEl.classList.remove('hidden');
-        } else {
+        } else if (spotEl) {
             spotEl.classList.add('hidden');
         }
 
         const chartEl = document.getElementById('strikeFlowsChart');
-        if (strikes.length === 0) {
-            chartEl.innerHTML = '<div class="text-gray-500 text-center py-4">暂无大宗交易数据</div>';
-        } else {
-            const maxAbsNet = Math.max(...strikes.map(s => Math.abs(s.net)), 1);
-            chartEl.innerHTML = strikes.map(s => {
-                const netPct = s.net / maxAbsNet * 100;
-                const isBuy = s.net > 0;
-                const barW = Math.min(95, Math.abs(netPct));
-                const distPct = s.dist_from_spot_pct || 0;
-                const distLabel = distPct > 0 ? `+${distPct}%` : `${distPct}%`;
-                const optType = (s.option_type || '').toUpperCase();
-                const isPut = optType === 'PUT' || optType[0] === 'P';
-                const optTag = optType ? `<span class="px-1 py-0.5 rounded text-[9px] font-bold ${isPut ? 'bg-purple-500/30 text-purple-300' : 'bg-green-500/30 text-green-300'}">${isPut ? 'PUT' : 'CALL'}</span>` : '';
-                let colorClass, bgColor;
-                if (s.net > 3) { colorClass = 'text-green-400'; bgColor = 'from-green-700 to-green-500'; }
-                else if (s.net > 0) { colorClass = 'text-green-300'; bgColor = 'from-green-900 to-green-700'; }
-                else if (s.net > -3) { colorClass = 'text-red-300'; bgColor = 'from-red-900 to-red-700'; }
-                else { colorClass = 'text-red-400'; bgColor = 'from-red-700 to-red-500'; }
-                return `<div class="flex items-center gap-2 py-1 hover:bg-white/5 rounded px-1">
-                    <span class="font-mono text-xs w-20 text-right ${s.strike == (summary.key_levels?.heaviest_strike) ? 'text-yellow-300 font-bold' : ''}">$${Math.round(s.strike).toLocaleString()}</span>
-                    ${optTag}
-                    <div class="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden relative">
-                        <div class="h-full rounded-full bg-gradient-to-r ${bgColor}" style="width: ${barW}%; ${isBuy ? '' : 'margin-left:' + (95-barW) + '%'}"></div>
-                        ${s.strike == (summary.key_levels?.net_support) ? '<span class="absolute left-0 top-0 bottom-0 w-0.5 bg-yellow-400"></span>' : ''}
-                        ${s.strike == (summary.key_levels?.net_resistance) ? '<span class="absolute right-0 top-0 bottom-0 w-0.5 bg-orange-400"></span>' : ''}
-                    </div>
-                    <span class="${colorClass} text-xs w-10 text-right tabular-nums">${s.net > 0 ? '+' : ''}${s.net}</span>
-                    <span class="text-gray-500 text-xs w-12 text-right">(${distLabel})</span>
-                    <span class="text-gray-500 text-xs w-6 text-center tabular-nums">${s.buys}/${s.sells}</span></div>`;
-            }).join('');
-        }
-
-        const fbEl = document.getElementById('flowBreakdown');
-        if (flows.length === 0) {
-            fbEl.innerHTML = '<div class="col-span-2 text-gray-500 text-center py-2 text-xs">无流向数据</div>';
-        } else {
-            const maxCnt = Math.max(...flows.map(f => f.count), 1);
-            fbEl.innerHTML = flows.map(f => {
-                const pctBar = Math.min(100, f.count / maxCnt * 100);
-                return `<div class="rounded-lg bg-gray-800/50 p-2 flex items-center gap-2"><div class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background:${f.pct > 30 ? '#f97316' : '#6b7280'}"></div><div class="flex-1 min-w-0"><div class="text-xs text-gray-200 truncate">${f.label_cn || f.label}</div><div class="mt-0.5 bg-gray-700 rounded-full h-1.5 overflow-hidden"><div class="h-full rounded-full bg-orange-500/70" style="width:${f.pct}%"></div></div></div><div class="text-right flex-shrink-0"><div class="text-xs font-mono text-white">${f.count}</div><div class="text-[10px] text-gray-500">${f.pct}%</div></div></div>`;
-            }).join('');
+        const dist = data.distribution || [];
+        if (chartEl) {
+            chartEl.innerHTML = '';
+            const canvas = document.createElement('canvas');
+            canvas.id = 'strikeChartCanvas';
+            chartEl.appendChild(canvas);
+            const filteredDist = dist.filter(d => d.strike > 0 && (d.put > 0 || d.call > 0)).slice(0, 20);
+            if (filteredDist.length === 0) {
+                chartEl.innerHTML = '<div class="text-gray-500 text-center py-4">暂无OI数据</div>';
+            } else {
+                window._strikeChart = new Chart(canvas, {
+                    type: 'bar',
+                    data: {
+                        labels: filteredDist.map(d => d.strike?.toString() || ''),
+                        datasets: [
+                            { label: 'Put OI', data: filteredDist.map(d => d.put || 0), backgroundColor: 'rgba(239, 68, 68, 0.6)' },
+                            { label: 'Call OI', data: filteredDist.map(d => d.call || 0), backgroundColor: 'rgba(34, 197, 94, 0.6)' }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: { y: { beginAtZero: true } },
+                        plugins: { legend: { display: true, position: 'top' } }
+                    }
+                });
+            }
         }
     } catch (error) {
         console.error('加载风向分析失败:', error);
     }
 }
-// ============================================================
 // Module 1: IV Term Structure
 // ============================================================
 let tsChart = null;
@@ -1906,15 +2017,15 @@ async function loadPcrChart(currency = 'BTC', hours = 168) {
         const res = await safeFetch(`${API_BASE}/api/charts/pcr?currency=${currency}&hours=${hours}`);
         const data = await res.json();
         const ctx = document.getElementById('pcrChart');
-        if (!ctx || !data.data || data.data.length === 0) return;
+        if (!ctx || !data || data.length === 0) return;
         if (window._pcrChart) window._pcrChart.destroy();
         window._pcrChart = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: data.data.map(d => d.timestamp?.slice(5, 16)),
+                labels: data.map(d => d.time?.slice(5, 16)),
                 datasets: [{
                     label: 'Put/Call Ratio',
-                    data: data.data.map(d => d.pcr),
+                    data: data.map(d => d.pcr),
                     borderColor: 'rgb(168, 85, 247)',
                     backgroundColor: 'rgba(168, 85, 247, 0.1)',
                     fill: true,

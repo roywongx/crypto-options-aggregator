@@ -39,7 +39,7 @@ def fetch_deribit_summaries(currency: str = "BTC") -> List[Dict]:
     try:
         from main import _get_deribit_monitor
         mon = _get_deribit_monitor()
-        summaries = mon.get_option_summaries(currency)
+        summaries = mon._get_book_summaries(currency)
         return summaries if summaries else []
     except Exception:
         return []
