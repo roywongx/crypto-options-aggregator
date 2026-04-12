@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+from models.contracts import ScanParams, RollCalcParams, QuickScanParams, RecoveryCalcParams, SandboxParams
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
