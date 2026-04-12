@@ -983,3 +983,9 @@ async def get_risk_assessment(currency: str = Query(default="BTC")):
     assessor = UnifiedRiskAssessor()
     
     return assessor.assess_comprehensive_risk(spot, currency)
+
+
+# 启动服务器
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
