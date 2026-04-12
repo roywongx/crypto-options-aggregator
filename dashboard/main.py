@@ -117,7 +117,7 @@ DB_PATH.parent.mkdir(exist_ok=True)
 
 import threading
 
-_db_local = threading.local()
+_db_local = threading.local()  # Per-thread SQLite connections (WAL mode)
 
 def get_db_connection():
     """Thread-safe SQLite connection with WAL mode and busy timeout"""
@@ -587,7 +587,7 @@ def init_database():
             cursor.execute(f"ALTER TABLE large_trades_history ADD COLUMN {col} {'REAL' if col in ('notional_usd','delta') else 'TEXT'}")
 
     conn.commit()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
 
 def save_scan_record(data: Dict[str, Any]):
@@ -635,7 +635,7 @@ def save_scan_record(data: Dict[str, Any]):
     cursor.execute("DELETE FROM large_trades_history WHERE timestamp < ?", (_cutoff,))
 
     conn.commit()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
 
 def run_options_scan(params: ScanParams) -> Dict[str, Any]:
@@ -1163,7 +1163,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     """, (currency,))
 
     row = cursor.fetchone()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     if not row:
         raise HTTPException(status_code=404, detail="暂无数据")
@@ -1215,7 +1215,7 @@ async def calculate_recovery(params: RecoveryCalcParams):
         WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
     """, (params.currency,))
     row = cursor.fetchone()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     if not row:
         raise HTTPException(status_code=404, detail="暂无扫描数据，请先执行扫描")
@@ -1240,7 +1240,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
     cursor = conn.cursor()
     cursor.execute("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (params.currency,))
     row = cursor.fetchone()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     if not row or not row[0]:
         raise HTTPException(status_code=404, detail="暂无扫描数据，请先执行扫描")
@@ -1371,7 +1371,7 @@ async def get_stats():
 
     db_size = os.path.getsize(DB_PATH)
 
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     return {
         "total_scans": total_scans,
@@ -1515,7 +1515,7 @@ async def health_check():
         mode = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM scan_records")
         count = cursor.fetchone()[0]
-        # conn.close()  # managed by connection pool
+        # conn.close()  # threading.local() manages per-thread connection lifecycle
         checks["database"] = {"status": "ok", "mode": mode, "records": count}
     except Exception as e:
         checks["database"] = {"status": "error", "message": str(e)}
@@ -1665,7 +1665,7 @@ async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Quer
     """, (since.strftime('%Y-%m-%d %H:%M:%S'), currency))
 
     rows = cursor.fetchall()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     return [{"time": r[0], "dvol": round(r[1], 2) if r[1] else 0, "z_score": round(r[2], 2) if r[2] else 0, "signal": r[3]} for r in rows]
 
@@ -1701,7 +1701,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
         ORDER BY notional_usd DESC LIMIT ?
     """, (currency, since, limit))
     rows = cursor.fetchall()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     results = []
     seen = set()
@@ -2201,7 +2201,7 @@ async def get_trades_history(
     cursor.execute(query, params)
     rows = cursor.fetchall()
     cols = [desc[0] for desc in cursor.description]
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     result = []
     for row in rows:
@@ -2241,7 +2241,7 @@ async def get_strike_distribution(
     """, (currency, since_str, int(spot * 0.15), int(spot * 4.0)))
 
     rows = cursor.fetchall()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     distribution = []
     for row in rows:
@@ -2307,7 +2307,7 @@ async def get_wind_analysis(
         WHERE currency = ? AND timestamp > ?
     """, (currency, since_str))
     totals = cursor.fetchone()
-    # conn.close()  # managed by connection pool
+    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     total_trades = totals[0] or 0
     total_buys = totals[1] or 0
