@@ -37,16 +37,10 @@ async function loadGridStrategy() {
         const putCount = putCountEl ? putCountEl.value : 5;
         const callCount = callCountEl ? callCountEl.value : 3;
         
-        showLoading('加载网格策略...');
-        
         // 调用网格推荐API
         const response = await safeFetch(
             `${API_BASE}/api/grid/recommend?currency=${currency}&put_count=${putCount}&call_count=${callCount}`
         );
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
         
         gridData = await response.json();
         
@@ -54,12 +48,11 @@ async function loadGridStrategy() {
         updateGridDisplay(gridData);
         renderGridChart(gridData);
         
-        hideLoading();
-        
     } catch (error) {
         console.error('加载网格策略失败:', error);
-        showAlert(`网格策略加载失败: ${error.message}`, 'error');
-        hideLoading();
+        if (typeof showAlert === 'function') {
+            showAlert(`网格策略加载失败: ${error.message}`, 'error');
+        }
     }
 }
 

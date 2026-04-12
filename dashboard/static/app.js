@@ -544,10 +544,6 @@ async function loadLatestData() {
         const currency = document.getElementById('currencySelect').value;
         const response = await safeFetch(`${API_BASE}/api/latest?currency=${currency}`);
 
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
         const data = await response.json();
         currentData = data;
         if (data.spot_price) currentSpotPrice = data.spot_price;
@@ -574,20 +570,23 @@ async function loadLatestData() {
         // v7.0: Load risk dashboard
         loadRiskDashboard(currency);
         
-        // v8.0: 更新网格策略数据
-        await loadGridStrategyData();
+        // v8.0: 非阻塞式加载网格策略数据
+        loadGridStrategyData().catch(() => {});
         
-        showAlert('数据刷新成功', 'success');
     } catch (error) {
         console.error('加载数据失败:', error);
         showAlert(`数据刷新失败: ${error.message}`, 'error');
         
-        // 错误重试机制
-        setTimeout(() => {
-            if (navigator.onLine) {
-                loadLatestData();
-            }
-        }, 5000);
+        // 错误重试机制 - 只重试一次，避免无限循环
+        if (!loadLatestData._retrying) {
+            loadLatestData._retrying = true;
+            setTimeout(() => {
+                if (navigator.onLine) {
+                    loadLatestData();
+                }
+                loadLatestData._retrying = false;
+            }, 10000);
+        }
     }
 }
 
@@ -1392,8 +1391,6 @@ async function loadGridStrategyData() {
     try {
         const currency = document.getElementById('currencySelect').value;
         const response = await safeFetch(`${API_BASE}/api/grid/recommend?currency=${currency}&put_count=5&call_count=3`);
-        
-        if (!response.ok) return;
         
         const data = await response.json();
         
