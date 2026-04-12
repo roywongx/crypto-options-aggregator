@@ -598,9 +598,8 @@ function updateOpportunitiesTable(contracts) {
     let PAGE_SIZE = 20;
     if (!window.displayedContracts) window.displayedContracts = [];
     if (!window.contractPage) window.contractPage = 1;
-    if (contracts.length > window.displayedContracts.length) {
-        window.displayedContracts = contracts.slice(0, window.contractPage * PAGE_SIZE);
-    }
+    // 始终用传入的 contracts 更新显示数据（排序时需要更新）
+    window.displayedContracts = contracts.slice(0, window.contractPage * PAGE_SIZE);
     const displayContracts = window.displayedContracts;
     const hasMore = displayContracts.length < contracts.length;
 
@@ -1049,7 +1048,6 @@ function sortContracts(field) {
     const fieldMap = {
         'mark_iv': 'iv',
         'premium': 'premium_usd',
-        'breakeven': 'breakeven_pct',
         'spread_pct': 'spread_pct',
         'distance_spot_pct': 'distance_spot_pct'
     };
