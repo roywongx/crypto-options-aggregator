@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import config
 from routers.grid import router as grid_router
 from services.dvol_analyzer import calc_delta_bs
+from services.instrument import _parse_inst_name
 
 # DeribitOptionsMonitor 单例缓存
 _deribit_monitor_cache = {}
@@ -911,23 +912,23 @@ def _quick_scan_sync(params: QuickScanParams = None):
         for s in summaries:
             meta = _parse_inst_name(s.get("instrument_name", ""))
             if not meta: continue
-            if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
+            if meta.dte < use_min_dte or meta.dte > use_max_dte: continue
             
             req_type = _p.option_type.upper()
             req_type_short = "P" if req_type == "PUT" else "C"
-            if meta["option_type"] != req_type_short: continue
+            if meta.option_type != req_type_short: continue
                 
             iv = float(s.get("mark_iv") or 0) / 100.0
             prem = float(s.get("mark_price") or 0)
             oi = float(s.get("open_interest") or 0)
             if iv <= 0 or prem <= 0 or oi < 10: continue
 
-            strike = meta["strike"]
+            strike = meta.strike
             underlying = float(s.get("underlying_price", spot)) or spot
 
             raw_delta = s.get("delta")
             if raw_delta is None or float(raw_delta or 0) == 0:
-                delta_val = abs(calc_delta_bs(strike, underlying, iv, meta["dte"], meta["option_type"]))
+                delta_val = abs(calc_delta_bs(strike, underlying, iv, meta.dte, meta.option_type))
             else:
                 delta_val = abs(float(raw_delta))
             
@@ -943,28 +944,28 @@ def _quick_scan_sync(params: QuickScanParams = None):
             prem_usd = prem * underlying
             margin_ratio = _p.margin_ratio
             cv = strike * margin_ratio
-            apr = (prem_usd / cv) * (365 / meta["dte"]) * 100 if cv > 0 else 0
+            apr = (prem_usd / cv) * (365 / meta.dte) * 100 if cv > 0 else 0
             
             dist = abs(strike - spot) / spot * 100
 
             contracts.append({
                 "symbol": s.get("instrument_name", ""),
                 "platform": "Deribit",
-                "expiry": meta["expiry"],
-                "dte": meta["dte"],
-                "option_type": meta["option_type"],
+                "expiry": meta.expiry,
+                "dte": meta.dte,
+                "option_type": meta.option_type,
                 "strike": strike,
                 "apr": round(apr, 1),
                 "premium_usd": round(prem_usd, 2),
                 "delta": round(delta_val, 3),
                 "iv": round(iv * 100, 1),
                 "open_interest": round(oi, 0),
-                "loss_at_10pct": round(max(0, (strike - spot * 0.9) if meta["option_type"] == "P" else (spot * 1.1 - strike)), 2),
-                "breakeven": round(strike - prem_usd if meta["option_type"] == "P" else strike + prem_usd, 0),
+                "loss_at_10pct": round(max(0, (strike - spot * 0.9) if meta.option_type == "P" else (spot * 1.1 - strike)), 2),
+                "breakeven": round(strike - prem_usd if meta.option_type == "P" else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
                 "spread_pct": 0.1,
-                "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, meta["option_type"]),
-                "pop": _calc_pop(delta_val, meta["option_type"], spot, strike, iv, meta["dte"]),
+                "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, meta.option_type),
+                "pop": _calc_pop(delta_val, meta.option_type, spot, strike, iv, meta.dte),
                 "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                 "liquidity_score": min(100, int((oi / 500) * 100))
             })
@@ -1718,19 +1719,19 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
                 
                 # Use calc_delta_bs (skip slow order book API call)
                 trade_iv = float(t.get("iv") or 50) / 100.0
-                delta_val = abs(calc_delta_bs(meta["strike"], spot,
-                    trade_iv, meta["dte"], meta["option_type"]))
+                delta_val = abs(calc_delta_bs(meta.strike, spot,
+                    trade_iv, meta.dte, meta.option_type))
                 
                 fl = _classify_flow_heuristic(
-                    direction, meta["option_type"], delta_val, meta["strike"], spot)
+                    direction, meta.option_type, delta_val, meta.strike, spot)
                 
                 seen.add(inst)
                 results.append({
                     "instrument_name": inst, "direction": direction,
                     "notional_usd": round(premium_usd, 2),
                     "volume": round(trade_amount, 4),
-                    "strike": meta["strike"],
-                    "option_type": meta["option_type"],
+                    "strike": meta.strike,
+                    "option_type": meta.option_type,
                     "flow_label": fl,
                     "delta": delta_val
                 })
@@ -1746,21 +1747,6 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
     
     results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
     return results[:limit]
-
-
-def _parse_inst_name(inst: str):
-    """从 services.instrument 导入，转换为字典"""
-    from services.instrument import _parse_inst_name as parse_inst
-    result = parse_inst(inst)
-    if result is None:
-        return None
-    return {
-        "currency": result.currency,
-        "expiry": result.expiry,
-        "strike": result.strike,
-        "option_type": result.option_type,
-        "dte": result.dte
-    }
 
 
 # DEPRECATED: Use mark['delta'] from API instead. Kept for Deribit branch fallback only.
@@ -1781,17 +1767,17 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
 
     for s in summaries:
         meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta["dte"] < 1 or meta["dte"] > 180:
+        if not meta or meta.dte < 1 or meta.dte > 180:
             continue
         iv_pct = float(s.get("mark_iv") or 0)
         if iv_pct <= 5 or iv_pct > 500:
             continue
         oi = float(s.get("open_interest") or 0)
-        strike = meta["strike"]
+        strike = meta.strike
         moneyness = (strike - spot) / spot if spot > 0 else 0
 
         bucket = "ATM"
-        if meta["option_type"] == "P":
+        if meta.option_type == "P":
             if moneyness < -0.08: bucket = "-40D"
             elif moneyness < -0.03: bucket = "-20D"
             elif moneyness > 0.03: bucket = "+20D"
@@ -1802,17 +1788,17 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
             elif moneyness < -0.03: bucket = "-20D"
             elif moneyness < -0.08: bucket = "-40D"
 
-        surface.append({"dte": meta["dte"], "strike": strike,
-            "type": meta["option_type"], "iv": round(iv_pct, 1),
+        surface.append({"dte": meta.dte, "strike": strike,
+            "type": meta.option_type, "iv": round(iv_pct, 1),
             "bucket": bucket, "oi": round(oi, 1), "moneyness": round(moneyness, 3)})
 
         for db in dte_buckets:
             window = max(5, int(db * 0.6))
-            if abs(meta["dte"] - db) <= window:
+            if abs(meta.dte - db) <= window:
                 term_data[db].append(iv_pct)
                 break
         else:
-            nearest = min(dte_buckets, key=lambda x: abs(meta["dte"] - x))
+            nearest = min(dte_buckets, key=lambda x: abs(meta.dte - x))
             term_data[nearest].append(iv_pct)
 
     term_structure = []
@@ -1896,13 +1882,13 @@ async def _calc_max_pain_internal(currency: str):
     parsed = []
     for s in summaries:
         meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta["dte"] < 1:
+        if not meta or meta.dte < 1:
             continue
         oi = float(s.get("open_interest") or 0)
         gamma = float(s.get("gamma") or 0)
         if oi < 1:
             continue
-        parsed.append({"strike": meta["strike"], "expiry": meta["expiry"], "dte": meta["dte"], "option_type": meta["option_type"], "oi": oi, "gamma": gamma})
+        parsed.append({"strike": meta.strike, "expiry": meta.expiry, "dte": meta.dte, "option_type": meta.option_type, "oi": oi, "gamma": gamma})
 
     if not parsed:
         # Debug: count how many items were filtered
@@ -2030,11 +2016,11 @@ async def sandbox_simulate(params: SandboxParams):
     cands = []
     for s in summaries:
         meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta["dte"] < 14 or meta["dte"] > 180:
+        if not meta or meta.dte < 14 or meta.dte > 180:
             continue
-        if meta["option_type"] != opt_type.upper():
+        if meta.option_type != opt_type.upper():
             continue
-        if opt_type.upper() == 'P' and meta["strike"] >= params.crash_price * 0.85:
+        if opt_type.upper() == 'P' and meta.strike >= params.crash_price * 0.85:
             continue
         # mark_iv is in percentage (e.g., 47.5), convert to decimal (0.475)
         iv = float(s.get("mark_iv") or 0) / 100.0
@@ -2045,8 +2031,8 @@ async def sandbox_simulate(params: SandboxParams):
         oi = float(s.get("open_interest") or 0)
         if prem_usd <= 0 or oi < 10:
             continue
-        ncv = meta["strike"] * params.margin_ratio
-        apr_e = (prem_usd / ncv) * (365 / meta["dte"]) * 100 if ncv > 0 else 0
+        ncv = meta.strike * params.margin_ratio
+        apr_e = (prem_usd / ncv) * (365 / meta.dte) * 100 if ncv > 0 else 0
         if apr_e < 5:
             continue
         cands.append({**meta, "premium_usd": prem_usd, "apr": round(apr_e, 1), "oi": oi, "cv": round(ncv, 2)})
