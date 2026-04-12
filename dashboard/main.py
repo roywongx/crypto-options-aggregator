@@ -50,28 +50,14 @@ from services.instrument import _parse_inst_name
 from services.risk_framework import RiskFramework, CalculationEngine, _risk_emoji
 from services.flow_classifier import _classify_flow_heuristic, parse_trade_alert, _severity_from_notional, get_flow_label_info
 from services.spot_price import get_spot_price, get_spot_price_binance, get_spot_price_deribit, _get_spot_from_scan
+from db.connection import get_db_connection as _db_conn
 
-# DeribitOptionsMonitor 单例缓存
+def get_db_connection():
+    return _db_conn()
+
 _deribit_monitor_cache = {}
 
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
-DB_PATH.parent.mkdir(exist_ok=True)
-
-import threading
-
-_db_local = threading.local()  # Per-thread SQLite connections (WAL mode)
-
-def get_db_connection():
-    """Thread-safe SQLite connection with WAL mode and busy timeout"""
-    conn = getattr(_db_local, 'conn', None)
-    if conn is None:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.row_factory = sqlite3.Row
-        _db_local.conn = conn
-    return conn
 
 
 
