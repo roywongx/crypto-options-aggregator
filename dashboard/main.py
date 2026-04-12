@@ -47,89 +47,10 @@ from config import config
 from routers.grid import router as grid_router
 from services.dvol_analyzer import calc_delta_bs
 from services.instrument import _parse_inst_name
+from services.risk_framework import RiskFramework, CalculationEngine
 
 # DeribitOptionsMonitor 单例缓存
 _deribit_monitor_cache = {}
-
-class RiskFramework:
-    """v6.0: BTC 风险框架 - $55k 常规底, $45k 极限底"""
-    REGULAR_FLOOR = config.BTC_REGULAR_FLOOR
-    EXTREME_FLOOR = config.BTC_EXTREME_FLOOR
-    
-    @classmethod
-    def get_status(cls, spot: float) -> str:
-        if spot > cls.REGULAR_FLOOR * 1.1:
-            return "NORMAL"
-        elif spot > cls.REGULAR_FLOOR:
-            return "NEAR_FLOOR"
-        elif spot > cls.EXTREME_FLOOR:
-            return "ADVERSE"  # 逆境
-        else:
-            return "PANIC"   # 极恐/止损区
-            
-    @classmethod
-    def get_score_modifier(cls, strike: float, spot: float) -> float:
-        """根据行权价在风险框架中的位置给出评分修正"""
-        if strike <= cls.EXTREME_FLOOR:
-            return 1.2  # 极度安全，加分
-        elif strike <= cls.REGULAR_FLOOR:
-            return 1.1  # 相对安全，小加分
-        elif strike > spot:
-            return 0.8  # ITM 风险高，减分
-        return 1.0
-
-class CalculationEngine:
-    """v5.6: 统一计算引擎 - 消除 main.py 和 options_aggregator.py 的公式不一致"""
-    
-    @staticmethod
-    def calc_apr(premium_usd: float, strike: float, dte: int, margin_ratio: float = 0.2) -> float:
-        cv = strike * margin_ratio
-        if cv <= 0 or dte <= 0: return 0.0
-        return round((premium_usd / cv) * (365 / dte) * 100, 1)
-    
-    @staticmethod
-    def calc_pop(delta_val: float) -> float:
-        abs_d = abs(delta_val)
-        pop = max(5.0, min(95.0, round((1.0 - abs_d) * 100, 1)))
-        return pop
-    
-    @staticmethod
-    def calc_breakeven_pct(spot: float, strike: float, premium_usd: float, option_type: str) -> float:
-        premium_per_unit = premium_usd / spot if spot > 0 else 0
-        if option_type.upper() in ('P', 'PUT'):
-            safety = (spot - (strike - premium_per_unit)) / spot * 100
-        else:
-            safety = ((strike + premium_per_unit) - spot) / spot * 100
-        return round(max(0, safety), 1)
-    
-    @staticmethod
-    def calc_iv_rank(current_iv: float, history_ivs: list) -> float:
-        if not history_ivs or current_iv <= 0: return 50.0
-        sorted_ivs = sorted(history_ivs); n = len(sorted_ivs)
-        rank = 1
-        for i, v in enumerate(sorted_ivs):
-            if v >= current_iv: rank = i + 1; break
-        else: rank = n
-        if n == 1: return 50.0
-        return round((rank - 1) / (n - 1) * 100, 1)
-    
-    @staticmethod
-    def weighted_score(apr: float, pop: float, breakeven_pct: float,
-                       liquidity_score: float, iv_rank: float, 
-                       strike: float = 0, spot: float = 0) -> float:
-        a = min(max(apr, 0) / 200.0, 1.0)
-        p = min(max(pop, 0) / 100.0, 1.0)
-        b = min(max(breakeven_pct, 0) / 20.0, 1.0)
-        l = min(max(liquidity_score, 0) / 100.0, 1.0)
-        ir = max(iv_rank, 0); iv = 1.0 - abs(ir - 50) / 50.0
-        
-        score = a*0.25 + p*0.25 + b*0.20 + l*0.15 + iv*0.15
-        
-        # 应用风险框架修正
-        if spot > 0 and strike > 0:
-            score *= RiskFramework.get_score_modifier(strike, spot)
-            
-        return round(score, 4)
 
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
 DB_PATH.parent.mkdir(exist_ok=True)
