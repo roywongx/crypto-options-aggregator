@@ -1110,21 +1110,9 @@ function applyColumnVisibility() {
     if (!headerRow) return;
     const headers = headerRow.querySelectorAll('th');
     headers.forEach(th => {
-        const sortKey = th.dataset.sort || th.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
-        if (sortKey && columnVisibility[sortKey] !== undefined) {
+        const sortKey = th.dataset.sort;
+        if (sortKey && columnVisibility.hasOwnProperty(sortKey)) {
             th.style.display = columnVisibility[sortKey] ? '' : 'none';
-        }
-    });
-    const bodyRows = document.querySelectorAll('#opportunitiesTable tr[data-symbol]');
-    bodyRows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length === headers.length) {
-            headers.forEach((th, i) => {
-                const sortKey = th.dataset.sort || th.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
-                if (sortKey && columnVisibility[sortKey] !== undefined) {
-                    cells[i].style.display = columnVisibility[sortKey] ? '' : 'none';
-                }
-            });
         }
     });
 }
