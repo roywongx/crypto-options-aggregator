@@ -140,13 +140,13 @@ async function setAutoRefresh(minutes) {
     if (minutes > 0) {
         autoRefreshInterval = setInterval(async () => {
             if (navigator.onLine) {
-                await loadLatestData();
+                await triggerScan();
             } else {
                 showAlert('网络断开，跳过自动刷新', 'warning');
             }
         }, minutes * 60 * 1000);
         
-        showAlert(`已设置 ${minutes} 分钟自动刷新`, 'info');
+        showAlert(`已设置 ${minutes} 分钟自动刷新（含扫描）`, 'info');
     }
 }
 
@@ -559,20 +559,14 @@ async function loadLatestData() {
         loadDvolChartData();
         loadPcrChart(currency, chartPeriods.pcr || 168);
         
-        // v6.0: Load bottom fishing advice for BTC
-        if (currency === 'BTC') {
-            loadBottomFishingAdvice('BTC');
-        } else {
-            const section = document.getElementById('bottomFishingSection');
-            if (section) section.classList.add('hidden');
-        }
-        
-        // v7.0: Load risk dashboard
+        // v8.0: Load risk dashboard (unified)
         loadRiskDashboard(currency);
+        
         
         // v8.0: 非阻塞式加载网格策略数据
         loadGridStrategyData().catch(() => {});
         
+        showAlert('数据刷新成功', 'success');
     } catch (error) {
         console.error('加载数据失败:', error);
         showAlert(`数据刷新失败: ${error.message}`, 'error');
@@ -590,78 +584,9 @@ async function loadLatestData() {
     }
 }
 
-async function loadBottomFishingAdvice(currency = 'BTC') {
-    try {
-        const res = await safeFetch(`${API_BASE}/api/bottom-fishing/advice?currency=${currency}`);
-        const data = await res.json();
-        
-        const section = document.getElementById('bottomFishingSection');
-        if (!section) return;
-        
-        if (!data || data.status === undefined) {
-            section.classList.add('hidden');
-            return;
-        }
-        
-        section.classList.remove('hidden');
-        
-        // Status Badge
-        const badge = document.getElementById('rfStatusBadge');
-        badge.innerText = data.status;
-        badge.className = 'px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ';
-        
-        if (data.status === 'NORMAL') {
-            badge.classList.add('bg-green-500/20', 'text-green-400');
-        } else if (data.status === 'NEAR_FLOOR') {
-            badge.classList.add('bg-blue-500/20', 'text-blue-400');
-        } else if (data.status === 'ADVERSE') {
-            badge.classList.add('bg-orange-500/20', 'text-orange-400', 'animate-pulse');
-        } else if (data.status === 'PANIC') {
-            badge.classList.add('bg-red-500/20', 'text-red-400', 'animate-bounce');
-        }
-        
-        // Advice List
-        const adviceList = document.getElementById('rfAdviceList');
-        adviceList.innerHTML = data.advice.map(a => `<li>${safeHTML(a)}</li>`).join('');
-        
-        // Action List
-        const actionList = document.getElementById('rfActionList');
-        actionList.innerHTML = data.recommended_actions.map(a => 
-            `<span class="px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full text-xs text-green-300 font-medium">
-                <i class="fas fa-check mr-1"></i> ${safeHTML(a)}
-            </span>`
-        ).join('');
-        
-        // Market Pain
-        const mpEl = document.getElementById('rfMaxPain');
-        mpEl.innerText = data.max_pain ? `$${data.max_pain.toLocaleString()}` : '--';
-        
-        const distEl = document.getElementById('rfPainDist');
-        if (data.max_pain && data.spot) {
-            const diff = data.max_pain - data.spot;
-            const pct = (diff / data.spot * 100).toFixed(1);
-            const color = diff > 0 ? 'text-green-400' : 'text-red-400';
-            const icon = diff > 0 ? '↑' : '↓';
-            distEl.innerHTML = `<span class="${color}">${icon} ${Math.abs(diff).toLocaleString()} (${pct}%)</span>`;
-        } else {
-            distEl.innerText = '--';
-        }
-        
-        // MM Signal
-        const mmEl = document.getElementById('rfMmSignal');
-        mmEl.innerHTML = data.mm_signal ? `<i class="fas fa-info-circle mr-2"></i> ${safeHTML(data.mm_signal)}` : '暂无做市商对冲信号';
-        
-    } catch (e) {
-        console.error('Failed to load bottom fishing advice:', e);
-        const section = document.getElementById('bottomFishingSection');
-        if (section) section.classList.add('hidden');
-    }
-}
-
-// v7.0: 加载风险仪表板
 async function loadRiskDashboard(currency = 'BTC') {
     try {
-        const res = await safeFetch(`${API_BASE}/api/risk/assess?currency=${currency}`);
+        const res = await safeFetch(`${API_BASE}/api/risk/overview?currency=${currency}`);
         const data = await res.json();
         
         updateRiskDashboardUI(data);
@@ -671,12 +596,9 @@ async function loadRiskDashboard(currency = 'BTC') {
 }
 
 function updateRiskDashboardUI(data) {
-    // 更新综合分数徽章
     const scoreBadge = document.getElementById('riskScoreBadge');
     if (scoreBadge) {
         scoreBadge.textContent = `综合风险: ${data.composite_score}`;
-        
-        // 根据风险等级设置颜色
         scoreBadge.className = 'px-3 py-1 rounded-full text-sm font-bold ';
         if (data.risk_level === 'LOW') {
             scoreBadge.classList.add('bg-green-500/20', 'text-green-400');
@@ -689,75 +611,106 @@ function updateRiskDashboardUI(data) {
         }
     }
     
-    // 更新各风险组件
+    // Status Badge
+    const badge = document.getElementById('rfStatusBadge');
+    if (badge && data.status) {
+        badge.innerText = data.status;
+        badge.className = 'px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ';
+        if (data.status === 'NORMAL') {
+            badge.classList.add('bg-green-500/20', 'text-green-400');
+        } else if (data.status === 'NEAR_FLOOR') {
+            badge.classList.add('bg-blue-500/20', 'text-blue-400');
+        } else if (data.status === 'ADVERSE') {
+            badge.classList.add('bg-orange-500/20', 'text-orange-400', 'animate-pulse');
+        } else if (data.status === 'PANIC') {
+            badge.classList.add('bg-red-500/20', 'text-red-400', 'animate-bounce');
+        }
+    }
+    
+    // 4维度风险分数
     const components = data.components;
-    
-    // 价格风险
-    const priceScore = document.getElementById('priceRiskScore');
-    const priceLevel = document.getElementById('priceRiskLevel');
-    if (priceScore && components.price_risk) {
-        priceScore.textContent = components.price_risk.score;
-        priceScore.className = 'text-2xl font-bold ' + getRiskColor(components.price_risk.score);
-        priceLevel.textContent = components.price_risk.status;
+    if (components) {
+        const priceScore = document.getElementById('priceRiskScore');
+        const priceLevel = document.getElementById('priceRiskLevel');
+        if (priceScore && components.price_risk) {
+            priceScore.textContent = components.price_risk.score;
+            priceScore.className = 'text-2xl font-bold ' + getRiskColor(components.price_risk.score);
+            priceLevel.textContent = components.price_risk.status;
+        }
+        
+        const volScore = document.getElementById('volRiskScore');
+        const volLevel = document.getElementById('volRiskLevel');
+        if (volScore && components.volatility_risk) {
+            volScore.textContent = components.volatility_risk.score;
+            volScore.className = 'text-2xl font-bold ' + getRiskColor(components.volatility_risk.score);
+            volLevel.textContent = components.volatility_risk.signal || '正常';
+        }
+        
+        const sentScore = document.getElementById('sentimentRiskScore');
+        const sentLevel = document.getElementById('sentimentRiskLevel');
+        if (sentScore && components.sentiment_risk) {
+            sentScore.textContent = components.sentiment_risk.score;
+            sentScore.className = 'text-2xl font-bold ' + getRiskColor(components.sentiment_risk.score);
+            sentLevel.textContent = '基于价格';
+        }
+        
+        const liqScore = document.getElementById('liquidityRiskScore');
+        const liqLevel = document.getElementById('liquidityRiskLevel');
+        if (liqScore && components.liquidity_risk) {
+            liqScore.textContent = components.liquidity_risk.score;
+            liqScore.className = 'text-2xl font-bold ' + getRiskColor(components.liquidity_risk.score);
+            liqLevel.textContent = '正常';
+        }
     }
     
-    // 波动率风险
-    const volScore = document.getElementById('volRiskScore');
-    const volLevel = document.getElementById('volRiskLevel');
-    if (volScore && components.volatility_risk) {
-        volScore.textContent = components.volatility_risk.score;
-        volScore.className = 'text-2xl font-bold ' + getRiskColor(components.volatility_risk.score);
-        volLevel.textContent = components.volatility_risk.signal || '正常';
+    // 策略建议
+    const adviceList = document.getElementById('rfAdviceList');
+    if (adviceList && data.advice) {
+        adviceList.innerHTML = data.advice.map(a => `<li>${safeHTML(a)}</li>`).join('');
     }
     
-    // 情绪风险
-    const sentScore = document.getElementById('sentimentRiskScore');
-    const sentLevel = document.getElementById('sentimentRiskLevel');
-    if (sentScore && components.sentiment_risk) {
-        sentScore.textContent = components.sentiment_risk.score;
-        sentScore.className = 'text-2xl font-bold ' + getRiskColor(components.sentiment_risk.score);
-        sentLevel.textContent = '基于价格';
-    }
-    
-    // 流动性风险
-    const liqScore = document.getElementById('liquidityRiskScore');
-    const liqLevel = document.getElementById('liquidityRiskLevel');
-    if (liqScore && components.liquidity_risk) {
-        liqScore.textContent = components.liquidity_risk.score;
-        liqScore.className = 'text-2xl font-bold ' + getRiskColor(components.liquidity_risk.score);
-        liqLevel.textContent = '正常';
-    }
-    
-    // 更新建议
-    const recList = document.getElementById('riskRecommendations');
-    if (recList && data.recommendations) {
-        recList.innerHTML = data.recommendations.map(rec => 
-            `<li class="flex items-start gap-2"><span class="text-yellow-500">•</span><span>${rec}</span></li>`
+    // 推荐操作
+    const actionList = document.getElementById('rfActionList');
+    if (actionList && data.recommended_actions) {
+        actionList.innerHTML = data.recommended_actions.map(a => 
+            `<span class="px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full text-xs text-green-300 font-medium">
+                <i class="fas fa-check mr-1"></i> ${safeHTML(a)}
+            </span>`
         ).join('');
     }
     
-    // 更新支撑位信息
-    if (components.price_risk && components.price_risk.factors) {
-        const factors = components.price_risk.factors;
-        // 从factors中提取支撑位信息
-        const regularMatch = factors.find(f => f.includes('常规支撑'));
-        const extremeMatch = factors.find(f => f.includes('极端支撑'));
+    // 市场痛点
+    const mpEl = document.getElementById('rfMaxPain');
+    if (mpEl) {
+        mpEl.innerText = data.max_pain ? `$${data.max_pain.toLocaleString()}` : '--';
+    }
+    
+    const distEl = document.getElementById('rfPainDist');
+    if (distEl && data.max_pain && data.spot) {
+        const diff = data.max_pain - data.spot;
+        const pct = (diff / data.spot * 100).toFixed(1);
+        const color = diff > 0 ? 'text-green-400' : 'text-red-400';
+        const icon = diff > 0 ? '↑' : '↓';
+        distEl.innerHTML = `<span class="${color}">${icon} ${Math.abs(diff).toLocaleString()} (${pct}%)</span>`;
+    }
+    
+    // MM Signal
+    const mmEl = document.getElementById('rfMmSignal');
+    if (mmEl) {
+        mmEl.innerHTML = data.mm_signal ? `<i class="fas fa-info-circle mr-2"></i> ${safeHTML(data.mm_signal)}` : '暂无做市商对冲信号';
+    }
+    
+    // 支撑位
+    if (data.floors) {
+        const regularEl = document.getElementById('regularFloor');
+        const extremeEl = document.getElementById('extremeFloor');
+        const regularHeader = document.getElementById('floorRegularHeader');
+        const extremeHeader = document.getElementById('floorExtremeHeader');
         
-        if (regularMatch) {
-            const regularEl = document.getElementById('regularFloor');
-            if (regularEl) {
-                const value = regularMatch.split(':')[1].trim();
-                regularEl.textContent = value;
-            }
-        }
-        
-        if (extremeMatch) {
-            const extremeEl = document.getElementById('extremeFloor');
-            if (extremeEl) {
-                const value = extremeMatch.split(':')[1].trim();
-                extremeEl.textContent = value;
-            }
-        }
+        if (regularEl) regularEl.textContent = `$${data.floors.regular.toLocaleString()}`;
+        if (extremeEl) extremeEl.textContent = `$${data.floors.extreme.toLocaleString()}`;
+        if (regularHeader) regularHeader.textContent = `$${data.floors.regular.toLocaleString()}`;
+        if (extremeHeader) extremeHeader.textContent = `$${data.floors.extreme.toLocaleString()}`;
     }
 }
 

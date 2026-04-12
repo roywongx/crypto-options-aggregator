@@ -919,9 +919,29 @@ async def sandbox_simulate(params: SandboxParams):
 
 @app.get("/api/bottom-fishing/advice")
 async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
+    return await get_risk_overview(currency)
+
+
+@app.get("/api/risk/assess")
+async def get_risk_assessment(currency: str = Query(default="BTC")):
+    return await get_risk_overview(currency)
+
+
+# v8.0: 统一风险中枢API
+@app.get("/api/risk/overview")
+async def get_risk_overview(currency: str = Query(default="BTC")):
+    """统一风险中枢 - 合并风险评估与抄底建议"""
+    from services.unified_risk_assessor import UnifiedRiskAssessor
+    
     spot = get_spot_price(currency)
     status = RiskFramework.get_status(spot)
+    floors = RiskFramework._get_floors()
 
+    # 综合风险评估
+    assessor = UnifiedRiskAssessor()
+    risk_data = assessor.assess_comprehensive_risk(spot, currency)
+
+    # 最大痛点
     try:
         from routers.maxpain import _calc_max_pain_internal
         pain_data = await _calc_max_pain_internal(currency)
@@ -931,24 +951,25 @@ async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
         nearest_mp = None
         mm_signal = ""
 
+    # 策略建议
     advice = []
     actions = []
 
     if status == "NORMAL":
-        advice.append(f"当前价格 ${spot:,.0f} 处于常规区间（高于 $55k）。")
-        advice.append("建议：以获取 200% APR 为目标，保持低杠杆。")
+        advice.append(f"当前价格 ${spot:,.0f} 处于常规区间。")
+        advice.append("建议：以获取稳定 APR 为目标，保持低杠杆。")
         actions.append("卖出 OTM Put (Delta 0.15-0.25)")
     elif status == "NEAR_FLOOR":
-        advice.append(f"当前价格 ${spot:,.0f} 接近常规底 ($55k)。")
+        advice.append(f"当前价格 ${spot:,.0f} 接近常规底 ${floors['regular']:,.0f}。")
         advice.append("建议：可适当增加仓位，博取高 Theta 收益。")
-        actions.append("卖出 ATM/ITM Put 并在跌破时准备滚仓")
+        actions.append("卖出 ATM/ITM Put 并准备滚仓")
     elif status == "ADVERSE":
-        advice.append(f"市场处于逆境区 (${spot:,.0f} < $55k)。")
-        advice.append("建议：启用后备资金 ($50k)，高杠杆快平仓，积极执行 Rolling Down & Out。")
-        actions.append("将持仓滚动至 $45k - $50k 区间")
+        advice.append(f"市场处于逆境区 (${spot:,.0f} < ${floors['regular']:,.0f})。")
+        advice.append("建议：启用后备资金，高杠杆快平仓，积极执行 Rolling Down & Out。")
+        actions.append("将持仓滚动至支撑区间")
     elif status == "PANIC":
-        advice.append(f"⚠️ 警告：价格已破极限底 $45k！")
-        advice.append("核心指令：止损并承认失败，保留剩余本金。不要在此区域接货。")
+        advice.append(f"⚠️ 警告：价格已破极限底 ${floors['extreme']:,.0f}！")
+        advice.append("核心指令：止损并保留本金。不要在此区域接货。")
         actions.append("平掉所有 Put 仓位，保持现金")
 
     if nearest_mp:
@@ -962,27 +983,20 @@ async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
         "currency": currency,
         "spot": spot,
         "status": status,
+        "composite_score": risk_data["composite_score"],
+        "risk_level": risk_data["risk_level"],
+        "components": risk_data["components"],
+        "recommendations": risk_data["recommendations"],
+        "floors": {
+            "regular": floors["regular"],
+            "extreme": floors["extreme"]
+        },
         "max_pain": nearest_mp,
         "mm_signal": mm_signal,
         "advice": advice,
         "recommended_actions": actions,
-        "floors": {
-            "regular": RiskFramework.REGULAR_FLOOR,
-            "extreme": RiskFramework.EXTREME_FLOOR
-        }
+        "timestamp": risk_data["timestamp"]
     }
-
-
-# v7.0: 综合风险评估API
-@app.get("/api/risk/assess")
-async def get_risk_assessment(currency: str = Query(default="BTC")):
-    """获取综合风险评估"""
-    from services.unified_risk_assessor import UnifiedRiskAssessor
-    
-    spot = get_spot_price(currency)
-    assessor = UnifiedRiskAssessor()
-    
-    return assessor.assess_comprehensive_risk(spot, currency)
 
 
 # v8.0: 预警系统API

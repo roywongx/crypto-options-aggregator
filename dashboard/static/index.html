@@ -126,36 +126,37 @@
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
                     <i class="fas fa-shield-alt text-red-500"></i>
-                    <h3 class="font-semibold text-lg">综合风险仪表板</h3>
+                    <h3 class="font-semibold text-lg">BTC 风险中枢</h3>
+                    <span id="rfStatusBadge" class="px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider"></span>
                 </div>
-                <div id="riskScoreBadge" class="px-3 py-1 rounded-full text-sm font-bold bg-gray-700">
-                    加载中...
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2 text-xs text-gray-400">
+                        <span>常规底: <b id="floorRegularHeader" class="text-blue-400">--</b></span>
+                        <span>极限底: <b id="floorExtremeHeader" class="text-red-400">--</b></span>
+                    </div>
+                    <div id="riskScoreBadge" class="px-3 py-1 rounded-full text-sm font-bold bg-gray-700">
+                        加载中...
+                    </div>
                 </div>
             </div>
             
+            <!-- 风险概览：4维度分数 -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <!-- 价格风险 -->
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">价格风险</div>
                     <div id="priceRiskScore" class="text-2xl font-bold">--</div>
                     <div id="priceRiskLevel" class="text-xs mt-1">--</div>
                 </div>
-                
-                <!-- 波动率风险 -->
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">波动率风险</div>
                     <div id="volRiskScore" class="text-2xl font-bold">--</div>
                     <div id="volRiskLevel" class="text-xs mt-1">--</div>
                 </div>
-                
-                <!-- 情绪风险 -->
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">情绪风险</div>
                     <div id="sentimentRiskScore" class="text-2xl font-bold">--</div>
                     <div id="sentimentRiskLevel" class="text-xs mt-1">--</div>
                 </div>
-                
-                <!-- 流动性风险 -->
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">流动性风险</div>
                     <div id="liquidityRiskScore" class="text-2xl font-bold">--</div>
@@ -163,25 +164,53 @@
                 </div>
             </div>
             
-            <!-- 风险建议 -->
-            <div class="mt-4 p-3 bg-gray-800/30 rounded-lg">
-                <h4 class="text-sm font-semibold text-gray-300 mb-2">
-                    <i class="fas fa-lightbulb text-yellow-500 mr-1"></i>风险建议
-                </h4>
-                <ul id="riskRecommendations" class="text-sm text-gray-400 space-y-1">
-                    <li>加载中...</li>
-                </ul>
-            </div>
-            
-            <!-- 动态支撑位信息 -->
-            <div class="mt-4 grid grid-cols-2 gap-4">
-                <div class="p-3 bg-blue-500/10 rounded-lg border border-blue-500/30">
-                    <div class="text-xs text-blue-400 mb-1">常规支撑位</div>
-                    <div id="regularFloor" class="text-lg font-bold text-blue-300">--</div>
+            <!-- 行动指南 + 市场情绪 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="space-y-3">
+                    <div id="rfAdviceContainer" class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                        <h4 class="text-sm font-semibold text-blue-400 mb-2 flex items-center gap-2">
+                            <i class="fas fa-lightbulb"></i> 核心策略建议
+                        </h4>
+                        <ul id="rfAdviceList" class="text-sm text-gray-200 space-y-2 list-disc list-inside">
+                            <li>加载中...</li>
+                        </ul>
+                    </div>
+                    <div id="rfActionContainer" class="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+                        <h4 class="text-sm font-semibold text-green-400 mb-2 flex items-center gap-2">
+                            <i class="fas fa-play-circle"></i> 推荐操作
+                        </h4>
+                        <div id="rfActionList" class="flex flex-wrap gap-2">
+                        </div>
+                    </div>
                 </div>
-                <div class="p-3 bg-red-500/10 rounded-lg border border-red-500/30">
-                    <div class="text-xs text-red-400 mb-1">极端支撑位</div>
-                    <div id="extremeFloor" class="text-lg font-bold text-red-300">--</div>
+                <div class="space-y-3">
+                    <div class="card-glass rounded-lg p-4 bg-gray-900/40">
+                        <h4 class="text-sm font-semibold text-purple-400 mb-3 flex items-center gap-2">
+                            <i class="fas fa-brain"></i> 市场情绪 & 痛点解析
+                        </h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="p-3 bg-gray-800/40 rounded-lg">
+                                <div class="text-xs text-gray-400 mb-1">最大痛点 (Max Pain)</div>
+                                <div id="rfMaxPain" class="text-xl font-bold">--</div>
+                            </div>
+                            <div class="p-3 bg-gray-800/40 rounded-lg">
+                                <div class="text-xs text-gray-400 mb-1">价格位置</div>
+                                <div id="rfPainDist" class="text-sm font-medium">--</div>
+                            </div>
+                        </div>
+                        <div id="rfMmSignal" class="mt-3 p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-sm text-purple-200">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="p-3 bg-blue-500/10 rounded-lg border border-blue-500/30">
+                            <div class="text-xs text-blue-400 mb-1">常规支撑位</div>
+                            <div id="regularFloor" class="text-lg font-bold text-blue-300">--</div>
+                        </div>
+                        <div class="p-3 bg-red-500/10 rounded-lg border border-red-500/30">
+                            <div class="text-xs text-red-400 mb-1">极端支撑位</div>
+                            <div id="extremeFloor" class="text-lg font-bold text-red-300">--</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
@@ -394,58 +423,6 @@
         </section>
 
         <!-- BTC 风险框架 & 抄底建议 (v6.0) -->
-        <section id="bottomFishingSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-blue-500 hidden">
-            <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-2">
-                    <i class="fas fa-anchor text-blue-500"></i>
-                    <h3 class="font-semibold text-lg">BTC 风险框架 & 抄底建议</h3>
-                    <span id="rfStatusBadge" class="px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider"></span>
-                </div>
-                <div class="flex items-center gap-4 text-xs text-gray-400">
-                    <span>常规底: <b class="text-blue-400">$55,000</b></span>
-                    <span>极限底: <b class="text-red-400">$45,000</b></span>
-                </div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="space-y-3">
-                    <div id="rfAdviceContainer" class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
-                        <h4 class="text-sm font-semibold text-blue-400 mb-2 flex items-center gap-2">
-                            <i class="fas fa-lightbulb"></i> 核心策略建议
-                        </h4>
-                        <ul id="rfAdviceList" class="text-sm text-gray-200 space-y-2 list-disc list-inside">
-                            <!-- 动态填充 -->
-                        </ul>
-                    </div>
-                    <div id="rfActionContainer" class="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-                        <h4 class="text-sm font-semibold text-green-400 mb-2 flex items-center gap-2">
-                            <i class="fas fa-play-circle"></i> 推荐操作
-                        </h4>
-                        <div id="rfActionList" class="flex flex-wrap gap-2">
-                            <!-- 动态填充 -->
-                        </div>
-                    </div>
-                </div>
-                <div class="card-glass rounded-lg p-4 bg-gray-900/40">
-                    <h4 class="text-sm font-semibold text-purple-400 mb-3 flex items-center gap-2">
-                        <i class="fas fa-brain"></i> 市场情绪 & 痛点解析
-                    </h4>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="p-3 bg-gray-800/40 rounded-lg">
-                            <div class="text-xs text-gray-400 mb-1">最大痛点 (Max Pain)</div>
-                            <div id="rfMaxPain" class="text-xl font-bold">--</div>
-                        </div>
-                        <div class="p-3 bg-gray-800/40 rounded-lg">
-                            <div class="text-xs text-gray-400 mb-1">价格位置</div>
-                            <div id="rfPainDist" class="text-sm font-medium">--</div>
-                        </div>
-                    </div>
-                    <div id="rfMmSignal" class="mt-4 p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-sm text-purple-200">
-                        <!-- 动态填充 -->
-                    </div>
-                </div>
-            </div>
-        </section>
-
         <!-- 扫描参数 -->
         <section class="card-glass rounded-xl p-5 mb-6">
             <div class="flex items-center gap-2 mb-4">
@@ -940,7 +917,7 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=585&t=1775666150"></script>
-    <script src="/static/grid-strategy.js?v=800&t=1775666150"></script>
-<div style="display:none" data-app-version="v800"></div></body>
+    <script src="/static/app.js?v=814&t=1775667600"></script>
+    <script src="/static/grid-strategy.js?v=814&t=1775667600"></script>
+<div style="display:none" data-app-version="v810"></div></body>
 </html>
