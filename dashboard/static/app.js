@@ -1127,8 +1127,8 @@ function applyColumnVisibility() {
         }
     });
     
-    // 过滤表格body
-    const tbody = document.getElementById('opportunitiesTableBody');
+    // 过滤表格body - tbody id是 opportunitiesTable
+    const tbody = document.getElementById('opportunitiesTable');
     if (tbody) {
         const rows = tbody.querySelectorAll('tr[data-symbol]');
         rows.forEach(row => {
