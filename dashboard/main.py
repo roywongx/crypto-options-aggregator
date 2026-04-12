@@ -605,7 +605,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "breakeven": round(strike - prem_usd if meta.option_type == "P" else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
                 "spread_pct": 0.1,
-                "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, meta.option_type),
+                "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, meta.option_type, spot),
                 "pop": calc_pop(delta_val, meta.option_type, spot, strike, iv, meta.dte),
                 "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                 "liquidity_score": min(100, int((oi / 500) * 100))
@@ -673,7 +673,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "breakeven": round(strike - prem_usd if opt_type == 'P' else strike + prem_usd, 0),
                 "distance_spot_pct": round(abs(strike - spot) / spot * 100, 1),
                 "spread_pct": round(spread_pct, 2),
-                "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, opt_type),
+                "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, opt_type, spot),
                 "pop": calc_pop(abs(delta_val or 0), opt_type, spot, strike, iv, int(dte)),
                 "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                 "liquidity_score": int(liq_score)
