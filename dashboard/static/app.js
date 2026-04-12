@@ -123,7 +123,7 @@ function setAutoRefresh(minutes) {
         autoRefreshInterval = null;
     }
     if (minutes > 0) {
-        autoRefreshInterval = setInterval(triggerScan, minutes * 60 * 1000);
+        autoRefreshInterval = setInterval(() => { loadDashboardData(true); showAlert('数据已刷新（缓存）', 'info'); }, minutes * 60 * 1000);
     }
 }
 
@@ -594,14 +594,23 @@ function updateOpportunitiesTable(contracts) {
     const riskAlerts = [];
     let highRiskContracts = [];
 
-    tbody.innerHTML = contracts.slice(0, 20).map((contract, idx) => {
+    // 分页加载：初始显示20个，支持加载更多
+    let PAGE_SIZE = 20;
+    if (!window.displayedContracts) window.displayedContracts = [];
+    if (!window.contractPage) window.contractPage = 1;
+    if (contracts.length > window.displayedContracts.length) {
+        window.displayedContracts = contracts.slice(0, window.contractPage * PAGE_SIZE);
+    }
+    const displayContracts = window.displayedContracts;
+    const hasMore = displayContracts.length < contracts.length;
+
+    tbody.innerHTML = displayContracts.map((contract, idx) => {
         const platformColor = contract.platform === 'Deribit' ? 'text-blue-400' : 'text-yellow-400';
         const platformBg = contract.platform === 'Deribit' ? 'bg-blue-500/10' : 'bg-yellow-500/10';
         const liqColor = contract.liquidity_score >= 70 ? 'text-green-400' : contract.liquidity_score >= 40 ? 'text-yellow-400' : 'text-red-400';
         const liqBg = contract.liquidity_score >= 70 ? 'bg-green-500/10' : contract.liquidity_score >= 40 ? 'bg-yellow-500/10' : 'bg-red-500/10';
         const deltaAbs = Math.abs(contract.delta);
 
-        // 统一合约名称字段
         const symbol = contract.symbol || contract.instrument_name || 'N/A';
         contract.symbol = symbol;
 
@@ -984,6 +993,13 @@ async function loadStats() {
 
 let alertQueue = [];
 function showAlert(message, type = 'info') {
+    // Demo alerts 检查 localStorage
+    const demoMatch = message.match(/demo|示例|测试/i);
+    if (demoMatch) {
+        const key = 'alert_dismissed_' + message.substring(0, 20).replace(/\s+/g, '_');
+        if (localStorage.getItem(key)) return;
+        localStorage.setItem(key, 'true');
+    }
     alertQueue.push({m:message, t:type, time:Date.now()});
     alertQueue = alertQueue.filter(a => Date.now() - a.time < 3000).slice(-3);
     const alertsList = document.getElementById('alertsList');
@@ -1024,6 +1040,10 @@ let currentSort = { field: null, direction: 'desc' };
 
 function sortContracts(field) {
     if (!currentData || !currentData.contracts || currentData.contracts.length === 0) return;
+
+    // 保存当前展开行的 symbol
+    const expandedSymbols = new Set();
+    document.querySelectorAll('tr[data-expanded="true"]').forEach(r => expandedSymbols.add(r.dataset.symbol));
 
     // 切换排序方向
     if (currentSort.field === field) {
@@ -1072,6 +1092,22 @@ function sortContracts(field) {
     updateOpportunitiesTable(sortedContracts);
 
     showAlert(`已按 ${getFieldName(field)} ${currentSort.direction === 'asc' ? '升序' : '降序'} 排序`, 'info');
+
+    // 恢复之前展开的行
+    setTimeout(() => {
+        expandedSymbols.forEach(symbol => {
+            const row = document.querySelector(`tr[data-symbol="${symbol}"]`);
+            if (row && !row.dataset.expanded) {
+                row.dataset.expanded = 'true';
+                const btn = row.querySelector('.expand-btn');
+                if (btn) btn.textContent = '▼';
+                const detail = row.nextElementSibling;
+                if (detail && detail.classList.contains('contract-detail')) {
+                    detail.classList.remove('hidden');
+                }
+            }
+        });
+    }, 50);
 }
 
 function updateSortIcons(activeField, direction) {

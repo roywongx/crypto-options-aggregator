@@ -1096,7 +1096,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "distance_spot_pct": round(abs(strike - spot) / spot * 100, 1),
                 "spread_pct": round(spread_pct, 2),
                 "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, opt_type),
-                "pop": _calc_pop(abs(delta_val or 0), opt_type, spot, strike, float(mark.get("markIV", 47) if mark.get("markIV") else 47) / 100.0, int(dte)),
+                "pop": _calc_pop(abs(delta_val or 0), opt_type, spot, strike, iv, int(dte)),
                 "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                 "liquidity_score": int(liq_score)
             })
