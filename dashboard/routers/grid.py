@@ -36,7 +36,9 @@ def _get_contracts_from_db(currency: str):
             try:
                 contracts = json.loads(row[0]) if isinstance(row[0], str) else row[0]
                 return contracts
-            except:
+            except Exception as e:
+                import sys
+                print(f"[WARN] _get_contracts_from_db: parse error: {e}", file=sys.stderr)
                 return []
         return []
     except Exception as e:
@@ -246,7 +248,9 @@ async def get_revenue_summary(
                     for c in contracts:
                         premium = float(c.get("premium_usd", c.get("premium", 0)))
                         total_premium += premium
-                except:
+                except Exception as e:
+                    import sys
+                    print(f"[WARN] revenue-summary: parse error: {e}", file=sys.stderr)
                     continue
 
         avg_daily_premium = total_premium / max(1, scan_count)
