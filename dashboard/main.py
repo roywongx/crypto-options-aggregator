@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
-from models.contracts import ScanParams, RollCalcParams, QuickScanParams, RecoveryCalcParams, SandboxParams
+from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -48,7 +48,8 @@ DB_PATH = Path(__file__).parent / "data" / "monitor.db"
 
 
 
-from models.contracts import ScanParams, RollCalcParams, QuickScanParams, RecoveryCalcParams, SandboxParams
+from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
+
 
 def _get_deribit_monitor():
     """获取 DeribitOptionsMonitor 单例（单进程安全，多 worker 各自独立）"""
@@ -210,75 +211,6 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         import logging
         logging.getLogger(__name__).error("adapt_params_by_dvol failed: %s", str(e), exc_info=True)
         return {"success": False, "error": "参数适配失败，请检查输入参数"}
-
-
-def calculate_recovery_plan(contracts: List[Dict], params: RecoveryCalcParams, spot_price: float) -> Dict[str, Any]:
-    if not contracts or len(contracts) == 0:
-        return {"error": "没有可用的合约数据"}
-
-    current_loss = params.current_loss
-    target_apr = params.target_apr / 100
-
-    valid_contracts = [c for c in contracts if c.get('apr', 0) > 50 and abs(c.get('delta', 0)) <= params.max_delta]
-
-    if not valid_contracts:
-        return {"error": "没有符合条件的合约（APR>50%且Delta在范围内）"}
-
-    valid_contracts.sort(key=lambda x: x.get('apr', 0), reverse=True)
-
-    plans = []
-    for contract in valid_contracts[:5]:
-        apr = contract.get('apr', 0) / 100
-        dte = contract.get('dte', 30)
-        strike = contract.get('strike', 0)
-        delta = abs(contract.get('delta', 0))
-
-        period_yield = apr * (dte / 365)
-        if period_yield <= 0:
-            continue
-
-        required_premium = current_loss
-        contract_value = strike * 0.2
-        num_contracts = max(1, int(required_premium / (contract_value * period_yield)))
-
-        if num_contracts > params.max_contracts:
-            num_contracts = params.max_contracts
-
-        total_margin = contract_value * num_contracts
-        expected_premium = total_margin * period_yield
-        net_profit = expected_premium - current_loss
-
-        risk_level = "低风险"
-        if delta > 0.4:
-            risk_level = "高风险"
-        elif delta > 0.3:
-            risk_level = "中风险"
-        elif dte < 7:
-            risk_level = "中风险"
-
-        plan = {
-            "symbol": contract.get('symbol', 'N/A'),
-            "platform": contract.get('platform', 'N/A'),
-            "strike": strike,
-            "dte": dte,
-            "apr": contract.get('apr', 0),
-            "delta": delta,
-            "num_contracts": num_contracts,
-            "total_margin": round(total_margin, 2),
-            "expected_premium": round(expected_premium, 2),
-            "net_profit": round(net_profit, 2),
-            "risk_level": risk_level
-        }
-        plans.append(plan)
-
-    plans.sort(key=lambda x: x['net_profit'], reverse=True)
-
-    return {
-        "current_loss": current_loss,
-        "target_apr": params.target_apr,
-        "plans": plans,
-        "recommended": plans[0] if plans else None
-    }
 
 
 def generate_wind_sentiment(summary: Dict, spot: float) -> str:
@@ -695,33 +627,156 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     }
 
 
-@app.post("/api/recovery-calculate")
-async def calculate_recovery(params: RecoveryCalcParams):
+@app.post("/api/strategy-calc")
+async def strategy_calc(params: StrategyCalcParams):
     conn = get_db_connection()
     cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT contracts_data, spot_price FROM scan_records 
-        WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
-    """, (params.currency,))
+    cursor.execute("SELECT contracts_data, spot_price FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (params.currency,))
     row = cursor.fetchone()
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
-    if not row:
+    if not row or not row[0]:
         raise HTTPException(status_code=404, detail="暂无扫描数据，请先执行扫描")
 
-    col_names = [desc[0] for desc in cursor.description] if cursor.description else []
-    rd = dict(zip(col_names, row)) if row and col_names else {}
-
     try:
-        contracts = json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else []
+        contracts = json.loads(row[0])
     except Exception:
         contracts = []
 
-    spot = rd.get('spot_price', 0) or 0
-    result = calculate_recovery_plan(contracts, params, spot)
-    return result
+    spot = row[1] or 0
 
+    if params.mode == "roll":
+        return _calc_roll_plan(contracts, params, spot)
+    else:
+        return _calc_new_plan(contracts, params, spot)
+
+
+def _calc_roll_plan(contracts: List[Dict], params: StrategyCalcParams, spot: float) -> Dict[str, Any]:
+    """滚仓模式计算"""
+    import math
+    from config import config
+
+    MIN_NET_CREDIT_USD = config.MIN_NET_CREDIT_USD
+    SLIPPAGE_PCT = config.ROLL_SLIPPAGE_PCT
+    SAFETY_BUFFER_PCT = config.ROLL_SAFETY_BUFFER_PCT
+
+    plans = []
+    break_even_exceeds_cap = 0
+    filtered_by_negative_nc = 0
+    filtered_by_margin = 0
+
+    for c in contracts:
+        c_type = c.get('option_type', 'P').upper()
+        if c_type != params.option_type.upper(): continue
+        c_strike = c.get('strike', 0)
+        if c_type == 'P' and c_strike >= params.old_strike: continue
+        if c_type == 'C' and c_strike <= params.old_strike: continue
+        if c.get('dte', 0) < params.min_dte or c.get('dte', 0) > params.max_dte: continue
+        if abs(c.get('delta', 1)) > params.target_max_delta: continue
+
+        prem_usd = c.get('premium_usd') or c.get('premium', 0)
+        if prem_usd <= 0: continue
+
+        effective_prem_usd = prem_usd * (1 - SLIPPAGE_PCT)
+        break_even_qty = math.ceil(params.close_cost_total / effective_prem_usd)
+        min_qty_for_profit = math.ceil(params.close_cost_total / effective_prem_usd * (1 + SAFETY_BUFFER_PCT))
+        max_allowed_qty = int(params.old_qty * params.max_qty_multiplier)
+
+        if break_even_qty > max_allowed_qty:
+            break_even_exceeds_cap += 1
+            continue
+
+        new_qty = max(min_qty_for_profit, break_even_qty)
+        strike = c['strike']
+        margin_req = new_qty * strike * params.margin_ratio if params.option_type == 'PUT' else new_qty * prem_usd * 10
+        if margin_req > params.reserve_capital:
+            filtered_by_margin += 1
+            continue
+
+        gross_credit = new_qty * effective_prem_usd
+        net_credit = gross_credit - params.close_cost_total
+
+        if net_credit < MIN_NET_CREDIT_USD:
+            filtered_by_negative_nc += 1
+            continue
+
+        delta_val = abs(c.get('delta', 0))
+        dte_val = c.get('dte', 30)
+        apr_val = c.get('apr', 0)
+
+        capital_efficiency = net_credit / margin_req if margin_req > 0 else 0
+        delta_penalty = max(0, (delta_val - 0.25) * 2)
+        dte_weight = min(1.0, dte_val / 45.0)
+        rf_modifier = RiskFramework.get_score_modifier(strike, spot)
+        risk_adjusted_score = capital_efficiency * (1 - delta_penalty) * (0.5 + 0.5 * dte_weight) * rf_modifier
+        annualized_roi = (net_credit / margin_req * 365 / max(dte_val, 1)) if margin_req > 0 else 0
+
+        plans.append({
+            "symbol": c.get('symbol', 'N/A'),
+            "platform": c.get('platform', 'N/A'),
+            "strike": strike, "dte": dte_val, "delta": delta_val, "apr": apr_val,
+            "premium_usd": prem_usd, "effective_prem_usd": round(effective_prem_usd, 2),
+            "new_qty": new_qty, "break_even_qty": break_even_qty,
+            "margin_req": round(margin_req, 2), "gross_credit": round(gross_credit, 2),
+            "net_credit": round(net_credit, 2), "roi_pct": round(annualized_roi, 1),
+            "score": round(risk_adjusted_score, 4), "capital_efficiency": round(capital_efficiency, 4)
+        })
+
+    plans.sort(key=lambda x: (x['score'], x['net_credit'], -x['delta']), reverse=True)
+
+    return {
+        "success": True, "mode": "roll",
+        "params": params.model_dump(),
+        "plans": plans[:15],
+        "meta": {"total_contracts_scanned": len(contracts), "plans_found": len(plans),
+                 "filtered": {"break_even_exceeded_cap": break_even_exceeds_cap,
+                              "negative_net_credit": filtered_by_negative_nc, "insufficient_margin": filtered_by_margin}}
+    }
+
+
+def _calc_new_plan(contracts: List[Dict], params: StrategyCalcParams, spot: float) -> Dict[str, Any]:
+    """新建模式计算"""
+    import math
+
+    plans = []
+    for c in contracts:
+        c_type = c.get('option_type', 'P').upper()
+        if c_type != params.option_type.upper(): continue
+        c_strike = c.get('strike', 0)
+        if c.get('dte', 0) < params.min_dte or c.get('dte', 0) > params.max_dte: continue
+        if abs(c.get('delta', 0)) > params.target_max_delta: continue
+
+        prem_usd = c.get('premium_usd') or c.get('premium', 0)
+        if prem_usd <= 0: continue
+
+        strike = c['strike']
+        margin_req = strike * params.margin_ratio if params.option_type == 'PUT' else prem_usd * 10
+        if margin_req > params.reserve_capital: continue
+
+        gross_credit = prem_usd
+        apr_val = c.get('apr', 0)
+        dte_val = c.get('dte', 30)
+        annualized_roi = (gross_credit / margin_req * 365 / max(dte_val, 1)) if margin_req > 0 else 0
+        delta_val = abs(c.get('delta', 0))
+        capital_efficiency = gross_credit / margin_req if margin_req > 0 else 0
+        rf_modifier = RiskFramework.get_score_modifier(strike, spot)
+        risk_adjusted_score = capital_efficiency * rf_modifier
+
+        plans.append({
+            "symbol": c.get('symbol', 'N/A'), "platform": c.get('platform', 'N/A'),
+            "strike": strike, "dte": dte_val, "delta": delta_val, "apr": apr_val,
+            "premium_usd": prem_usd, "margin_req": round(margin_req, 2),
+            "gross_credit": round(gross_credit, 2), "roi_pct": round(annualized_roi, 1),
+            "score": round(risk_adjusted_score, 4), "capital_efficiency": round(capital_efficiency, 4)
+        })
+
+    plans.sort(key=lambda x: (x['score'], x['roi_pct']), reverse=True)
+
+    return {
+        "success": True, "mode": "new",
+        "params": params.model_dump(),
+        "plans": plans[:15],
+        "meta": {"total_contracts_scanned": len(contracts), "plans_found": len(plans)}
+    }
 
 
 @app.post("/api/calculator/roll")

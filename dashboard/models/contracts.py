@@ -39,12 +39,26 @@ class QuickScanParams(BaseModel):
         if self.min_dte > self.max_dte:
             raise ValueError(f"min_dte ({self.min_dte}) must be <= max_dte ({self.max_dte})")
 
-class RecoveryCalcParams(BaseModel):
+class StrategyCalcParams(BaseModel):
+    """统一策略计算器参数 - 支持滚仓模式和新建模式"""
     currency: str = Field(default="BTC", description="币种")
-    current_loss: float = Field(..., gt=0, description="当前浮亏金额(USDT)")
-    target_apr: float = Field(default=200, ge=50, le=500, description="目标年化收益率(%)")
-    max_contracts: int = Field(default=10, ge=1, le=50, description="最大合约数量")
-    max_delta: float = Field(default=0.45, ge=0.1, le=0.8, description="最大Delta容忍")
+    mode: str = Field(default="roll", pattern="^(roll|new)$", description="模式: roll=滚仓, new=新建")
+    option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$", description="期权类型")
+    reserve_capital: float = Field(default=50000.0, ge=0, description="可用后备资金(USDT)")
+    target_max_delta: float = Field(default=0.35, ge=0.01, le=0.8, description="目标最大Delta")
+    min_dte: int = Field(default=7, ge=1)
+    max_dte: int = Field(default=90, ge=1)
+    margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
+
+    old_strike: Optional[float] = Field(default=None, description="原持仓行权价 (滚仓模式)")
+    old_qty: float = Field(default=1.0, gt=0, description="原持仓数量 (滚仓模式)")
+    close_cost_total: float = Field(default=0, ge=0, description="平仓总成本USDT (滚仓模式)")
+    max_qty_multiplier: float = Field(default=3.0, ge=1.0, description="最大倍投倍数 (滚仓模式)")
+    target_apr: float = Field(default=200, ge=50, le=500, description="目标年化收益率% (新建模式)")
+
+    def model_post_init(self, __context):
+        if self.mode == "roll" and self.old_strike is None:
+            raise ValueError("滚仓模式需要提供 old_strike")
 
 class SandboxParams(BaseModel):
     currency: str = Field(default="BTC", pattern="^(BTC|ETH|SOL)$")
