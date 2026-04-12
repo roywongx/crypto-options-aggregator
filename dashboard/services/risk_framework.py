@@ -75,6 +75,24 @@ class CalculationEngine:
             return 0.0
         return ((sell_price - buy_price) / ((sell_price + buy_price) / 2)) * 100
 
+    @staticmethod
+    def weighted_score(apr: float, pop: float, breakeven_pct: float,
+                       liquidity_score: float, iv_rank: float,
+                       strike: float = 0, spot: float = 0) -> float:
+        a = min(max(apr, 0) / 200.0, 1.0)
+        p = min(max(pop, 0) / 100.0, 1.0)
+        b = min(max(breakeven_pct, 0) / 20.0, 1.0)
+        l = min(max(liquidity_score, 0) / 100.0, 1.0)
+        ir = max(iv_rank, 0)
+        iv = 1.0 - abs(ir - 50) / 50.0
+
+        score = a * 0.25 + p * 0.25 + b * 0.20 + l * 0.15 + iv * 0.15
+
+        if spot > 0 and strike > 0:
+            score *= RiskFramework.get_score_modifier(strike, spot)
+
+        return round(score, 4)
+
 def _risk_emoji(abs_delta: float) -> str:
     if abs_delta > 0.30:
         return "🔴"
