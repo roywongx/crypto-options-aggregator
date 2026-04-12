@@ -37,6 +37,7 @@ from services.risk_framework import RiskFramework, CalculationEngine, _risk_emoj
 from services.flow_classifier import _classify_flow_heuristic, parse_trade_alert, _severity_from_notional, get_flow_label_info
 from services.spot_price import get_spot_price, get_spot_price_binance, get_spot_price_deribit, _get_spot_from_scan
 from services.strategy_calc import calc_roll_plan, calc_new_plan
+from services.trades import generate_wind_sentiment, fetch_large_trades, fetch_deribit_summaries
 from db.connection import get_db_connection as _db_conn
 from db.schema import init_database_schema
 
@@ -212,38 +213,6 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         import logging
         logging.getLogger(__name__).error("adapt_params_by_dvol failed: %s", str(e), exc_info=True)
         return {"success": False, "error": "参数适配失败，请检查输入参数"}
-
-
-def generate_wind_sentiment(summary: Dict, spot: float) -> str:
-    parts = []
-    kr = summary.get('key_levels', {})
-
-    buy_ratio = summary.get('buy_ratio', 0.5)
-    sell_ratio = summary.get('sell_ratio', 0.5)
-    total_trades = summary.get('total_trades', 0)
-    if total_trades > 0:
-        buy_pct = buy_ratio * 100
-        if buy_pct > 55:
-            parts.append(f"买盘主导({buy_pct:.0f}%)")
-        elif buy_pct < 45:
-            parts.append(f"卖盘主导({100-buy_pct:.0f}%)")
-
-
-    support = kr.get('net_support')
-    resistance = kr.get('net_resistance')
-    if support and resistance:
-        spct_s = (support - spot) / spot * 100
-        spct_r = (resistance - spot) / spot * 100
-        parts.append(f"支撑${support/1000:.0f}K({spct_s:+.1f}%)/阻力${resistance/1000:.0f}K({spct_r:+.1f}%)")
-
-    top_flow = summary.get('dominant_flow')
-    if top_flow and top_flow != 'unknown':
-        # dominant_flow is now already the Chinese label (from v5.9 aggregation)
-        parts.append(f"主流行为:{top_flow}")
-
-    if not parts:
-        return "数据不足，暂无法判断"
-    return " | ".join(parts)
 
 
 @asynccontextmanager
