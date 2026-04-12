@@ -339,51 +339,132 @@ async function triggerScan() {
     }
 }
 
-async function calculateRecovery() {
-    const btn = document.getElementById('recoveryBtn');
-    const lossInput = document.getElementById('recoveryLoss');
-    const resultDiv = document.getElementById('recoveryResult');
+let currentCalcMode = 'roll';
 
-    const currentLoss = parseFloat(lossInput.value);
-    if (!currentLoss || currentLoss <= 0) {
-        showAlert('请输入有效的浮亏金额', 'error');
-        lossInput.focus();
-        return;
+function setCalcMode(mode) {
+    currentCalcMode = mode;
+    const rollBtn = document.getElementById('modeRollBtn');
+    const newBtn = document.getElementById('modeNewBtn');
+    const rollFields = document.getElementById('scRollFields');
+    const newFields = document.getElementById('scNewFields');
+
+    if (mode === 'roll') {
+        rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-orange-500/20 border border-orange-500/50 text-orange-400';
+        newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+        rollFields.classList.remove('hidden');
+        newFields.classList.add('hidden');
+    } else {
+        newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-blue-500/20 border border-blue-500/50 text-blue-400';
+        rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+        newFields.classList.remove('hidden');
+        rollFields.classList.add('hidden');
+    }
+}
+
+async function submitStrategyCalc() {
+    const btn = document.getElementById('scSubmitBtn');
+    const wrapper = document.getElementById('scResultsWrapper');
+
+    const params = {
+        currency: document.getElementById('scCurrency').value,
+        mode: currentCalcMode,
+        option_type: document.getElementById('scOptionType').value,
+        reserve_capital: parseFloat(document.getElementById('scReserve').value) || 50000,
+        target_max_delta: parseFloat(document.getElementById('scMaxDelta').value) || 0.35,
+        min_dte: parseInt(document.getElementById('scMinDte').value) || 7,
+        max_dte: parseInt(document.getElementById('scMaxDte').value) || 90,
+        margin_ratio: 0.2
+    };
+
+    if (currentCalcMode === 'roll') {
+        params.old_strike = parseFloat(document.getElementById('scOldStrike').value);
+        params.old_qty = parseFloat(document.getElementById('scOldQty').value) || 1;
+        params.close_cost_total = parseFloat(document.getElementById('scCloseCost').value) || 0;
+        params.max_qty_multiplier = parseFloat(document.getElementById('scMaxMult').value) || 3;
+        if (!params.old_strike) {
+            showAlert('请输入旧行权价', 'error');
+            return;
+        }
+    } else {
+        params.target_apr = parseFloat(document.getElementById('scTargetApr').value) || 200;
     }
 
     btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>计算中...</span>';
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 计算中...';
+    wrapper.innerHTML = '<div class="text-center py-12 text-cyan-400"><i class="fas fa-spinner fa-spin text-3xl mb-2"></i><p>计算中...</p></div>';
 
     try {
-        const params = {
-            currency: document.getElementById('recoveryCurrency').value,
-            current_loss: currentLoss,
-            target_apr: parseFloat(document.getElementById('recoveryApr').value) || 200,
-            max_delta: parseFloat(document.getElementById('recoveryMaxDelta').value) || 0.45
-        };
-
-        const response = await safeFetch(`${API_BASE}/api/recovery-calculate`, {
+        const response = await safeFetch(`${API_BASE}/api/strategy-calc`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(params)
         });
-
         const result = await response.json();
 
-        if (result.error) {
-            showAlert('计算失败: ' + result.error, 'error');
-            resultDiv.classList.add('hidden');
+        if (!result.success) {
+            wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>${result.error || '计算失败'}</p></div>`;
         } else {
-            displayRecoveryResult(result);
-            resultDiv.classList.remove('hidden');
-            showAlert('修复方案计算完成！', 'success');
+            displayStrategyCalcResult(result, wrapper);
         }
     } catch (error) {
-        showAlert('计算错误: ' + error.message, 'error');
+        wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>错误: ${error.message}</p></div>`;
     } finally {
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-magic"></i> <span>计算修复方案</span>';
+        btn.innerHTML = '<i class="fas fa-magic"></i> 计算方案';
     }
+}
+
+function displayStrategyCalcResult(result, wrapper) {
+    const plans = result.plans || [];
+    if (plans.length === 0) {
+        const meta = result.meta || {};
+        wrapper.innerHTML = `<div class="text-center py-12 text-yellow-400">
+            <i class="fas fa-search text-3xl mb-2 opacity-50"></i>
+            <p>未找到符合条件的方案</p>
+            <p class="text-xs text-gray-500 mt-2">扫描了 ${meta.total_contracts_scanned || 0} 个合约</p>
+        </div>`;
+        return;
+    }
+
+    let html = `<div class="overflow-x-auto">
+        <table class="w-full text-xs">
+            <thead class="bg-gray-800/80">
+                <tr class="text-gray-400 border-b border-gray-700/50">
+                    <th class="text-left py-2 px-2 font-medium">排名</th>
+                    <th class="text-left py-2 px-2 font-medium">合约</th>
+                    <th class="text-right py-2 px-2 font-medium">Strike</th>
+                    <th class="text-center py-2 px-2 font-medium">DTE</th>
+                    <th class="text-right py-2 px-2 font-medium">Delta</th>
+                    <th class="text-right py-2 px-2 font-medium">APR</th>
+                    ${result.mode === 'roll' ? '<th class="text-right py-2 px-2 font-medium">数量</th><th class="text-right py-2 px-2 font-medium">净流入</th>' : '<th class="text-right py-2 px-2 font-medium">保证金</th><th class="text-right py-2 px-2 font-medium">权利金</th>'}
+                    <th class="text-right py-2 px-2 font-medium">ROI%</th>
+                    <th class="text-right py-2 px-2 font-medium">评分</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800/30">`;
+
+    plans.forEach((plan, idx) => {
+        const isBest = idx === 0;
+        html += `<tr class="hover:bg-white/5 transition ${isBest ? 'bg-green-500/10' : ''}">
+            <td class="py-3 px-2">${isBest ? '<i class="fas fa-crown text-yellow-400"></i>' : idx + 1}</td>
+            <td class="py-3 px-2"><span class="font-mono text-white">${plan.symbol}</span><br><span class="text-[10px] text-gray-500">${plan.platform}</span></td>
+            <td class="py-3 px-2 text-right font-mono text-orange-400">${plan.strike?.toLocaleString()}</td>
+            <td class="py-3 px-2 text-center">${plan.dte}</td>
+            <td class="py-3 px-2 text-right">${plan.delta?.toFixed(3)}</td>
+            <td class="py-3 px-2 text-right text-green-400">${plan.apr?.toFixed(1)}%</td>
+            ${result.mode === 'roll' ? `<td class="py-3 px-2 text-right">${plan.new_qty}</td><td class="py-3 px-2 text-right text-cyan-400">$${plan.net_credit?.toFixed(2)}</td>` : `<td class="py-3 px-2 text-right">$${plan.margin_req?.toFixed(2)}</td><td class="py-3 px-2 text-right text-green-400">$${plan.gross_credit?.toFixed(2)}</td>`}
+            <td class="py-3 px-2 text-right text-yellow-400 font-bold">${plan.roi_pct?.toFixed(1)}%</td>
+            <td class="py-3 px-2 text-right">${plan.score?.toFixed(4)}</td>
+        </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    html += `<div class="mt-3 text-xs text-gray-500">扫描了 ${result.meta?.total_contracts_scanned || 0} 个合约，找到 ${result.meta?.plans_found || 0} 个方案</div>`;
+    wrapper.innerHTML = html;
+}
+
+async function calculateRecovery() {
+    showAlert('请使用策略计算器', 'info');
 }
 
 function displayRecoveryResult(result) {
@@ -1872,113 +1953,6 @@ function openRollCalcModal() {
             document.getElementById('rcOldStrike').value = Math.round(curSpot * 0.95);
         }
         document.getElementById('rcOldStrike').focus();
-    }
-}
-
-function closeRollCalcModal() {}
-
-async function submitRollCalc() {
-    const btn = document.getElementById('rcSubmitBtn');
-    const wrapper = document.getElementById('rcResultsWrapper');
-    const table = document.getElementById('rcResultsTable');
-    const tbody = document.getElementById('rcResultsBody');
-    
-    table.classList.remove('hidden');
-    
-    const currency = document.getElementById('rcCurrency').value;
-    const oldStrike = parseFloat(document.getElementById('rcOldStrike').value);
-    const oldQty = parseFloat(document.getElementById('rcOldQty').value);
-    const closeCost = parseFloat(document.getElementById('rcCloseCost').value);
-    const reserve = parseFloat(document.getElementById('rcReserve').value);
-    
-    if (!oldStrike || !oldQty || !closeCost) {
-        showAlert('请填写完整的实盘持仓与平仓成本信息', 'error');
-        return;
-    }
-    
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 计算中...';
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-10 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>扫描匹配最优滚仓路径...</td></tr>';
-    
-    try {
-        const payload = {
-            currency: currency,
-            old_strike: oldStrike,
-            old_qty: oldQty,
-            close_cost_total: closeCost,
-            reserve_capital: reserve,
-            target_max_delta: parseFloat(document.getElementById('rcMaxDelta').value) || 0.35,
-            min_dte: parseInt(document.getElementById('rcMinDte').value) || 7,
-            max_dte: parseInt(document.getElementById('rcMaxDte').value) || 90,
-            max_qty_multiplier: parseFloat(document.getElementById('rcMaxMult').value) || 3.0
-        };
-        
-        const response = await safeFetch(API_BASE + '/api/calculator/roll', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        
-        const result = await response.json();
-        
-        if (!result.success || !result.plans || result.plans.length === 0) {
-            const meta = (result.meta || {}).filtered || {};
-            let reasonHtml = '';
-            if (Object.keys(meta).length > 0) {
-                reasonHtml = `<br><span class="text-xs text-gray-400">
-                    过滤统计: BE超限${meta.break_even_exceeded_cap||0} | 负收益${meta.negative_net_credit||0} | 保证金不足${meta.insufficient_margin||0}<br>
-                    建议: 增大倍数上限 / 提高后备金 / 放宽Delta
-                </span>`;
-            }
-            wrapper.innerHTML = `<div class="text-center py-6 ${!result.success ? 'text-red-400' : 'text-yellow-500'}">
-                <i class="fas ${!result.success ? 'fa-times-circle' : 'fa-search'} text-2xl mb-2 opacity-50 block"></i>
-                <div class="font-medium">${!result.success ? ('计算失败: ' + (result.error || '未知错误')) : '未找到满足条件的正收益滚仓方案'}</div>
-                ${reasonHtml ? `<div class="text-xs text-gray-400 mt-2">${reasonHtml}</div>` : '<div class="text-xs text-gray-500 mt-2">建议: 放宽Delta/增大倍数/提高后备金</div>'}
-            </div>`;
-            table.classList.add('hidden');
-        } else {
-            wrapper.innerHTML = '';
-            table.classList.remove('hidden');
-            tbody.innerHTML = result.plans.map((plan, idx) => {
-                const isBest = idx === 0;
-                return `
-                <tr class="hover:bg-white/5 transition ${isBest ? 'bg-green-500/10' : ''}">
-                    <td class="py-3 px-3">
-                        <div class="flex flex-col">
-                            <span class="font-mono text-white flex items-center gap-2">
-                                ${isBest ? '<i class="fas fa-crown text-yellow-400"></i>' : ''}
-                                ${plan.symbol}
-                            </span>
-                            <span class="text-[10px] text-gray-500">DTE: ${plan.dte} | APR: ${plan.apr.toFixed(1)}% | 平台: ${plan.platform}</span>
-                        </div>
-                    </td>
-                    <td class="py-3 px-3 text-right">
-                        <span class="font-mono text-orange-400 font-bold">${plan.new_qty}</span>
-                        <span class="text-xs text-gray-500 ml-1">(BE:${plan.break_even_qty || '?'})</span>
-                    </td>
-                    <td class="py-3 px-3 text-right font-mono ${plan.delta > 0.3 ? 'text-red-400' : 'text-green-400'}">${plan.delta.toFixed(3)}</td>
-                    <td class="py-3 px-3 text-right">
-                        <span class="font-mono">$${Math.round(plan.margin_req).toLocaleString()}</span>
-                    </td>
-                    <td class="py-3 px-3 text-right">
-                        <span class="font-mono font-bold text-green-400">+$${Math.round(plan.net_credit).toLocaleString()}</span>
-                        <div class="text-[10px] text-gray-500">已扣除平仓成本</div>
-                    </td>
-                    <td class="py-3 px-3 text-right">
-                        <span class="font-mono ${((plan.roi_pct || 0) > 50) ? 'text-green-400 font-bold' : 'text-yellow-300'}">${(plan.roi_pct || 0).toFixed(1)}%</span>
-                        <div class="text-[10px] text-gray-500">${(plan.capital_efficiency || 0).toFixed(2)}x</div>
-                    </td>
-                </tr>
-                `;
-            }).join('');
-        }
-        
-    } catch (e) {
-        wrapper.innerHTML = `<div class="text-center py-6 text-red-500"><i class="fas fa-exclamation-triangle text-2xl mb-2"></i><div>计算失败: ${e.message}</div></div>`;
-        table.classList.add('hidden');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-magic"></i> 计算正收益滚仓方案';
     }
 }
 
