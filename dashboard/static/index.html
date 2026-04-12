@@ -86,7 +86,7 @@
         </header>
 
         <!-- 顶部指标卡片 -->
-        <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <section class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
             <div class="card-glass metric-card rounded-xl p-4">
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-gray-400 text-sm">现货价格</span>
@@ -105,11 +105,11 @@
             </div>
             <div class="card-glass metric-card rounded-xl p-4">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">大宗交易 (1h)</span>
-                    <i class="fas fa-fish text-purple-500 text-lg"></i>
+                    <span class="text-gray-400 text-sm">距支撑位</span>
+                    <i class="fas fa-shield-alt text-blue-400 text-lg"></i>
                 </div>
-                <div class="text-2xl font-bold" id="largeTradesCount">--</div>
-                <div class="text-xs text-gray-400 mt-1">笔大单成交</div>
+                <div class="text-2xl font-bold" id="supportDistCard">--</div>
+                <div class="text-xs text-gray-400 mt-1">到常规支撑位</div>
             </div>
             <div class="card-glass metric-card rounded-xl p-4">
                 <div class="flex items-center justify-between mb-2">
@@ -118,6 +118,22 @@
                 </div>
                 <div class="text-2xl font-bold text-green-400" id="bestApr">--</div>
                 <div class="text-xs text-gray-400 mt-1">本周期最高</div>
+            </div>
+            <div class="card-glass metric-card rounded-xl p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-gray-400 text-sm">大宗交易 (1h)</span>
+                    <i class="fas fa-fish text-purple-500 text-lg"></i>
+                </div>
+                <div class="text-2xl font-bold" id="largeTradesCount">--</div>
+                <div class="text-xs text-gray-400 mt-1">笔大单成交</div>
+            </div>
+            <div class="card-glass metric-card rounded-xl p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-gray-400 text-sm">风险评分</span>
+                    <i class="fas fa-heartbeat text-red-400 text-lg"></i>
+                </div>
+                <div class="text-2xl font-bold" id="riskScoreCard">--</div>
+                <div class="text-xs text-gray-400 mt-1" id="riskLevelCard">综合风险</div>
             </div>
         </section>
 
@@ -181,6 +197,12 @@
                         </h4>
                         <div id="rfActionList" class="flex flex-wrap gap-2">
                         </div>
+                    </div>
+                    <div id="positionGuidance" class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                        <h4 class="text-sm font-semibold text-blue-400 mb-2 flex items-center gap-2">
+                            <i class="fas fa-sliders-h"></i> 仓位建议
+                        </h4>
+                        <div class="text-gray-500 text-sm">等待加载...</div>
                     </div>
                 </div>
                 <div class="space-y-3">
@@ -630,32 +652,36 @@
                         <table class="w-full table-compact" id="contractsTable">
                             <thead>
                                 <tr class="bg-gradient-to-r from-gray-800/80 to-gray-800/40 text-gray-400 text-xs" id="tableHeaders">
-                                    <th style="width:5.0%" class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('platform')" data-sort="platform">平台</th>
-                                    <th style="width:4.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('option_type')" data-sort="option_type">类型</th>
-                                    <th style="width:7%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('expiry')" data-sort="expiry">到期日</th>
+                                    <th style="width:4.5%" class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('platform')" data-sort="platform">平台</th>
+                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('option_type')" data-sort="option_type">类型</th>
+                                    <th style="width:6.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('expiry')" data-sort="expiry">到期日</th>
                                     <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('dte')" data-sort="dte">到期天数</th>
-                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('strike')" data-sort="strike">行权价</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('delta')" data-sort="delta">Delta</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('gamma')" data-sort="gamma">Gamma</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('vega')" data-sort="vega">Vega</th>
+                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('strike')" data-sort="strike">行权价</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('delta')" data-sort="delta">Delta</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('theta')" data-sort="theta" title="Theta - 每日时间价值衰减，正值=每天赚多少">Theta</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('gamma')" data-sort="gamma">Gamma</th>
+                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('vega')" data-sort="vega">Vega</th>
                                     <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('mark_iv')" data-sort="mark_iv">隐含波动率</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('apr')" data-sort="apr">年化收益</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('pop')" data-sort="pop" title="盈利概率 - OTM期权到期归零概率的补集，越高越安全">POP</th>
-                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('premium')" data-sort="premium">权利金$</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('apr')" data-sort="apr">年化收益</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('pop')" data-sort="pop" title="盈利概率 - PUT: 到期不被行权概率; CALL: 被行权概率(卖飞风险)">POP</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('premium')" data-sort="premium">权利金$</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('margin_required')" data-sort="margin_required" title="保证金需求 - 开仓所需最低保证金">保证金$</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('capital_efficiency')" data-sort="capital_efficiency" title="资金效率 - 权利金/保证金，越高越好">资金效率</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('support_distance_pct')" data-sort="support_distance_pct" title="支撑距离 - PUT行权价到常规支撑位的距离，>10%安全，<5%危险">支撑距离</th>
                                     <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('liquidity_score')" data-sort="liquidity_score">流动性</th>
-                                    <th style="width:6.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏损$</th>
-                                    <th style="width:6.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('breakeven')" data-sort="breakeven">盈亏平衡$</th>
-                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('breakeven_pct')" data-sort="breakeven_pct" title="安全垫距离 - 现价到盈亏平衡点的百分比缓冲">安全垫%</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('open_interest')" data-sort="open_interest">持仓量</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('spread_pct')" data-sort="spread_pct">买卖价差</th>
-                                    <th style="width:4.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-blue-300 transition select-none" onclick="sortContracts('iv_rank')" data-sort="iv_rank" title="IV Rank - 当前IV在历史分位中的位置，50%为中性">IV Rank</th>
-                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('_score')" data-sort="_score" title="加权评分 - 综合APR+POP+安全垫+流动性+IV">评分</th>
-                                    <th style="width:5.5%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('risk')" data-sort="risk">风险等级</th>
+                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏损$</th>
+                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('breakeven')" data-sort="breakeven">盈亏平衡$</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('breakeven_pct')" data-sort="breakeven_pct" title="安全垫距离 - 现价到盈亏平衡点的百分比缓冲">安全垫%</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('open_interest')" data-sort="open_interest">持仓量</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('spread_pct')" data-sort="spread_pct">买卖价差</th>
+                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-blue-300 transition select-none" onclick="sortContracts('iv_rank')" data-sort="iv_rank" title="IV Rank - 当前IV在历史分位中的位置，50%为中性">IV Rank</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('_score')" data-sort="_score" title="加权评分 - 综合APR+POP+安全垫+流动性+IV">评分</th>
+                                    <th style="width:5.0%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('risk')" data-sort="risk">风险等级</th>
                                 </tr>
                             </thead>
                             <tbody id="opportunitiesTable" class="divide-y divide-gray-800/40">
                                 <tr>
-                                    <td colspan="21" class="text-center py-12 text-gray-500">
+                                    <td colspan="25" class="text-center py-12 text-gray-500">
                                         <div class="flex flex-col items-center gap-3">
                                             <i class="fas fa-search text-3xl text-gray-600"></i>
                                             <p>点击"立即扫描"获取期权数据</p>

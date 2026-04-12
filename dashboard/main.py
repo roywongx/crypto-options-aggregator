@@ -340,6 +340,9 @@ def _quick_scan_sync(params: QuickScanParams = None):
             dvol_pct = max(1, min(99, dvol_pct))
 
     contracts = []
+    floors = RiskFramework._get_floors()
+    regular_floor = floors.get("regular", 0)
+    extreme_floor = floors.get("extreme", 0)
     
     # Process Deribit
     if summaries:
@@ -392,11 +395,17 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "apr": round(apr, 1),
                 "premium_usd": round(prem_usd, 2),
                 "delta": round(delta_val, 3),
+                "theta": round(float(s.get("theta", 0) or 0), 4),
+                "gamma": round(float(s.get("gamma", 0) or 0), 6),
+                "vega": round(float(s.get("vega", 0) or 0), 4),
                 "iv": round(iv * 100, 1),
                 "open_interest": round(oi, 0),
                 "loss_at_10pct": round(max(0, (strike - spot * 0.9) if meta.option_type == "P" else (spot * 1.1 - strike)), 2),
                 "breakeven": round(strike - prem_usd if meta.option_type == "P" else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
+                "support_distance_pct": round((strike - regular_floor) / regular_floor * 100, 1) if regular_floor > 0 and meta.option_type == "P" else None,
+                "margin_required": round(max(strike * 0.1, (strike - prem_usd) * margin_ratio), 2),
+                "capital_efficiency": round(prem_usd / max(strike * 0.1, (strike - prem_usd) * margin_ratio) * 100, 1) if cv > 0 else 0,
                 "spread_pct": 0.1,
                 "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, meta.option_type, spot),
                 "pop": calc_pop(delta_val, meta.option_type, spot, strike, iv, meta.dte),
@@ -465,6 +474,9 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "loss_at_10pct": round(max(0, (strike - spot * 0.9) if opt_type == "P" else (spot * 1.1 - strike)), 2),
                 "breakeven": round(strike - prem_usd if opt_type == 'P' else strike + prem_usd, 0),
                 "distance_spot_pct": round(abs(strike - spot) / spot * 100, 1),
+                "support_distance_pct": round((strike - regular_floor) / regular_floor * 100, 1) if regular_floor > 0 and opt_type == "P" else None,
+                "margin_required": round(max(strike * 0.1, (strike - prem_usd) * margin_ratio), 2),
+                "capital_efficiency": round(prem_usd / max(strike * 0.1, (strike - prem_usd) * margin_ratio) * 100, 1) if cv > 0 else 0,
                 "spread_pct": round(spread_pct, 2),
                 "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, opt_type, spot),
                 "pop": calc_pop(abs(delta_val or 0), opt_type, spot, strike, iv, int(dte)),
@@ -979,6 +991,14 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         else:
             advice.append("价格高于痛点，存在向下回归压力。")
 
+    position_guidance = {
+        "NORMAL": {"max_position_pct": 30, "suggested_delta_range": "0.15-0.25", "suggested_dte": "14-35"},
+        "NEAR_FLOOR": {"max_position_pct": 40, "suggested_delta_range": "0.20-0.35", "suggested_dte": "7-28"},
+        "ADVERSE": {"max_position_pct": 15, "suggested_delta_range": "0.10-0.20", "suggested_dte": "14-45"},
+        "PANIC": {"max_position_pct": 0, "suggested_delta_range": "N/A", "suggested_dte": "N/A"}
+    }
+    pos_guide = position_guidance.get(status, position_guidance["NORMAL"])
+
     return {
         "currency": currency,
         "spot": spot,
@@ -995,6 +1015,7 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         "mm_signal": mm_signal,
         "advice": advice,
         "recommended_actions": actions,
+        "position_guidance": pos_guide,
         "timestamp": risk_data["timestamp"]
     }
 

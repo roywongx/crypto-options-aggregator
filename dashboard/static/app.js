@@ -13,9 +13,9 @@ const STRATEGY_PRESETS = {
         "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0, "label": "折价接货"}
     },
     "CALL": {
-        "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0, "label": "保留上涨"},
-        "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0, "label": "标准备兑"},
-        "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0, "label": "强横盘"}
+        "conservative": {"max_delta": 0.15, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 8.0, "label": "保留上涨"},
+        "standard":     {"max_delta": 0.25, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 10.0, "label": "标准备兑"},
+        "aggressive":   {"max_delta": 0.35, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 15.0, "label": "强横盘"}
     }
 };
 let _currentPreset = 'standard';
@@ -712,6 +712,53 @@ function updateRiskDashboardUI(data) {
         if (regularHeader) regularHeader.textContent = `$${data.floors.regular.toLocaleString()}`;
         if (extremeHeader) extremeHeader.textContent = `$${data.floors.extreme.toLocaleString()}`;
     }
+
+    // 仓位建议
+    const posGuide = data.position_guidance;
+    if (posGuide) {
+        const posEl = document.getElementById('positionGuidance');
+        if (posEl) {
+            const maxPct = posGuide.max_position_pct;
+            const deltaRange = posGuide.suggested_delta_range;
+            const dteRange = posGuide.suggested_dte;
+            posEl.innerHTML = `
+                <div class="flex items-center gap-4 text-sm">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-chart-pie text-blue-400"></i>
+                        <span class="text-gray-400">最大仓位:</span>
+                        <span class="font-bold ${maxPct === 0 ? 'text-red-400' : maxPct <= 15 ? 'text-orange-400' : maxPct >= 40 ? 'text-emerald-400' : 'text-green-300'}">${maxPct}%</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-crosshairs text-yellow-400"></i>
+                        <span class="text-gray-400">Delta:</span>
+                        <span class="font-mono font-bold text-yellow-300">${deltaRange}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-clock text-purple-400"></i>
+                        <span class="text-gray-400">DTE:</span>
+                        <span class="font-mono font-bold text-purple-300">${dteRange}</span>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    // 更新顶部指标卡
+    const supportDistCard = document.getElementById('supportDistCard');
+    if (supportDistCard && data.floors && data.spot) {
+        const distPct = ((data.spot - data.floors.regular) / data.floors.regular * 100).toFixed(1);
+        supportDistCard.textContent = distPct + '%';
+        supportDistCard.className = 'text-2xl font-bold ' + (distPct >= 15 ? 'text-emerald-400' : distPct >= 5 ? 'text-yellow-400' : 'text-red-400');
+    }
+    const riskScoreCard = document.getElementById('riskScoreCard');
+    const riskLevelCard = document.getElementById('riskLevelCard');
+    if (riskScoreCard) {
+        riskScoreCard.textContent = data.composite_score;
+        riskScoreCard.className = 'text-2xl font-bold ' + getRiskColor(data.composite_score);
+    }
+    if (riskLevelCard) {
+        riskLevelCard.textContent = data.risk_level || '综合风险';
+    }
 }
 
 function getRiskColor(score) {
@@ -779,7 +826,7 @@ function updateOpportunitiesTable(contracts) {
     countEl.textContent = `${contracts.length} 个合约`;
 
     if (contracts.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="21" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="25" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
         return;
     }
 
@@ -851,24 +898,33 @@ function updateOpportunitiesTable(contracts) {
 
         const gamma = contract.gamma || 0;
         const vega = contract.vega || 0;
+        const theta = contract.theta || 0;
         const iv = contract.mark_iv || contract.iv || 0;
         const pop = contract.pop || null;
         const bePct = contract.breakeven_pct || null;
         const ivRank = contract.iv_rank || null;
+        const marginReq = contract.margin_required || 0;
+        const capEff = contract.capital_efficiency || 0;
+        const supportDist = contract.support_distance_pct;
+        const isPut = contract.option_type === 'P' || contract.option_type === 'PUT';
 
         return `<tr class="hover:bg-white/[0.02] transition ${riskClass}">
             <td class="py-2 px-3 text-center"><span class="${platformColor} text-xs font-semibold">${contract.platform}</span></td>
-            <td class="py-2 px-2 text-center"><span class="${contract.option_type === 'PUT' ? 'text-green-400' : 'text-blue-400'} text-xs font-bold">${contract.option_type || 'PUT'}</span></td>
+            <td class="py-2 px-2 text-center"><span class="${isPut ? 'text-green-400' : 'text-blue-400'} text-xs font-bold">${contract.option_type || 'PUT'}</span></td>
             <td class="py-2 px-2 text-center font-mono text-xs tabular-nums">${symbol.split('-')[1] || ''}</td>
             <td class="py-2 px-2 text-center text-xs tabular-nums">${(contract.dte || 0).toFixed(0)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums">$${Math.round(contract.strike).toLocaleString()}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(4)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${theta > 5 ? 'text-emerald-400' : theta > 0 ? 'text-green-300' : 'text-gray-500'}" title="每日时间价值衰减">${theta > 0 ? '+' : ''}${theta.toFixed(2)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-orange-400' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-yellow-400' : 'text-gray-300'}">${vega.toFixed(1)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${iv ? (iv >= 80 ? 'text-red-400' : iv >= 50 ? 'text-yellow-400' : 'text-emerald-400') : 'text-gray-300'}">${iv ? iv.toFixed(1) + '%' : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${(contract.apr || 0).toFixed(1)}%</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (pop >= 70 ? 'text-emerald-400' : pop >= 50 ? 'text-yellow-300' : 'text-orange-400') : 'text-gray-500'}">${pop ? pop.toFixed(0) + '%' : '-'}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (isPut ? (pop >= 70 ? 'text-emerald-400' : pop >= 50 ? 'text-yellow-300' : 'text-orange-400') : (pop <= 30 ? 'text-emerald-400' : pop <= 50 ? 'text-yellow-300' : 'text-red-400')) : 'text-gray-500'}" title="${isPut ? '到期不被行权概率' : '被行权概率(卖飞风险)'}">${pop ? (isPut ? pop.toFixed(0) + '%' : (100 - pop).toFixed(0) + '%飞') : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${(contract.premium || contract.premium_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-400" title="开仓保证金需求">$${marginReq.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${capEff >= 15 ? 'text-emerald-400' : capEff >= 8 ? 'text-green-300' : 'text-gray-400'}" title="权利金/保证金">${capEff.toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${supportDist !== null && supportDist !== undefined ? (supportDist >= 10 ? 'text-emerald-400' : supportDist >= 5 ? 'text-yellow-300' : 'text-red-400') : 'text-gray-600'}" title="PUT行权价到支撑位距离">${supportDist !== null && supportDist !== undefined ? supportDist.toFixed(1) + '%' : (isPut ? '-' : 'N/A')}</td>
             <td class="py-2 px-2 text-center"><span class="${liqColor} text-xs font-medium">${contract.liquidity_score}</span></td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-red-400/80">$${lossVal.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-blue-300/80">$${breakeven.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
@@ -876,7 +932,7 @@ function updateOpportunitiesTable(contracts) {
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-400">${oi.toLocaleString()}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${spreadColor}">${spreadPct.toFixed(2)}%</td>
             <td class="py-2 px-2 text-center font-mono text-xs tabular-nums ${ivRank ? (ivRank >= 70 ? 'text-red-400' : ivRank <= 30 ? 'text-emerald-400' : 'text-gray-400') : 'text-gray-500'}">${ivRank ? String(ivRank).split('.')[0] : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${contract._score !== undefined ? (contract._score >= 0.7 ? "text-emerald-400 font-bold" : contract._score >= 0.5 ? "text-green-300" : contract._score >= 0.3 ? "text-yellow-300" : "text-gray-500") : "text-gray-500"}" title="\u52a0\u6743\u8bc4\u5206: APR(25%)+POP(25%)+\u5b89\u5168\u57ab(20%)+\u6d41\u52a8\u6027(15%)+IV\u4e2d\u6027(15%)">${contract._score !== undefined ? contract._score.toFixed(3) : "-"}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${contract._score !== undefined ? (contract._score >= 0.7 ? "text-emerald-400 font-bold" : contract._score >= 0.5 ? "text-green-300" : contract._score >= 0.3 ? "text-yellow-300" : "text-gray-500") : "text-gray-500"}" title="加权评分: APR(25%)+POP(25%)+安全垫(20%)+流动性(15%)+IV中性(15%)">${contract._score !== undefined ? contract._score.toFixed(3) : "-"}</td>
             <td class="py-2 px-3 text-center">${riskBadge}</td>
         </tr>`;
     }).join('');
@@ -1459,12 +1515,16 @@ const COLUMN_CONFIG = [
     { key: 'dte', label: '到期天数', defaultVisible: true },
     { key: 'strike', label: '行权价', defaultVisible: true },
     { key: 'delta', label: 'Delta', defaultVisible: true },
+    { key: 'theta', label: 'Theta', defaultVisible: true },
     { key: 'gamma', label: 'Gamma', defaultVisible: false },
     { key: 'vega', label: 'Vega', defaultVisible: false },
     { key: 'mark_iv', label: '隐含波动率', defaultVisible: false },
     { key: 'apr', label: '年化收益', defaultVisible: true },
     { key: 'pop', label: 'POP', defaultVisible: true },
     { key: 'premium', label: '权利金$', defaultVisible: true },
+    { key: 'margin_required', label: '保证金$', defaultVisible: true },
+    { key: 'capital_efficiency', label: '资金效率', defaultVisible: true },
+    { key: 'support_distance_pct', label: '支撑距离', defaultVisible: true },
     { key: 'liquidity_score', label: '流动性', defaultVisible: false },
     { key: 'loss_at_10pct', label: '-10%亏损$', defaultVisible: false },
     { key: 'breakeven', label: '盈亏平衡$', defaultVisible: false },
