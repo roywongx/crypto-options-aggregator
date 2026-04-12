@@ -1109,16 +1109,17 @@ function applyColumnVisibility() {
     const headerRow = document.getElementById('tableHeaders');
     if (!headerRow) return;
     const headers = headerRow.querySelectorAll('th');
-    
-    // 构建列索引到字段名的映射
+
+    // 构建列索引到字段名的映射（跳过第0列的展开按钮）
     const colIndexToKey = {};
     headers.forEach((th, idx) => {
+        if (idx === 0) return; // 跳过展开按钮列
         const sortKey = th.dataset.sort;
         if (sortKey) {
-            colIndexToKey[idx] = sortKey;
+            colIndexToKey[idx - 1] = sortKey; // body列索引 = header列索引 - 1
         }
     });
-    
+
     // 过滤表头
     headers.forEach(th => {
         const sortKey = th.dataset.sort;
@@ -1126,8 +1127,8 @@ function applyColumnVisibility() {
             th.style.display = columnVisibility[sortKey] ? '' : 'none';
         }
     });
-    
-    // 过滤表格body - tbody id是 opportunitiesTable
+
+    // 过滤表格body
     const tbody = document.getElementById('opportunitiesTable');
     if (tbody) {
         const rows = tbody.querySelectorAll('tr[data-symbol]');
