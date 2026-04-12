@@ -11,6 +11,16 @@ import asyncio
 import subprocess
 import math
 
+# 统一策略预设：从 options_aggregator 导入（避免三套定义）
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+try:
+    from options_aggregator import STRATEGY_PRESETS as _OA_PRESETS
+    # 确保 main.py 使用的 STRATEGY_PRESETS 与 options_aggregator 一致
+    if 'STRATEGY_PRESETS' not in dir():
+        STRATEGY_PRESETS = _OA_PRESETS
+except ImportError:
+    pass  # 保留下方定义作为 fallback
+
 def _norm_cdf(x):
     """标准正态分布累积分布函数近似 (Abramowitz & Stegun)"""
     sign = 1 if x >= 0 else -1
@@ -2492,18 +2502,9 @@ async def get_wind_analysis(
     }
 
 
-STRATEGY_PRESETS = {
-    "PUT": {
-        "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0},
-        "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0},
-        "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0}
-    },
-    "CALL": {
-        "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0},
-        "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0},
-        "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0}
-    }
-}
+# STRATEGY_PRESETS 已移至 options_aggregator.py，L8-19 定义为唯一真值
+# main.py 通过 from options_aggregator import STRATEGY_PRESETS 使用
+# 此处保留以备 options_aggregator 导入失败时的 fallback
 
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
