@@ -9,6 +9,21 @@ import json
 import sqlite3
 import asyncio
 import subprocess
+import math
+
+def _norm_cdf(x):
+    """标准正态分布累积分布函数近似 (Abramowitz & Stegun)"""
+    sign = 1 if x >= 0 else -1
+    x = abs(x)
+    if x >= 37.0:
+        return 0.0 if sign > 0 else 1.0
+    exp_arg = -x * x / 2
+    if exp_arg < -700: exp_val = 0.0
+    else: exp_val = math.exp(exp_arg)
+    t = 1.0 / (1.0 + 0.2316419 * x)
+    poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+    p = 1.0 - exp_val * poly / math.sqrt(2 * math.pi)
+    return p if sign > 0 else 1.0 - p
 from concurrent.futures import ThreadPoolExecutor
 import requests
 import re
@@ -850,6 +865,15 @@ app = FastAPI(title="期权监控面板", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 
+# CORS middleware for cross-origin requests
+@app.middleware("http")
+async def corsMiddleware(request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
+
 @app.middleware("http")
 async def no_cache_middleware(request, call_next):
     response = await call_next(request)
@@ -1174,7 +1198,8 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     _dvol_raw = {}
     if rd.get('raw_output'):
         try: _dvol_raw = json.loads(rd['raw_output'])
-        except Exception: pass
+        except Exception as e:
+            print(f"[WARN] Fallback failed: {e}")
 
     try:
         _ltd = rd.get('large_trades_details', '')
@@ -2530,9 +2555,18 @@ def _calc_iv_rank(current_iv: float, history_ivs: list) -> float:
     return round((rank - 1) / (n - 1) * 100, 1)
 
 def _calc_pop(delta_val, option_type, spot, strike, iv, dte):
-    abs_d = abs(delta_val)
-    pop = 1.0 - abs_d
-    pop = max(5.0, min(95.0, round(pop * 100, 1)))
+    """基于 Black-Scholes 的概率盈利计算"""
+    if dte <= 0 or spot <= 0 or strike <= 0 or iv <= 0:
+        return 50.0
+    T = dte / 365.0
+    r = 0.01
+    sqrt_t = math.sqrt(T)
+    d1 = (math.log(spot / strike) + (r + iv ** 2 / 2) * T) / (iv * sqrt_t) if iv * sqrt_t > 0 else 0
+    if option_type.upper() in ('P', 'PUT'):
+        pop = _norm_cdf(-d1) * 100
+    else:
+        pop = _norm_cdf(d1) * 100
+    pop = max(5.0, min(95.0, round(pop, 1)))
     return pop
 
 def _calc_breakeven_pct(spot, strike, premium_usd, option_type):
