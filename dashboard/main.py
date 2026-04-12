@@ -45,12 +45,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import config
 from routers.grid import router as grid_router
-from services.dvol_analyzer import calc_delta_bs
+from services.dvol_analyzer import adapt_params_by_dvol, calc_delta_bs, calc_pop, get_dvol_from_deribit, _get_dvol_simple_fallback
 from services.instrument import _parse_inst_name
-from services.risk_framework import RiskFramework, CalculationEngine
+from services.risk_framework import RiskFramework, CalculationEngine, _risk_emoji
 from services.flow_classifier import _classify_flow_heuristic, parse_trade_alert, _severity_from_notional, get_flow_label_info
-from services.risk_framework import _risk_emoji
-from services.dvol_analyzer import adapt_params_by_dvol
+from services.spot_price import get_spot_price, get_spot_price_binance, get_spot_price_deribit, _get_spot_from_scan
 
 # DeribitOptionsMonitor 单例缓存
 _deribit_monitor_cache = {}
@@ -124,26 +123,6 @@ class RecoveryCalcParams(BaseModel):
     max_delta: float = Field(default=0.45, ge=0.1, le=0.8, description="最大Delta容忍")
 
 
-def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
-    """从 services.spot_price 导入"""
-    from services.spot_price import get_spot_price_binance as _get_binance
-    return _get_binance(currency)
-
-def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
-    """从 services.spot_price 导入"""
-    from services.spot_price import get_spot_price_deribit as _get_deribit
-    return _get_deribit(currency)
-
-def get_spot_price(currency: str = "BTC") -> float:
-    """从 services.spot_price 导入"""
-    from services.spot_price import get_spot_price as _get_spot
-    return _get_spot(currency)
-
-def _get_spot_from_scan(currency: str = "BTC"):
-    """从 services.spot_price 导入"""
-    from services.spot_price import _get_spot_from_scan as _from_scan
-    return _from_scan(currency)
-
 def _get_deribit_monitor():
     """获取 DeribitOptionsMonitor 单例（单进程安全，多 worker 各自独立）"""
     if 'mon' not in _deribit_monitor_cache:
@@ -151,66 +130,6 @@ def _get_deribit_monitor():
         from deribit_options_monitor import DeribitOptionsMonitor
         _deribit_monitor_cache['mon'] = DeribitOptionsMonitor()
     return _deribit_monitor_cache['mon']
-
-def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
-    try:
-        mon = _get_deribit_monitor()
-        result = mon.get_dvol_signal(currency)
-        if not result:
-            return {}
-        trend_arrow = "↑" if result.get("trend") == "上涨" else ("↓" if result.get("trend") == "下跌" else "→")
-        return {
-            "current": result.get("current_dvol", 0),
-            "z_score": result.get("z_score_7d", 0),
-            "signal": result.get("signal", "正常区间"),
-            "trend": trend_arrow,
-            "trend_label": result.get("trend", "震荡"),
-            "confidence": result.get("confidence_label", "中"),
-            "interpretation": result.get("recommendation", ""),
-            "data_points": result.get("history_points", 0),
-            "percentile_7d": result.get("iv_percentile_7d", 50.0),
-        }
-    except Exception as e:
-        print(f"获取DVOL失败(高级版): {e}, 回退简单版", file=sys.stderr)
-        return _get_dvol_simple_fallback(currency)
-def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
-    try:
-        base_params = {
-            "currency": currency,
-            "start_timestamp": int((datetime.utcnow() - timedelta(days=7)).timestamp() * 1000),
-            "end_timestamp": int(datetime.utcnow().timestamp() * 1000)
-        }
-        response = requests.get(
-            "https://www.deribit.com/api/v2/public/get_volatility_index_data",
-            params={**base_params, "resolution": "3600"}, timeout=10
-        )
-        data = response.json()
-        if data.get("result") and data["result"].get("data"):
-            points = data["result"]["data"]
-            if len(points) > 0:
-                current = float(points[-1][4])
-                closes = [float(p[4]) for p in points]
-                if len(closes) > 1:
-                    mean_val = sum(closes) / len(closes)
-                    std_val = (sum((x - mean_val) ** 2 for x in closes) / len(closes)) ** 0.5
-                    z_score = (current - mean_val) / std_val if std_val > 0 else 0
-                else:
-                    z_score = 0
-                if z_score > config.DVOL_Z_HIGH: signal = "异常偏高"
-                elif z_score > config.DVOL_Z_MID: signal = "偏高"
-                elif z_score < -2: signal = "异常偏低"
-                elif z_score < -1: signal = "偏低"
-                else: signal = "正常区间"
-                return {
-                    "current": round(current, 2), "z_score": round(z_score, 2),
-                    "signal": signal, "trend": "→", "trend_label": "震荡",
-                    "confidence": "低", "interpretation": f"DVOL {round(current,1)}% (Z={round(z_score,2)})",
-                    "data_points": len(closes),
-                    "percentile_7d": round(sum(1 for x in closes if x <= current) / len(closes) * 100, 1) if closes else 50.0
-                }
-        return {}
-    except Exception:
-        return {}
 
 
 def init_database():
@@ -701,7 +620,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "distance_spot_pct": round(dist, 1),
                 "spread_pct": 0.1,
                 "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, meta.option_type),
-                "pop": _calc_pop(delta_val, meta.option_type, spot, strike, iv, meta.dte),
+                "pop": calc_pop(delta_val, meta.option_type, spot, strike, iv, meta.dte),
                 "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                 "liquidity_score": min(100, int((oi / 500) * 100))
             })
@@ -769,7 +688,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "distance_spot_pct": round(abs(strike - spot) / spot * 100, 1),
                 "spread_pct": round(spread_pct, 2),
                 "breakeven_pct": _calc_breakeven_pct(spot, strike, prem_usd, opt_type),
-                "pop": _calc_pop(abs(delta_val or 0), opt_type, spot, strike, iv, int(dte)),
+                "pop": calc_pop(abs(delta_val or 0), opt_type, spot, strike, iv, int(dte)),
                 "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
                 "liquidity_score": int(liq_score)
             })
@@ -2123,39 +2042,8 @@ async def get_wind_analysis(
 
 # STRATEGY_PRESETS moved to config.py
 # adapt_params_by_dvol moved to services/dvol_analyzer.py
-
-def _calc_iv_rank(current_iv: float, history_ivs: list) -> float:
-    if not history_ivs or current_iv <= 0: return 50.0
-    sorted_ivs = sorted(history_ivs); n = len(sorted_ivs)
-    rank = 1
-    for i, v in enumerate(sorted_ivs):
-        if v >= current_iv: rank = i + 1; break
-    else: rank = n
-    if n == 1: return 50.0
-    return round((rank - 1) / (n - 1) * 100, 1)
-
-def _calc_pop(delta_val, option_type, spot, strike, iv, dte):
-    """基于 Black-Scholes 的概率盈利计算"""
-    if dte <= 0 or spot <= 0 or strike <= 0 or iv <= 0:
-        return 50.0
-    T = dte / 365.0
-    r = 0.01
-    sqrt_t = math.sqrt(T)
-    d1 = (math.log(spot / strike) + (r + iv ** 2 / 2) * T) / (iv * sqrt_t) if iv * sqrt_t > 0 else 0
-    if option_type.upper() in ('P', 'PUT'):
-        pop = _norm_cdf(-d1) * 100
-    else:
-        pop = _norm_cdf(d1) * 100
-    pop = max(5.0, min(95.0, round(pop, 1)))
-    return pop
-
-def _calc_breakeven_pct(spot, strike, premium_usd, option_type):
-    premium_per_unit = premium_usd / spot if spot > 0 else 0
-    if option_type.upper() in ('P', 'PUT'):
-        safety = (spot - (strike - premium_per_unit)) / spot * 100
-    else:
-        safety = ((strike + premium_per_unit) - spot) / spot * 100
-    return round(max(0, safety), 1)
+# _calc_pop moved to services/dvol_analyzer.py
+# _calc_breakeven_pct moved to services/risk_framework.py
 
 
 @app.get("/api/bottom-fishing/advice")
