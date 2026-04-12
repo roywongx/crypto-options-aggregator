@@ -270,3 +270,39 @@ async def get_revenue_summary(
         import sys
         print(f"[ERROR] /api/grid/revenue-summary: {e}", file=sys.stderr)
         return {"error": str(e)}
+
+
+@router.get("/presets")
+async def get_grid_presets():
+    """获取网格策略预设配置"""
+    return {
+        "presets": [
+            {
+                "name": "保守型",
+                "description": "低风险，稳定收益",
+                "put_count": 3,
+                "call_count": 2,
+                "min_dte": 14,
+                "max_dte": 30,
+                "min_apr": 20.0
+            },
+            {
+                "name": "均衡型",
+                "description": "平衡风险与收益",
+                "put_count": 5,
+                "call_count": 3,
+                "min_dte": 7,
+                "max_dte": 45,
+                "min_apr": 15.0
+            },
+            {
+                "name": "激进型",
+                "description": "高风险，高收益",
+                "put_count": 7,
+                "call_count": 5,
+                "min_dte": 7,
+                "max_dte": 60,
+                "min_apr": 10.0
+            }
+        ]
+    }

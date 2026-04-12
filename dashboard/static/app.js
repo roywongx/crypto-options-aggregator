@@ -68,6 +68,16 @@ document.addEventListener('DOMContentLoaded', () => {
     setAutoRefresh(5);
     requestNotificationPermission();
     loadPcrChart();
+    
+    // v8.0: 添加网络状态监听
+    window.addEventListener('online', () => {
+        showAlert('网络连接已恢复', 'success');
+        loadLatestData();
+    });
+
+    window.addEventListener('offline', () => {
+        showAlert('网络连接已断开', 'warning');
+    });
 });
 
 function requestNotificationPermission() {
@@ -126,8 +136,17 @@ function setAutoRefresh(minutes) {
         clearInterval(autoRefreshInterval);
         autoRefreshInterval = null;
     }
+    
     if (minutes > 0) {
-        autoRefreshInterval = setInterval(() => { loadLatestData(); showAlert('数据已刷新（缓存）', 'info'); }, minutes * 60 * 1000);
+        autoRefreshInterval = setInterval(async () => {
+            if (navigator.onLine) {
+                await loadLatestData();
+            } else {
+                showAlert('网络断开，跳过自动刷新', 'warning');
+            }
+        }, minutes * 60 * 1000);
+        
+        showAlert(`已设置 ${minutes} 分钟自动刷新`, 'info');
     }
 }
 
@@ -516,8 +535,18 @@ function displayRecoveryResult(result) {
 
 async function loadLatestData() {
     try {
+        // 添加网络状态检测
+        if (!navigator.onLine) {
+            showAlert('网络连接已断开，刷新失败', 'error');
+            return;
+        }
+        
         const currency = document.getElementById('currencySelect').value;
         const response = await safeFetch(`${API_BASE}/api/latest?currency=${currency}`);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
 
         const data = await response.json();
         currentData = data;
@@ -544,8 +573,21 @@ async function loadLatestData() {
         
         // v7.0: Load risk dashboard
         loadRiskDashboard(currency);
+        
+        // v8.0: 更新网格策略数据
+        await loadGridStrategyData();
+        
+        showAlert('数据刷新成功', 'success');
     } catch (error) {
         console.error('加载数据失败:', error);
+        showAlert(`数据刷新失败: ${error.message}`, 'error');
+        
+        // 错误重试机制
+        setTimeout(() => {
+            if (navigator.onLine) {
+                loadLatestData();
+            }
+        }, 5000);
     }
 }
 
@@ -1242,6 +1284,127 @@ document.getElementById('rollModal').addEventListener('click', (e) => {
     if (e.target.id === 'rollModal') closeRollModal();
 });
 
+
+// v8.0: 预警历史管理
+async function loadAlertHistory() {
+    try {
+        const level = document.getElementById('alertLevelFilter').value;
+        const type = document.getElementById('alertTypeFilter').value;
+        
+        let url = `${API_BASE}/api/alerts?hours=24`;
+        if (level) url += `&level=${level}`;
+        if (type) url += `&type=${type}`;
+        
+        const response = await safeFetch(url);
+        const data = await response.json();
+        
+        updateAlertStats(data.stats);
+        updateAlertHistoryList(data.alerts);
+    } catch (error) {
+        console.error('加载预警历史失败:', error);
+    }
+}
+
+function updateAlertStats(stats) {
+    const statsDiv = document.getElementById('alertStats');
+    statsDiv.innerHTML = `
+        <div class="bg-gray-800/50 p-3 rounded-lg text-center">
+            <div class="text-2xl font-bold">${stats.total}</div>
+            <div class="text-xs text-gray-400">总预警数</div>
+        </div>
+        <div class="bg-red-500/10 p-3 rounded-lg text-center">
+            <div class="text-2xl font-bold text-red-400">${stats.by_level.error || 0}</div>
+            <div class="text-xs text-gray-400">错误</div>
+        </div>
+        <div class="bg-yellow-500/10 p-3 rounded-lg text-center">
+            <div class="text-2xl font-bold text-yellow-400">${stats.by_level.warning || 0}</div>
+            <div class="text-xs text-gray-400">警告</div>
+        </div>
+        <div class="bg-blue-500/10 p-3 rounded-lg text-center">
+            <div class="text-2xl font-bold text-blue-400">${stats.by_level.info || 0}</div>
+            <div class="text-xs text-gray-400">信息</div>
+        </div>
+    `;
+}
+
+function updateAlertHistoryList(alerts) {
+    const listDiv = document.getElementById('alertHistoryList');
+    
+    if (alerts.length === 0) {
+        listDiv.innerHTML = '<div class="text-center text-gray-500 py-8">暂无预警记录</div>';
+        return;
+    }
+    
+    listDiv.innerHTML = alerts.map(alert => {
+        const time = new Date(alert.timestamp).toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        const levelColors = {
+            info: 'border-blue-500 bg-blue-500/10',
+            warning: 'border-yellow-500 bg-yellow-500/10',
+            error: 'border-red-500 bg-red-500/10',
+            critical: 'border-red-700 bg-red-700/10'
+        };
+        
+        const typeLabels = {
+            price: '价格',
+            volatility: '波动率',
+            position: '仓位',
+            risk: '风险',
+            system: '系统'
+        };
+        
+        return `
+            <div class="border-l-4 ${levelColors[alert.level]} p-3 rounded-lg">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <div class="text-sm font-medium">${alert.message}</div>
+                        <div class="text-xs text-gray-400">${time} · ${typeLabels[alert.type] || alert.type}</div>
+                    </div>
+                    <button onclick="acknowledgeAlert(${alert.id})" 
+                            class="text-xs ${alert.acknowledged ? 'bg-gray-600' : 'bg-gray-700 hover:bg-gray-600'} px-2 py-1 rounded">
+                        ${alert.acknowledged ? '已处理' : '确认'}
+                    </button>
+                </div>
+                ${alert.details ? `<div class="text-xs text-gray-500 mt-1">${JSON.stringify(alert.details)}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+async function acknowledgeAlert(alertId) {
+    try {
+        await safeFetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, {
+            method: 'POST'
+        });
+        loadAlertHistory();
+        showAlert('预警已确认', 'success');
+    } catch (error) {
+        console.error('确认预警失败:', error);
+        showAlert('确认预警失败', 'error');
+    }
+}
+
+// v8.0: 网格策略数据加载
+async function loadGridStrategyData() {
+    try {
+        const currency = document.getElementById('currencySelect').value;
+        const response = await safeFetch(`${API_BASE}/api/grid/recommend?currency=${currency}&put_count=5&call_count=3`);
+        
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        
+        // 更新网格策略显示（如果页面有网格策略部分）
+        if (window.updateGridDisplay) {
+            updateGridDisplay(data);
+        }
+    } catch (error) {
+        console.log('网格策略数据加载失败:', error);
+    }
+}
 
 // 列显示/隐藏功能
 const COLUMN_CONFIG = [
