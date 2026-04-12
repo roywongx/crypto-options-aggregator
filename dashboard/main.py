@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 from config import config
+from routers.grid import router as grid_router
 
 # DeribitOptionsMonitor 单例缓存
 _deribit_monitor_cache = {}
@@ -863,6 +864,7 @@ def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):
 
 app = FastAPI(title="期权监控面板", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+app.include_router(grid_router)
 
 
 # CORS middleware for cross-origin requests

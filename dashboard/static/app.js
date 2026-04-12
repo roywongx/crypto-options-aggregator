@@ -1855,3 +1855,113 @@ async function submitRollCalc() {
         btn.innerHTML = '<i class="fas fa-magic"></i> 计算正收益滚仓方案';
     }
 }
+
+async function fetchGridRecommendation() {
+    const btn = event.target.closest('button');
+    const loadingEl = document.getElementById('gridLoading');
+    const resultEl = document.getElementById('gridResult');
+
+    btn.disabled = true;
+    loadingEl.classList.remove('hidden');
+    resultEl.classList.add('hidden');
+
+    try {
+        const currency = document.getElementById('gridCurrency').value;
+        const putCount = parseInt(document.getElementById('gridPutCount').value) || 5;
+        const callCount = parseInt(document.getElementById('gridCallCount').value) || 3;
+        const minDte = parseInt(document.getElementById('gridMinDte').value) || 7;
+        const maxDte = parseInt(document.getElementById('gridMaxDte').value) || 45;
+        const minApr = parseFloat(document.getElementById('gridMinApr').value) || 15;
+
+        const params = new URLSearchParams({
+            currency: currency,
+            put_count: putCount,
+            call_count: callCount,
+            min_dte: minDte,
+            max_dte: maxDte,
+            min_apr: minApr
+        });
+
+        const response = await fetch(`/api/grid/recommend?${params}`);
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        document.getElementById('gridSpotPrice').textContent = `$${data.spot_price?.toLocaleString() || '--'}`;
+        document.getElementById('gridDvolSignal').textContent = data.dvol_signal || '--';
+        document.getElementById('gridRatio').textContent = data.recommended_ratio || '--';
+        document.getElementById('gridTotalPremium').textContent = `$${data.total_potential_premium?.toFixed(2) || '0.00'}`;
+
+        const putLevelsEl = document.getElementById('gridPutLevels');
+        const callLevelsEl = document.getElementById('gridCallLevels');
+
+        if (data.put_levels && data.put_levels.length > 0) {
+            putLevelsEl.innerHTML = data.put_levels.map(level => `
+                <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-mono font-bold text-red-400">$${level.strike?.toLocaleString()}</span>
+                        <span class="text-xs text-gray-400">DTE: ${level.dte}</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div><span class="text-gray-400">APR:</span> <span class="text-green-400 font-bold">${level.apr?.toFixed(1)}%</span></div>
+                        <div><span class="text-gray-400">溢价:</span> <span class="text-yellow-400">$${level.premium_usd?.toFixed(2)}</span></div>
+                        <div><span class="text-gray-400">Δ:</span> <span class="text-blue-400">${level.delta?.toFixed(3)}</span></div>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500">${level.reason || ''}</div>
+                </div>
+            `).join('');
+        } else {
+            putLevelsEl.innerHTML = '<div class="text-center py-4 text-gray-500">暂无Put推荐</div>';
+        }
+
+        if (data.call_levels && data.call_levels.length > 0) {
+            callLevelsEl.innerHTML = data.call_levels.map(level => `
+                <div class="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-mono font-bold text-green-400">$${level.strike?.toLocaleString()}</span>
+                        <span class="text-xs text-gray-400">DTE: ${level.dte}</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div><span class="text-gray-400">APR:</span> <span class="text-green-400 font-bold">${level.apr?.toFixed(1)}%</span></div>
+                        <div><span class="text-gray-400">溢价:</span> <span class="text-yellow-400">$${level.premium_usd?.toFixed(2)}</span></div>
+                        <div><span class="text-gray-400">Δ:</span> <span class="text-blue-400">${level.delta?.toFixed(3)}</span></div>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500">${level.reason || ''}</div>
+                </div>
+            `).join('');
+        } else {
+            callLevelsEl.innerHTML = '<div class="text-center py-4 text-gray-500">暂无Call推荐</div>';
+        }
+
+        const scenariosEl = document.getElementById('gridScenarios');
+        const spotPrice = data.spot_price || 83000;
+        const targetPrices = [
+            spotPrice * 0.85,
+            spotPrice,
+            spotPrice * 1.15
+        ];
+
+        scenariosEl.innerHTML = targetPrices.map(target => {
+            const pctChange = ((target - spotPrice) / spotPrice * 100).toFixed(1);
+            const colorClass = target < spotPrice ? 'border-red-500/30 bg-red-500/5' : 'border-green-500/30 bg-green-500/5';
+            return `
+                <div class="rounded-lg p-3 border ${colorClass}">
+                    <div class="text-xs text-gray-400 mb-1">${target < spotPrice ? '下跌' : target > spotPrice ? '上涨' : '当前'}</div>
+                    <div class="font-mono font-bold text-lg">$${target.toLocaleString()}</div>
+                    <div class="text-xs ${target < spotPrice ? 'text-red-400' : target > spotPrice ? 'text-green-400' : 'text-gray-400'}">${pctChange}%</div>
+                </div>
+            `;
+        }).join('');
+
+        resultEl.classList.remove('hidden');
+
+    } catch (e) {
+        console.error('Grid recommendation error:', e);
+        alert('获取推荐失败: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        loadingEl.classList.add('hidden');
+    }
+}
