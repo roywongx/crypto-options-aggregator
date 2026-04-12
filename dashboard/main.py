@@ -1749,9 +1749,18 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
 
 
 def _parse_inst_name(inst: str):
-    """从 services.instrument 导入"""
+    """从 services.instrument 导入，转换为字典"""
     from services.instrument import _parse_inst_name as parse_inst
-    return parse_inst(inst)
+    result = parse_inst(inst)
+    if result is None:
+        return None
+    return {
+        "currency": result.currency,
+        "expiry": result.expiry,
+        "strike": result.strike,
+        "option_type": result.option_type,
+        "dte": result.dte
+    }
 
 
 # DEPRECATED: Use mark['delta'] from API instead. Kept for Deribit branch fallback only.
@@ -1912,7 +1921,7 @@ async def _calc_max_pain_internal(currency: str):
         gamma = float(s.get("gamma") or 0)
         if oi < 1:
             continue
-        parsed.append({**meta, "oi": oi, "gamma": gamma})
+        parsed.append({"strike": meta["strike"], "expiry": meta["expiry"], "dte": meta["dte"], "option_type": meta["option_type"], "oi": oi, "gamma": gamma})
 
     if not parsed:
         # Debug: count how many items were filtered
