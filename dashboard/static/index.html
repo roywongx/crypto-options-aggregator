@@ -524,44 +524,6 @@
             </div>
         </section>
 
-        <!-- 预警历史 (v8.0) -->
-        <section id="alertHistory" class="card-glass rounded-xl p-5 mb-6">
-            <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-2">
-                    <i class="fas fa-bell text-yellow-500"></i>
-                    <h3 class="font-semibold text-lg">预警历史</h3>
-                </div>
-                <div class="flex gap-2">
-                    <select id="alertLevelFilter" class="input-dark rounded px-2 py-1 text-sm">
-                        <option value="">所有级别</option>
-                        <option value="info">信息</option>
-                        <option value="warning">警告</option>
-                        <option value="error">错误</option>
-                        <option value="critical">严重</option>
-                    </select>
-                    <select id="alertTypeFilter" class="input-dark rounded px-2 py-1 text-sm">
-                        <option value="">所有类型</option>
-                        <option value="price">价格</option>
-                        <option value="volatility">波动率</option>
-                        <option value="position">仓位</option>
-                        <option value="risk">风险</option>
-                    </select>
-                    <button onclick="loadAlertHistory()" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm">
-                        刷新
-                    </button>
-                </div>
-            </div>
-            
-            <div id="alertStats" class="grid grid-cols-4 gap-4 mb-4">
-                <!-- 统计数据 -->
-            </div>
-            
-            <div id="alertHistoryList" class="space-y-2 max-h-96 overflow-y-auto">
-                <!-- 预警列表 -->
-            </div>
-        </section>
-
-        <!-- BTC 风险框架 & 抄底建议 (v6.0) -->
         <!-- 扫描参数 -->
         <section class="card-glass rounded-xl p-5 mb-6">
             <div class="flex items-center gap-2 mb-4">
@@ -746,16 +708,6 @@
 
             <!-- 信息卡片区域 - 移除重复的图表，优化布局 -->
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mt-5">
-                <!-- 风险预警 -->
-                <div class="card-glass rounded-xl p-5 border-l-4 border-red-500" id="riskAlertsPanel" style="display: none;">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-exclamation-triangle text-red-500 animate-pulse"></i>
-                        风险预警
-                        <span class="text-xs text-red-400 font-normal">建议执行滚仓操作</span>
-                    </h2>
-                    <div id="riskAlertsList" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1 text-sm"></div>
-                </div>
-
                 <!-- 大宗异动 -->
                 <div class="card-glass rounded-xl p-5">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -903,17 +855,6 @@
                     </div>
                     <div id="sandboxResult" class="space-y-3">
                         <div class="text-gray-500 text-center py-6 text-sm">👆 点击「开始推演」进行沙盘模拟</div>
-                    </div>
-                </div>
-
-                <!-- 预警日志 -->
-                <div class="card-glass rounded-xl p-5">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-bell text-yellow-500"></i>
-                        预警日志
-                    </h2>
-                    <div id="alertsList" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 text-sm" style="max-height: 50vh;">
-                        <div class="text-gray-500 text-center py-4">暂无预警</div>
                     </div>
                 </div>
 

@@ -1036,38 +1036,6 @@ async def calc_wheel_roi(data: dict):
     return calc.calc_wheel_roi(put_strike, put_premium, call_strike, call_premium, spot, quantity)
 
 
-# v8.0: 预警系统API
-@app.get("/api/alerts")
-async def get_alerts(
-    level: str = Query(default=None),
-    alert_type: str = Query(default=None),
-    hours: int = Query(default=24),
-    limit: int = Query(default=100)
-):
-    """获取预警列表"""
-    from services.alert_manager import get_alert_manager
-    
-    manager = get_alert_manager()
-    alerts = manager.get_alerts(level=level, alert_type=alert_type, hours=hours, limit=limit)
-    stats = manager.get_alert_stats(hours=hours)
-    
-    return {
-        "alerts": alerts,
-        "stats": stats
-    }
-
-
-@app.post("/api/alerts/{alert_id}/acknowledge")
-async def acknowledge_alert(alert_id: int, action_taken: str = Query(default=None)):
-    """确认预警"""
-    from services.alert_manager import get_alert_manager
-    
-    manager = get_alert_manager()
-    manager.acknowledge_alert(alert_id, action_taken)
-    
-    return {"success": True, "message": "预警已确认"}
-
-
 # 启动服务器
 if __name__ == "__main__":
     import uvicorn

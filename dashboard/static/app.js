@@ -780,11 +780,9 @@ function updateOpportunitiesTable(contracts) {
 
     if (contracts.length === 0) {
         tbody.innerHTML = `<tr><td colspan="21" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
-        updateRiskAlerts([]);
         return;
     }
 
-    const riskAlerts = [];
     let highRiskContracts = [];
 
     // 分页加载：初始显示20个，支持加载更多
@@ -841,7 +839,7 @@ function updateOpportunitiesTable(contracts) {
         }
 
         if (riskLevel === '极高' || riskLevel === '高') {
-            riskAlerts.push({ symbol: symbol, strike: contract.strike, delta: deltaAbs, distancePct, level: riskLevel, reason: riskLevel === '极高' ? `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` : `Delta(${deltaAbs.toFixed(3)})>0.45` });
+            highRiskContracts.push({ symbol, reason: `Delta(${deltaAbs.toFixed(3)})>0.45` });
         }
 
         // 精简版12列表格数据
@@ -883,9 +881,6 @@ function updateOpportunitiesTable(contracts) {
         </tr>`;
     }).join('');
 
-    updateRiskAlerts(riskAlerts);
-
-    // 浏览器通知
     if (highRiskContracts.length > 0 && 'Notification' in window && Notification.permission === 'granted') {
         new Notification('期权风险预警', {
             body: `检测到 ${highRiskContracts.length} 个高风险合约，建议执行滚仓操作`,
@@ -952,47 +947,14 @@ function closeRollModal() {
     document.getElementById('rollModal').classList.remove('active');
 }
 
-function updateRiskAlerts(alerts) {
-    const panel = document.getElementById('riskAlertsPanel');
-    const list = document.getElementById('riskAlertsList');
-
-    if (alerts.length === 0) {
-        panel.style.display = 'none';
-        return;
-    }
-
-    panel.style.display = 'block';
-    const levelOrder = { '极高': 0, '高': 1, '中': 2, '警告': 3 };
-    alerts.sort((a, b) => levelOrder[a.level] - levelOrder[b.level]);
-
-    list.innerHTML = alerts.map(alert => {
-        const bgColor = alert.level === '极高' ? 'bg-red-500/20 border-red-500' : alert.level === '高' ? 'bg-red-500/10 border-red-400' : 'bg-orange-500/10 border-orange-400';
-        const icon = alert.level === '极高' || alert.level === '高' ? 'fa-exclamation-triangle' : 'fa-exclamation-circle';
-
-        return `<div class="${bgColor} border-l-4 rounded-lg p-3 text-xs">
-            <div class="flex items-start gap-2">
-                <i class="fas ${icon} text-red-400 mt-0.5 flex-shrink-0"></i>
-                <div class="flex-1">
-                    <div class="font-semibold text-white mb-1">${alert.symbol} - Strike ${Math.round(alert.strike).toLocaleString()}</div>
-                    <div class="text-gray-400">${alert.reason}</div>
-                    ${alert.distancePct !== null ? `<div class="text-orange-400 mt-1">距离: ${alert.distancePct.toFixed(1)}%</div>` : ''}
-                </div>
-            </div>
-        </div>`;
-    }).join('');
-
-    const highRiskCount = alerts.filter(a => a.level === '极高' || a.level === '高').length;
-    if (highRiskCount > 0) showAlert(`检测到 ${highRiskCount} 个高风险合约，建议执行滚仓操作！`, 'warning');
-}
-
 const flowSugg = {
-    protective_hedge: '\u673a\u6784\u62a4\u51b2 \u2193 \u77edf\u671f\u8c28\u614e',
-    premium_collect: '\u6536\u53d6\u6743\u5229 \u2191 \u503c\u597d\u73af\u5883',
-    speculative_put: '\u770b\u8dcc\u6295\u673a \u2193 \u98ce\u9669\u5347',
-    call_momentum: '\u8ffd\u6da8\u5efa\u4ed3 \u2191 \u770b\u597d\u884c\u60c5',
-    call_speculative: '\u770b\u6da8\u6295\u673a \u2191 \u5c0f\u5355\u4f4e\u4f4d\u5165\u573a',
-    covered_call: '\u5907\u5156\u5f00\u4ed3 \u2191 \u9501\u5b9a\u6536\u76ca',
-    call_overwrite: '\u6539\u4ed3\u64cd\u4f5c \u2191 \u8c03\u6574\u4ef7\u683c',
+    protective_hedge: '机构护冲 ↓ 短期谨慎',
+    premium_collect: '收取权利金 ↑ 值好环境',
+    speculative_put: '看跌投机 ↓ 风险升',
+    call_momentum: '追涨建仓 ↑ 看好行情',
+    call_speculative: '看涨投机 ↑ 小单低位入场',
+    covered_call: '备兑开仓 ↑ 锁定收益',
+    call_overwrite: '改仓操作 ↑ 调整价格',
 };
 
 function updateLargeTrades(trades, count) {
@@ -1057,9 +1019,9 @@ function updateLargeTrades(trades, count) {
 
         const severity = trade.severity || (notional >= 2000000 ? 'high' : notional >= 500000 ? 'medium' : 'info');
         const sevConfig = {
-            high: { bg: 'bg-red-500/20', badge: 'bg-red-500', label: '\u5927\u5355', emoji: '\u26a0\ufe0f' },
-            medium: { bg: 'bg-orange-500/20', badge: 'bg-orange-500', label: '\u4e2d\u5355', emoji: '\U0001f7e1' },
-            info: { bg: 'bg-blue-500/10', badge: 'bg-blue-500', label: '\u666e\u901a', emoji: '\u2705' }
+            high: { bg: 'bg-red-500/20', badge: 'bg-red-500', label: '大单', emoji: '⚠️' },
+            medium: { bg: 'bg-orange-500/20', badge: 'bg-orange-500', label: '中单', emoji: '🟡' },
+            info: { bg: 'bg-blue-500/10', badge: 'bg-blue-500', label: '普通', emoji: '✅' }
         };
         const sev = sevConfig[severity] || sevConfig.info;
 
@@ -1084,13 +1046,13 @@ function updateLargeTrades(trades, count) {
                         ${flowCN ? '<span class="text-cyan-300">' + flowCN + '</span>' : ''}
                         ${flowCN ? '<span class="text-gray-500 text-[10px] ml-1">' + (() => {
                             const suggestions = {
-                                'protective_hedge': '\u673a\u6784\u62a4\u51b2\u2193 \u77ed0\u671f\u8c28\u614e',
-                                'premium_collect': '\u6536\u53d6\u6743\u5229\u9650 \u2191 \u503c\u597d\u73af\u5883',
-                                'speculative_put': '\u770b\u8dcc\u6295\u673a \u2193 \u98ce\u9669\ 吻\u5347',
-                                'call_momentum': '\u8ffd\u6da8\u5efa\u4ed3 \u2191 \u770b\u597d\u884c\u60c5',
-                                'call_speculative': '\u770b\u6da8\u6295\u673a \u2191 \u5c0f\u5355\u4f4e\u4f4d\u5165\u573a',
-                                'covered_call': '\u5907\u5156\u5f00\u4ed3 \u2191 \u9501\u5b9a\u6536\u76ca',
-                                'call_overwrite': '\u6539\u4ed3\u64cd\u4f5c \u2191 \u8c03\u6574\u4ef7\u683c',
+                                'protective_hedge': '机构护冲↓ 短期谨慎',
+                                'premium_collect': '收取权利金 ↑ 值好环境',
+                                'speculative_put': '看跌投机 ↓ 风险升',
+                                'call_momentum': '追涨建仓 ↑ 看好行情',
+                                'call_speculative': '看涨投机 ↑ 小单低位入场',
+                                'covered_call': '备兑开仓 ↑ 锁定收益',
+                                'call_overwrite': '改仓操作 ↑ 调整价格',
                                 'unclassified': '',
                                 'unknown': ''
                             };
@@ -1195,38 +1157,39 @@ async function loadStats() {
 
 let alertQueue = [];
 function showAlert(message, type = 'info') {
-    // Demo alerts 检查 localStorage
-    const demoMatch = message.match(/demo|示例|测试/i);
-    if (demoMatch) {
-        const key = 'alert_dismissed_' + message.substring(0, 20).replace(/\s+/g, '_');
-        if (localStorage.getItem(key)) return;
-        localStorage.setItem(key, 'true');
-    }
-    alertQueue.push({m:message, t:type, time:Date.now()});
-    alertQueue = alertQueue.filter(a => Date.now() - a.time < 3000).slice(-3);
-    const alertsList = document.getElementById('alertsList');
-    if (alertsList.children.length === 1 && alertsList.children[0].textContent === '暂无预警') alertsList.innerHTML = '';
-
     const colors = { success: 'border-green-500 bg-green-500/10 text-green-400', error: 'border-red-500 bg-red-500/10 text-red-400', warning: 'border-yellow-500 bg-yellow-500/10 text-yellow-400', info: 'border-blue-500 bg-blue-500/10 text-blue-400' };
     const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
-    const alert = document.createElement('div');
-    alert.className = `border-l-4 p-3 rounded-lg text-sm ${colors[type]} flex items-start gap-2 animate-fade-in`;
-    alert.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${time}</div><div>${message}</div></div>`;
-    alertsList.insertBefore(alert, alertsList.firstChild);
-    while (alertsList.children.length > 20) alertsList.removeChild(alertsList.lastChild);
+    const alertsList = document.getElementById('alertsList');
+    if (alertsList) {
+        if (alertsList.children.length === 1 && alertsList.children[0].textContent === '暂无预警') alertsList.innerHTML = '';
+        const alert = document.createElement('div');
+        alert.className = `border-l-4 p-3 rounded-lg text-sm ${colors[type]} flex items-start gap-2 animate-fade-in`;
+        alert.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${time}</div><div>${message}</div></div>`;
+        alertsList.insertBefore(alert, alertsList.firstChild);
+        while (alertsList.children.length > 20) alertsList.removeChild(alertsList.lastChild);
+        return;
+    }
+
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:380px;';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `border-l-4 p-3 rounded-lg text-sm ${colors[type]} flex items-start gap-2 animate-fade-in`;
+    toast.style.cssText = 'backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+    toast.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${time}</div><div>${message}</div></div>`;
+    container.appendChild(toast);
+    setTimeout(() => { toast.style.transition = 'opacity 0.3s'; toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
+    while (container.children.length > 5) container.removeChild(container.firstChild);
 }
 
 function addDemoAlerts() {
-    const demoAlerts = [
-        { msg: '系统就绪，点击"立即扫描"开始监控', type: 'info' },
-        { msg: '新增功能：倍投修复计算器 - 输入浮亏金额自动计算修复方案', type: 'success' },
-        { msg: '新增功能：风险水位预警 - Delta>0.45或价格接近Strike 2%时自动提醒', type: 'success' },
-        { msg: '新增功能：点击高风险合约查看滚仓建议', type: 'success' },
-        { msg: '布局优化：精简表格至12列核心指标，提升可读性', type: 'success' }
-    ];
-    demoAlerts.forEach((alert, i) => setTimeout(() => showAlert(alert.msg, alert.type), i * 500));
+    showAlert('系统就绪，点击"立即扫描"开始监控', 'info');
 }
 
 setTimeout(addDemoAlerts, 1000);
@@ -1237,122 +1200,10 @@ document.getElementById('rollModal').addEventListener('click', (e) => {
 });
 
 
-// v8.0: 预警历史管理
-async function loadAlertHistory() {
-    try {
-        const level = document.getElementById('alertLevelFilter').value;
-        const type = document.getElementById('alertTypeFilter').value;
-        
-        let url = `${API_BASE}/api/alerts?hours=24`;
-        if (level) url += `&level=${level}`;
-        if (type) url += `&type=${type}`;
-        
-        const response = await safeFetch(url);
-        const data = await response.json();
-        
-        updateAlertStats(data.stats);
-        updateAlertHistoryList(data.alerts);
-    } catch (error) {
-        console.error('加载预警历史失败:', error);
-    }
-}
-
-function updateAlertStats(stats) {
-    const statsDiv = document.getElementById('alertStats');
-    statsDiv.innerHTML = `
-        <div class="bg-gray-800/50 p-3 rounded-lg text-center">
-            <div class="text-2xl font-bold">${stats.total}</div>
-            <div class="text-xs text-gray-400">总预警数</div>
-        </div>
-        <div class="bg-red-500/10 p-3 rounded-lg text-center">
-            <div class="text-2xl font-bold text-red-400">${stats.by_level.error || 0}</div>
-            <div class="text-xs text-gray-400">错误</div>
-        </div>
-        <div class="bg-yellow-500/10 p-3 rounded-lg text-center">
-            <div class="text-2xl font-bold text-yellow-400">${stats.by_level.warning || 0}</div>
-            <div class="text-xs text-gray-400">警告</div>
-        </div>
-        <div class="bg-blue-500/10 p-3 rounded-lg text-center">
-            <div class="text-2xl font-bold text-blue-400">${stats.by_level.info || 0}</div>
-            <div class="text-xs text-gray-400">信息</div>
-        </div>
-    `;
-}
-
-function updateAlertHistoryList(alerts) {
-    const listDiv = document.getElementById('alertHistoryList');
-    
-    if (alerts.length === 0) {
-        listDiv.innerHTML = '<div class="text-center text-gray-500 py-8">暂无预警记录</div>';
-        return;
-    }
-    
-    listDiv.innerHTML = alerts.map(alert => {
-        const time = new Date(alert.timestamp).toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-        
-        const levelColors = {
-            info: 'border-blue-500 bg-blue-500/10',
-            warning: 'border-yellow-500 bg-yellow-500/10',
-            error: 'border-red-500 bg-red-500/10',
-            critical: 'border-red-700 bg-red-700/10'
-        };
-        
-        const typeLabels = {
-            price: '价格',
-            volatility: '波动率',
-            position: '仓位',
-            risk: '风险',
-            system: '系统'
-        };
-        
-        return `
-            <div class="border-l-4 ${levelColors[alert.level]} p-3 rounded-lg">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <div class="text-sm font-medium">${alert.message}</div>
-                        <div class="text-xs text-gray-400">${time} · ${typeLabels[alert.type] || alert.type}</div>
-                    </div>
-                    <button onclick="acknowledgeAlert(${alert.id})" 
-                            class="text-xs ${alert.acknowledged ? 'bg-gray-600' : 'bg-gray-700 hover:bg-gray-600'} px-2 py-1 rounded">
-                        ${alert.acknowledged ? '已处理' : '确认'}
-                    </button>
-                </div>
-                ${alert.details ? `<div class="text-xs text-gray-500 mt-1">${JSON.stringify(alert.details)}</div>` : ''}
-            </div>
-        `;
-    }).join('');
-}
-
-async function acknowledgeAlert(alertId) {
-    try {
-        await safeFetch(`${API_BASE}/api/alerts/${alertId}/acknowledge`, {
-            method: 'POST'
-        });
-        loadAlertHistory();
-        showAlert('预警已确认', 'success');
-    } catch (error) {
-        console.error('确认预警失败:', error);
-        showAlert('确认预警失败', 'error');
-    }
-}
-
-// v8.0: 网格策略数据加载
+// v8.0: 网格策略数据加载 - 委托给 grid-strategy.js
 async function loadGridStrategyData() {
-    try {
-        const currency = document.getElementById('currencySelect').value;
-        const response = await safeFetch(`${API_BASE}/api/grid/recommend?currency=${currency}&put_count=5&call_count=3`);
-        
-        const data = await response.json();
-        
-        // 更新网格策略显示（如果页面有网格策略部分）
-        if (window.updateGridDisplay) {
-            updateGridDisplay(data);
-        }
-    } catch (error) {
-        console.log('网格策略数据加载失败:', error);
+    if (typeof loadGridStrategy === 'function') {
+        await loadGridStrategy();
     }
 }
 
@@ -2424,112 +2275,4 @@ function openRollCalcModal() {
     }
 }
 
-async function fetchGridRecommendation() {
-    const btn = event.target.closest('button');
-    const loadingEl = document.getElementById('gridLoading');
-    const resultEl = document.getElementById('gridResult');
 
-    btn.disabled = true;
-    loadingEl.classList.remove('hidden');
-    resultEl.classList.add('hidden');
-
-    try {
-        const currency = document.getElementById('gridCurrency').value;
-        const putCount = parseInt(document.getElementById('gridPutCount').value) || 5;
-        const callCount = parseInt(document.getElementById('gridCallCount').value) || 3;
-        const minDte = parseInt(document.getElementById('gridMinDte').value) || 7;
-        const maxDte = parseInt(document.getElementById('gridMaxDte').value) || 45;
-        const minApr = parseFloat(document.getElementById('gridMinApr').value) || 15;
-
-        const params = new URLSearchParams({
-            currency: currency,
-            put_count: putCount,
-            call_count: callCount,
-            min_dte: minDte,
-            max_dte: maxDte,
-            min_apr: minApr
-        });
-
-        const response = await fetch(`/api/grid/recommend?${params}`);
-        const data = await response.json();
-
-        if (data.error) {
-            throw new Error(data.error);
-        }
-
-        document.getElementById('gridSpotPrice').textContent = `$${data.spot_price?.toLocaleString() || '--'}`;
-        document.getElementById('gridDvolSignal').textContent = data.dvol_signal || '--';
-        document.getElementById('gridRatio').textContent = data.recommended_ratio || '--';
-        document.getElementById('gridTotalPremium').textContent = `$${data.total_potential_premium?.toFixed(2) || '0.00'}`;
-
-        const putLevelsEl = document.getElementById('gridPutLevels');
-        const callLevelsEl = document.getElementById('gridCallLevels');
-
-        if (data.put_levels && data.put_levels.length > 0) {
-            putLevelsEl.innerHTML = data.put_levels.map(level => `
-                <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="font-mono font-bold text-red-400">$${level.strike?.toLocaleString()}</span>
-                        <span class="text-xs text-gray-400">DTE: ${level.dte}</span>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 text-xs">
-                        <div><span class="text-gray-400">APR:</span> <span class="text-green-400 font-bold">${level.apr?.toFixed(1)}%</span></div>
-                        <div><span class="text-gray-400">溢价:</span> <span class="text-yellow-400">$${level.premium_usd?.toFixed(2)}</span></div>
-                        <div><span class="text-gray-400">Δ:</span> <span class="text-blue-400">${level.delta?.toFixed(3)}</span></div>
-                    </div>
-                    <div class="mt-2 text-xs text-gray-500">${level.reason || ''}</div>
-                </div>
-            `).join('');
-        } else {
-            putLevelsEl.innerHTML = '<div class="text-center py-4 text-gray-500">暂无Put推荐</div>';
-        }
-
-        if (data.call_levels && data.call_levels.length > 0) {
-            callLevelsEl.innerHTML = data.call_levels.map(level => `
-                <div class="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="font-mono font-bold text-green-400">$${level.strike?.toLocaleString()}</span>
-                        <span class="text-xs text-gray-400">DTE: ${level.dte}</span>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 text-xs">
-                        <div><span class="text-gray-400">APR:</span> <span class="text-green-400 font-bold">${level.apr?.toFixed(1)}%</span></div>
-                        <div><span class="text-gray-400">溢价:</span> <span class="text-yellow-400">$${level.premium_usd?.toFixed(2)}</span></div>
-                        <div><span class="text-gray-400">Δ:</span> <span class="text-blue-400">${level.delta?.toFixed(3)}</span></div>
-                    </div>
-                    <div class="mt-2 text-xs text-gray-500">${level.reason || ''}</div>
-                </div>
-            `).join('');
-        } else {
-            callLevelsEl.innerHTML = '<div class="text-center py-4 text-gray-500">暂无Call推荐</div>';
-        }
-
-        const scenariosEl = document.getElementById('gridScenarios');
-        const spotPrice = data.spot_price || 83000;
-        const targetPrices = [
-            spotPrice * 0.85,
-            spotPrice,
-            spotPrice * 1.15
-        ];
-
-        scenariosEl.innerHTML = targetPrices.map(target => {
-            const pctChange = ((target - spotPrice) / spotPrice * 100).toFixed(1);
-            const colorClass = target < spotPrice ? 'border-red-500/30 bg-red-500/5' : 'border-green-500/30 bg-green-500/5';
-            return `
-                <div class="rounded-lg p-3 border ${colorClass}">
-                    <div class="text-xs text-gray-400 mb-1">${target < spotPrice ? '下跌' : target > spotPrice ? '上涨' : '当前'}</div>
-                    <div class="font-mono font-bold text-lg">$${target.toLocaleString()}</div>
-                    <div class="text-xs ${target < spotPrice ? 'text-red-400' : target > spotPrice ? 'text-green-400' : 'text-gray-400'}">${pctChange}%</div>
-                </div>
-            `;
-        }).join('');
-
-        resultEl.classList.remove('hidden');
-
-    } catch (e) {
-        console.error('Grid recommendation error:', e);
-        alert('获取推荐失败: ' + e.message);
-    } finally {
-        btn.disabled = false;
-        loadingEl.classList.add('hidden');
-    }
-}
