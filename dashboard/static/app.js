@@ -1045,21 +1045,31 @@ function sortContracts(field) {
     const expandedSymbols = new Set();
     document.querySelectorAll('tr[data-expanded="true"]').forEach(r => expandedSymbols.add(r.dataset.symbol));
 
+    // 字段名映射：HTML使用的名称 -> API返回的名称
+    const fieldMap = {
+        'mark_iv': 'iv',
+        'premium': 'premium_usd',
+        'breakeven': 'breakeven_pct',
+        'spread_pct': 'spread_pct',
+        'distance_spot_pct': 'distance_spot_pct'
+    };
+    const actualField = fieldMap[field] || field;
+
     // 切换排序方向
-    if (currentSort.field === field) {
+    if (currentSort.field === actualField) {
         currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
     } else {
-        currentSort.field = field;
+        currentSort.field = actualField;
         currentSort.direction = 'desc';
     }
 
     // 更新表头图标
-    updateSortIcons(field, currentSort.direction);
+    updateSortIcons(actualField, currentSort.direction);
 
     // 排序数据
     const sortedContracts = [...currentData.contracts].sort((a, b) => {
-        let valA = a[field];
-        let valB = b[field];
+        let valA = a[actualField];
+        let valB = b[actualField];
 
         // 处理特殊字段
         if (field === 'delta') {
