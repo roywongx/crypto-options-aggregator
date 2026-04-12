@@ -51,6 +51,7 @@ from services.risk_framework import RiskFramework, CalculationEngine, _risk_emoj
 from services.flow_classifier import _classify_flow_heuristic, parse_trade_alert, _severity_from_notional, get_flow_label_info
 from services.spot_price import get_spot_price, get_spot_price_binance, get_spot_price_deribit, _get_spot_from_scan
 from db.connection import get_db_connection as _db_conn
+from db.schema import init_database_schema
 
 def get_db_connection():
     return _db_conn()
@@ -75,65 +76,11 @@ def _get_deribit_monitor():
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
-
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=5000")
     cursor.execute("PRAGMA synchronous=NORMAL")
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS scan_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            currency TEXT,
-            spot_price REAL,
-            dvol_current REAL,
-            dvol_z_score REAL,
-            dvol_signal TEXT,
-            large_trades_count INTEGER,
-            large_trades_details TEXT,
-            contracts_data TEXT,
-            raw_output TEXT
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS large_trades_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME NOT NULL,
-            currency TEXT NOT NULL,
-            source TEXT,
-            title TEXT,
-            message TEXT,
-            direction TEXT DEFAULT 'unknown',
-            strike REAL,
-            volume REAL DEFAULT 0,
-            option_type TEXT,
-            flow_label TEXT DEFAULT '',
-            notional_usd REAL DEFAULT 0,
-            delta REAL DEFAULT 0,
-            instrument_name TEXT DEFAULT ''
-        )
-    """)
-
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_currency ON large_trades_history(currency)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON large_trades_history(timestamp)")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_strike ON large_trades_history(strike)")
-
-    cursor.execute("PRAGMA table_info(scan_records)")
-    columns = [col[1] for col in cursor.fetchall()]
-
-    for col in ['dvol_signal', 'large_trades_details', 'contracts_data', 'raw_output']:
-        if col not in columns:
-            cursor.execute(f"ALTER TABLE scan_records ADD COLUMN {col} TEXT")
-
-    cursor.execute("PRAGMA table_info(large_trades_history)")
-    trade_cols = [col[1] for col in cursor.fetchall()]
-    for col in ['flow_label', 'notional_usd', 'delta', 'instrument_name']:
-        if col not in trade_cols:
-            cursor.execute(f"ALTER TABLE large_trades_history ADD COLUMN {col} {'REAL' if col in ('notional_usd','delta') else 'TEXT'}")
-
+    init_database_schema(conn)
     conn.commit()
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
 
 def save_scan_record(data: Dict[str, Any]):
@@ -1438,25 +1385,6 @@ async def get_vol_surface(currency: str = Query(default="BTC")):
         "surface": sorted(surface, key=lambda x: (x["dte"], x["strike"]))[:500],
         "term_structure": term_structure, "backwardation": backwardation,
         "alert": alert_msg, "total": len(surface)}
-
-def _get_spot_from_scan(currency: str = "BTC"):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT spot_price FROM scan_records WHERE currency=? AND spot_price > 0 ORDER BY timestamp DESC LIMIT 1", (currency,))
-        row = cur.fetchone()
-        if row and float(row[0]) > 0:
-            return float(row[0])
-    except Exception:
-        pass
-    try:
-        import urllib.request
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={currency}USDT"
-        resp = urllib.request.urlopen(url, timeout=5)
-        return float(json.loads(resp.read())["price"])
-    except Exception:
-        pass
-    return 0
 
 
 

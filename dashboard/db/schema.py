@@ -1,4 +1,5 @@
 # Database schema definitions
+import sqlite3
 
 SCHEMA_SCAN_RECORDS = """
 CREATE TABLE IF NOT EXISTS scan_records (
