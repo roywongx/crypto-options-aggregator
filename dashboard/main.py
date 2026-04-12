@@ -2418,19 +2418,7 @@ async def get_wind_analysis(
     }
 
 
-STRATEGY_PRESETS = {
-    "PUT": {
-        "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0},
-        "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0},
-        "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0}
-    },
-    "CALL": {
-        "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0},
-        "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0},
-        "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0}
-    }
-}
-
+# STRATEGY_PRESETS moved to config.py
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
     pct_7d = (dvol_raw.get('percentile_7d') or 50)

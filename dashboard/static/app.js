@@ -59,6 +59,7 @@ async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
+    initColumnVisibility();
     initCharts();
     loadLatestData();
     loadStats();
@@ -1033,6 +1034,108 @@ document.getElementById('rollModal').addEventListener('click', (e) => {
     if (e.target.id === 'rollModal') closeRollModal();
 });
 
+
+// 列显示/隐藏功能
+const COLUMN_CONFIG = [
+    { key: 'platform', label: '平台', defaultVisible: true },
+    { key: 'option_type', label: '类型', defaultVisible: true },
+    { key: 'expiry', label: '到期日', defaultVisible: true },
+    { key: 'dte', label: '到期天数', defaultVisible: true },
+    { key: 'strike', label: '行权价', defaultVisible: true },
+    { key: 'delta', label: 'Delta', defaultVisible: true },
+    { key: 'gamma', label: 'Gamma', defaultVisible: false },
+    { key: 'vega', label: 'Vega', defaultVisible: false },
+    { key: 'mark_iv', label: '隐含波动率', defaultVisible: false },
+    { key: 'apr', label: '年化收益', defaultVisible: true },
+    { key: 'pop', label: 'POP', defaultVisible: true },
+    { key: 'premium', label: '权利金$', defaultVisible: true },
+    { key: 'liquidity_score', label: '流动性', defaultVisible: false },
+    { key: 'loss_at_10pct', label: '-10%亏损$', defaultVisible: false },
+    { key: 'breakeven', label: '盈亏平衡$', defaultVisible: false },
+    { key: 'breakeven_pct', label: '安全垫%', defaultVisible: true },
+    { key: 'open_interest', label: '持仓量', defaultVisible: false },
+    { key: 'spread_pct', label: '买卖价差', defaultVisible: false },
+    { key: 'iv_rank', label: 'IV Rank', defaultVisible: false },
+    { key: '_score', label: '评分', defaultVisible: false },
+    { key: 'risk', label: '风险等级', defaultVisible: false }
+];
+
+let columnVisibility = {};
+
+function initColumnVisibility() {
+    const saved = localStorage.getItem('columnVisibility');
+    if (saved) {
+        try {
+            columnVisibility = JSON.parse(saved);
+        } catch (e) {
+            columnVisibility = {};
+        }
+    }
+    COLUMN_CONFIG.forEach(col => {
+        if (columnVisibility[col.key] === undefined) {
+            columnVisibility[col.key] = col.defaultVisible;
+        }
+    });
+    renderColumnMenu();
+    applyColumnVisibility();
+}
+
+function toggleColumnMenu() {
+    const menu = document.getElementById('columnMenu');
+    menu.classList.toggle('hidden');
+    if (!menu.classList.contains('hidden')) {
+        renderColumnMenu();
+    }
+}
+
+function renderColumnMenu() {
+    const list = document.getElementById('columnList');
+    list.innerHTML = COLUMN_CONFIG.map(col => `
+        <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 rounded cursor-pointer text-xs">
+            <input type="checkbox" id="col_${col.key}" ${columnVisibility[col.key] ? 'checked' : ''}
+                   onchange="toggleColumn('${col.key}')" class="rounded">
+            <span>${col.label}</span>
+        </label>
+    `).join('');
+}
+
+function toggleColumn(key) {
+    columnVisibility[key] = !columnVisibility[key];
+    localStorage.setItem('columnVisibility', JSON.stringify(columnVisibility));
+    applyColumnVisibility();
+}
+
+function applyColumnVisibility() {
+    const headerRow = document.getElementById('tableHeaders');
+    if (!headerRow) return;
+    const headers = headerRow.querySelectorAll('th');
+    headers.forEach(th => {
+        const sortKey = th.dataset.sort || th.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+        if (sortKey && columnVisibility[sortKey] !== undefined) {
+            th.style.display = columnVisibility[sortKey] ? '' : 'none';
+        }
+    });
+    const bodyRows = document.querySelectorAll('#opportunitiesTable tr[data-symbol]');
+    bodyRows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length === headers.length) {
+            headers.forEach((th, i) => {
+                const sortKey = th.dataset.sort || th.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+                if (sortKey && columnVisibility[sortKey] !== undefined) {
+                    cells[i].style.display = columnVisibility[sortKey] ? '' : 'none';
+                }
+            });
+        }
+    });
+}
+
+document.addEventListener('click', (e) => {
+    const menu = document.getElementById('columnMenu');
+    const btn = document.getElementById('columnToggleBtn');
+    if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && !btn.contains(e.target)) {
+        menu.classList.add('hidden');
+    }
+});
 
 // 排序功能
 let currentSort = { field: null, direction: 'desc' };

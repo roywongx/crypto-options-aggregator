@@ -45,6 +45,20 @@ class Config:
     DB_PATH_ENV = os.getenv("DASHBOARD_DB_PATH", "")
     API_KEY = os.getenv("DASHBOARD_API_KEY", "")
 
+    # v6.3: Strategy Presets
+    STRATEGY_PRESETS = {
+        "PUT": {
+            "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0},
+            "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0},
+            "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0}
+        },
+        "CALL": {
+            "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0},
+            "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0},
+            "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0}
+        }
+    }
+
     @classmethod
     def db_path(cls):
         from pathlib import Path
