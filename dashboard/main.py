@@ -10,20 +10,6 @@ import sqlite3
 import asyncio
 import subprocess
 import math
-
-def _norm_cdf(x):
-    """标准正态分布累积分布函数近似 (Abramowitz & Stegun)"""
-    sign = 1 if x >= 0 else -1
-    x = abs(x)
-    if x >= 37.0:
-        return 0.0 if sign > 0 else 1.0
-    exp_arg = -x * x / 2
-    if exp_arg < -700: exp_val = 0.0
-    else: exp_val = math.exp(exp_arg)
-    t = 1.0 / (1.0 + 0.2316419 * x)
-    poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
-    p = 1.0 - exp_val * poly / math.sqrt(2 * math.pi)
-    return p if sign > 0 else 1.0 - p
 from concurrent.futures import ThreadPoolExecutor
 import requests
 import re
