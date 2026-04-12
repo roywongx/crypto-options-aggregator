@@ -21,15 +21,9 @@ class ScenarioRequest(BaseModel):
 def _get_contracts_from_db(currency: str):
     """从数据库获取最近的合约数据"""
     try:
-        import sqlite3
-        from pathlib import Path
+        from db.connection import get_db_connection
 
-        db_path = Path(__file__).parent.parent / "data" / "options.db"
-        if not db_path.exists():
-            return []
-
-        conn = sqlite3.connect(str(db_path), timeout=10)
-        conn.row_factory = sqlite3.Row
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT contracts_data FROM scan_records
@@ -37,7 +31,6 @@ def _get_contracts_from_db(currency: str):
             ORDER BY timestamp DESC LIMIT 1
         """, (currency,))
         row = cursor.fetchone()
-        conn.close()
 
         if row and row[0]:
             try:
@@ -231,15 +224,9 @@ async def get_revenue_summary(
     days: int = Query(30, ge=1, le=365)
 ):
     try:
-        import sqlite3
-        from pathlib import Path
+        from db.connection import get_db_connection
 
-        db_path = Path(__file__).parent.parent / "data" / "options.db"
-        if not db_path.exists():
-            return {"error": "Database not found"}
-
-        conn = sqlite3.connect(str(db_path), timeout=10)
-        conn.row_factory = sqlite3.Row
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT timestamp, contracts_data FROM scan_records
@@ -248,7 +235,6 @@ async def get_revenue_summary(
         """, (currency, -days))
 
         rows = cursor.fetchall()
-        conn.close()
 
         total_premium = 0.0
         scan_count = len(rows)
