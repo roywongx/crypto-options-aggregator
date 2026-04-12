@@ -1,8 +1,27 @@
 # Services - DVOL Analyzer
 import requests
 import sys
+import math
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+
+def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type: str = 'P') -> float:
+    """使用 Black-Scholes 计算期权 Delta (Bug B1 修复)"""
+    if strike <= 0 or spot <= 0 or dte <= 0 or iv <= 0:
+        return 0.3
+    t = dte / 365.0
+    if t <= 0.01:
+        t = 0.01
+    iv_decimal = iv / 100.0
+    d1 = (math.log(spot / strike) + (iv_decimal ** 2 / 2) * t) / (iv_decimal * math.sqrt(t))
+    try:
+        from scipy.stats import norm
+        nd1 = norm.cdf(d1)
+    except Exception:
+        nd1 = max(0.0, min(1.0, 0.5 + 0.5 * math.tanh(d1 * 0.8)))
+    if option_type.upper() in ('P', 'PUT'):
+        return round(nd1 - 1, 4)
+    return round(nd1, 4)
 
 def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
     """从 Deribit 获取 DVOL 数据"""

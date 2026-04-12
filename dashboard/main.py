@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import config
 from routers.grid import router as grid_router
+from services.dvol_analyzer import calc_delta_bs
 
 # DeribitOptionsMonitor 单例缓存
 _deribit_monitor_cache = {}
@@ -217,7 +218,6 @@ def _get_spot_from_scan(currency: str = "BTC"):
     """从 services.spot_price 导入"""
     from services.spot_price import _get_spot_from_scan as _from_scan
     return _from_scan(currency)
-
 
 def _get_deribit_monitor():
     """获取 DeribitOptionsMonitor 单例（单进程安全，多 worker 各自独立）"""
@@ -927,7 +927,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
 
             raw_delta = s.get("delta")
             if raw_delta is None or float(raw_delta or 0) == 0:
-                delta_val = abs(_estimate_delta(strike, underlying, iv, meta["dte"], meta["option_type"]))
+                delta_val = abs(calc_delta_bs(strike, underlying, iv, meta["dte"], meta["option_type"]))
             else:
                 delta_val = abs(float(raw_delta))
             
@@ -1716,9 +1716,9 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
                 if premium_usd < MIN_NOTIONAL:
                     continue
                 
-                # Use estimated delta (skip slow order book API call)
+                # Use calc_delta_bs (skip slow order book API call)
                 trade_iv = float(t.get("iv") or 50) / 100.0
-                delta_val = abs(_estimate_delta(meta["strike"], spot,
+                delta_val = abs(calc_delta_bs(meta["strike"], spot,
                     trade_iv, meta["dte"], meta["option_type"]))
                 
                 fl = _classify_flow_heuristic(
@@ -1764,25 +1764,6 @@ def _parse_inst_name(inst: str):
 
 
 # DEPRECATED: Use mark['delta'] from API instead. Kept for Deribit branch fallback only.
-def _estimate_delta(strike, spot, iv, dte, option_type='P'):
-    """估算期权Delta (Deribit book_summaries不返回delta字段)"""
-    import math
-    if strike <= 0 or spot <= 0 or dte <= 0 or iv <= 0:
-        return 0.3
-    t = dte / 365.0
-    if t <= 0.01:
-        t = 0.01
-    d1 = (math.log(spot / strike) + (iv ** 2 / 2) * t) / (iv * math.sqrt(t))
-    try:
-        from scipy.stats import norm
-        nd1 = norm.cdf(d1)
-    except Exception:
-        nd1 = max(0.0, min(1.0, 0.5 + 0.5 * math.tanh(d1 * 0.8)))
-    if option_type.upper() in ('P', 'PUT'):
-        return round(nd1 - 1, 4)
-    return round(nd1, 4)
-
-
 @app.get("/api/charts/vol-surface")
 async def get_vol_surface(currency: str = Query(default="BTC")):
     summaries = _fetch_deribit_summaries(currency)
