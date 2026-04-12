@@ -131,7 +131,7 @@ function updateParamDisplay() {
     if (labelEl) labelEl.textContent = `${currency}/USDT`;
 }
 
-function setAutoRefresh(minutes) {
+async function setAutoRefresh(minutes) {
     if (autoRefreshInterval) {
         clearInterval(autoRefreshInterval);
         autoRefreshInterval = null;
