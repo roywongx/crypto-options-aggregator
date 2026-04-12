@@ -4,7 +4,7 @@
 > **策略核心**: 长期持有BTC + Sell Put/Call 网格做多 = 备兑轮 + 网格收租
 > **编写者**: Hermes（总指挥）
 > **日期**: 2026-04-12
-> **当前版本**: v6.0.8
+> **当前版本**: v6.1.0
 
 ---
 
@@ -82,18 +82,18 @@ dashboard/
 
 **拆分顺序**（必须按此顺序，每步验证能跑再下一步）：
 
-| 步骤 | 移动内容 | 从 → 到 |
-|------|---------|---------|
-| 1 | `_parse_inst_name` + InstrumentInfo | main.py → services/instrument.py |
-| 2 | `get_spot_price*` 系列函数 | main.py → services/spot_price.py |
-| 3 | `get_db_connection` + 建表语句 | main.py → db/connection.py + db/schema.py |
-| 4 | Pydantic 模型定义 | main.py → models/contracts.py |
-| 5 | DVOL 相关函数 | main.py → services/dvol_analyzer.py |
-| 6 | 风险框架函数 | main.py → services/risk_framework.py |
-| 7 | 大单流向分类 | main.py → services/flow_classifier.py |
-| 8 | 扫描核心逻辑 | main.py → services/scanner.py |
-| 9 | 路由拆分 | main.py → routers/*.py |
-| 10 | 剩余杂项整理 | main.py → 各自归属 |
+| 步骤 | 移动内容 | 从 → 到 | 状态 |
+|------|---------|---------|------|
+| 1 | `_parse_inst_name` + InstrumentInfo | main.py → services/instrument.py | ✅ 已完成 |
+| 2 | `get_spot_price*` 系列函数 | main.py → services/spot_price.py | ✅ 已完成 |
+| 3 | `get_db_connection` + 建表语句 | main.py → db/connection.py + db/schema.py | ✅ 已完成 |
+| 4 | Pydantic 模型定义 | main.py → models/contracts.py | ✅ 已完成 |
+| 5 | DVOL 相关函数 | main.py → services/dvol_analyzer.py | 🔄 待完成 |
+| 6 | 风险框架函数 | main.py → services/risk_framework.py | 🔄 待完成 |
+| 7 | 大单流向分类 | main.py → services/flow_classifier.py | 🔄 待完成 |
+| 8 | 扫描核心逻辑 | main.py → services/scanner.py | 🔄 待完成 |
+| 9 | 路由拆分 | main.py → routers/*.py | 🔄 待完成 |
+| 10 | 剩余杂项整理 | main.py → 各自归属 | 🔄 待完成 |
 
 ### 1.2 统一 instrument 解析（消除重复）
 
