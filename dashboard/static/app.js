@@ -1109,12 +1109,38 @@ function applyColumnVisibility() {
     const headerRow = document.getElementById('tableHeaders');
     if (!headerRow) return;
     const headers = headerRow.querySelectorAll('th');
+    
+    // 构建列索引到字段名的映射
+    const colIndexToKey = {};
+    headers.forEach((th, idx) => {
+        const sortKey = th.dataset.sort;
+        if (sortKey) {
+            colIndexToKey[idx] = sortKey;
+        }
+    });
+    
+    // 过滤表头
     headers.forEach(th => {
         const sortKey = th.dataset.sort;
         if (sortKey && columnVisibility.hasOwnProperty(sortKey)) {
             th.style.display = columnVisibility[sortKey] ? '' : 'none';
         }
     });
+    
+    // 过滤表格body
+    const tbody = document.getElementById('opportunitiesTableBody');
+    if (tbody) {
+        const rows = tbody.querySelectorAll('tr[data-symbol]');
+        rows.forEach(row => {
+            const cells = row.querySelectorAll('td');
+            cells.forEach((td, idx) => {
+                const key = colIndexToKey[idx];
+                if (key && columnVisibility.hasOwnProperty(key)) {
+                    td.style.display = columnVisibility[key] ? '' : 'none';
+                }
+            });
+        });
+    }
 }
 
 document.addEventListener('click', (e) => {
