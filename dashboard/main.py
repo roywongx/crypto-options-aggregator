@@ -999,6 +999,43 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
     }
 
 
+# v8.0: Payoff可视化API
+@app.post("/api/payoff/calc")
+async def calc_payoff(data: dict):
+    """计算策略Payoff图"""
+    from services.payoff_calculator import PayoffCalculator
+    
+    calc = PayoffCalculator()
+    legs = data.get("legs", [])
+    spot = data.get("spot", 0)
+    pct_range = data.get("pct_range", 0.3)
+    steps = data.get("steps", 100)
+    
+    if not legs or not spot:
+        return {"error": "缺少legs或spot参数"}
+    
+    return calc.calc_payoff(legs, spot, pct_range, steps)
+
+
+@app.post("/api/payoff/wheel")
+async def calc_wheel_roi(data: dict):
+    """计算Wheel策略ROI"""
+    from services.payoff_calculator import PayoffCalculator
+    
+    calc = PayoffCalculator()
+    put_strike = data.get("put_strike", 0)
+    put_premium = data.get("put_premium", 0)
+    call_strike = data.get("call_strike", 0)
+    call_premium = data.get("call_premium", 0)
+    spot = data.get("spot", 0)
+    quantity = data.get("quantity", 1)
+    
+    if not put_strike or not spot:
+        return {"error": "缺少put_strike或spot参数"}
+    
+    return calc.calc_wheel_roi(put_strike, put_premium, call_strike, call_premium, spot, quantity)
+
+
 # v8.0: 预警系统API
 @app.get("/api/alerts")
 async def get_alerts(

@@ -1356,6 +1356,250 @@ async function loadGridStrategyData() {
     }
 }
 
+// v8.0: Payoff可视化
+let payoffChart = null;
+
+function setPayoffMode(mode) {
+    const singleMode = document.getElementById('payoffSingleMode');
+    const wheelMode = document.getElementById('payoffWheelMode');
+    const singleBtn = document.getElementById('payoffModeSingle');
+    const wheelBtn = document.getElementById('payoffModeWheel');
+    
+    if (mode === 'single') {
+        singleMode.classList.remove('hidden');
+        wheelMode.classList.add('hidden');
+        singleBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400';
+        wheelBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+    } else {
+        singleMode.classList.add('hidden');
+        wheelMode.classList.remove('hidden');
+        wheelBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400';
+        singleBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+    }
+}
+
+async function calcPayoff() {
+    try {
+        const direction = document.getElementById('payoffDirection').value;
+        const optionType = document.getElementById('payoffOptionType').value;
+        const quantity = parseFloat(document.getElementById('payoffQuantity').value) || 1;
+        const strike = parseFloat(document.getElementById('payoffStrike').value);
+        const premium = parseFloat(document.getElementById('payoffPremium').value);
+        const spot = currentSpotPrice || 85000;
+        
+        const response = await safeFetch(`${API_BASE}/api/payoff/calc`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                legs: [{ direction, option_type: optionType, strike, premium, quantity }],
+                spot,
+                pct_range: 0.3,
+                steps: 100
+            })
+        });
+        
+        const data = await response.json();
+        renderPayoffChart(data);
+        updatePayoffResult(data);
+    } catch (error) {
+        console.error('Payoff计算失败:', error);
+        showAlert('Payoff计算失败', 'error');
+    }
+}
+
+async function calcWheelROI() {
+    try {
+        const putStrike = parseFloat(document.getElementById('wheelPutStrike').value);
+        const putPremium = parseFloat(document.getElementById('wheelPutPremium').value);
+        const callStrike = parseFloat(document.getElementById('wheelCallStrike').value);
+        const callPremium = parseFloat(document.getElementById('wheelCallPremium').value);
+        const spot = currentSpotPrice || 85000;
+        
+        const response = await safeFetch(`${API_BASE}/api/payoff/wheel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                put_strike: putStrike,
+                put_premium: putPremium,
+                call_strike: callStrike,
+                call_premium: callPremium,
+                spot,
+                quantity: 1
+            })
+        });
+        
+        const data = await response.json();
+        renderWheelChart(data);
+        updateWheelResult(data);
+    } catch (error) {
+        console.error('Wheel ROI计算失败:', error);
+        showAlert('Wheel ROI计算失败', 'error');
+    }
+}
+
+function renderPayoffChart(data) {
+    const ctx = document.getElementById('payoffChart').getContext('2d');
+    if (payoffChart) payoffChart.destroy();
+    
+    const zeroLine = new Array(data.prices.length).fill(0);
+    
+    payoffChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.prices.map(p => p.toLocaleString()),
+            datasets: [
+                {
+                    label: '总盈亏',
+                    data: data.total_pnl,
+                    borderColor: 'rgba(6, 182, 212, 1)',
+                    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                    fill: true,
+                    borderWidth: 2,
+                    pointRadius: 0
+                },
+                ...data.legs.map((leg, i) => ({
+                    label: `${leg.direction === 'sell' ? 'Sell' : 'Buy'} ${leg.option_type === 'P' ? 'Put' : 'Call'} $${leg.strike.toLocaleString()}`,
+                    data: leg.pnl,
+                    borderColor: leg.option_type === 'P' ? 'rgba(34, 197, 94, 0.6)' : 'rgba(59, 130, 246, 0.6)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    fill: false
+                })),
+                {
+                    label: '盈亏平衡',
+                    data: zeroLine,
+                    borderColor: 'rgba(234, 179, 8, 0.5)',
+                    borderWidth: 1,
+                    borderDash: [3, 3],
+                    pointRadius: 0,
+                    fill: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: '策略 Payoff 图' },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}`
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    title: { display: true, text: '盈亏 ($)' },
+                    ticks: { callback: v => '$' + v.toLocaleString() }
+                },
+                x: {
+                    title: { display: true, text: 'BTC 价格 ($)' },
+                    ticks: { maxTicksLimit: 10, callback: v => '$' + v.toLocaleString() }
+                }
+            }
+        }
+    });
+}
+
+function renderWheelChart(data) {
+    const ctx = document.getElementById('payoffChart').getContext('2d');
+    if (payoffChart) payoffChart.destroy();
+    
+    const zeroLine = new Array(data.prices.length).fill(0);
+    
+    payoffChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.prices.map(p => p.toLocaleString()),
+            datasets: [
+                {
+                    label: 'Wheel 总盈亏',
+                    data: data.wheel_pnl,
+                    borderColor: 'rgba(6, 182, 212, 1)',
+                    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                    fill: true,
+                    borderWidth: 2,
+                    pointRadius: 0
+                },
+                {
+                    label: 'Sell Put 盈亏',
+                    data: data.put_pnl,
+                    borderColor: 'rgba(34, 197, 94, 0.6)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    fill: false
+                },
+                {
+                    label: 'Sell Call 盈亏',
+                    data: data.call_pnl,
+                    borderColor: 'rgba(59, 130, 246, 0.6)',
+                    borderWidth: 1,
+                    borderDash: [5, 5],
+                    pointRadius: 0,
+                    fill: false
+                },
+                {
+                    label: '持股盈亏',
+                    data: data.stock_pnl,
+                    borderColor: 'rgba(168, 85, 247, 0.6)',
+                    borderWidth: 1,
+                    borderDash: [3, 3],
+                    pointRadius: 0,
+                    fill: false
+                },
+                {
+                    label: '盈亏平衡',
+                    data: zeroLine,
+                    borderColor: 'rgba(234, 179, 8, 0.5)',
+                    borderWidth: 1,
+                    borderDash: [3, 3],
+                    pointRadius: 0,
+                    fill: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Wheel 策略 Payoff 图' },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}`
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    title: { display: true, text: '盈亏 ($)' },
+                    ticks: { callback: v => '$' + v.toLocaleString() }
+                },
+                x: {
+                    title: { display: true, text: 'BTC 价格 ($)' },
+                    ticks: { maxTicksLimit: 10, callback: v => '$' + v.toLocaleString() }
+                }
+            }
+        }
+    });
+}
+
+function updatePayoffResult(data) {
+    document.getElementById('payoffMaxProfit').textContent = `$${data.max_profit.toLocaleString()}`;
+    document.getElementById('payoffMaxLoss').textContent = `$${data.max_loss.toLocaleString()}`;
+    document.getElementById('payoffBreakeven').textContent = data.breakevens.length > 0 ? `$${data.breakevens.map(b => b.toLocaleString()).join(', ')}` : '无';
+    document.getElementById('payoffWheelROI').textContent = '--';
+}
+
+function updateWheelResult(data) {
+    const s = data.summary;
+    document.getElementById('payoffMaxProfit').textContent = `$${s.total_income.toLocaleString()}`;
+    document.getElementById('payoffMaxLoss').textContent = `$${s.capital_at_risk.toLocaleString()}`;
+    document.getElementById('payoffBreakeven').textContent = `$${s.breakeven_stock.toLocaleString()}`;
+    document.getElementById('payoffWheelROI').textContent = `${s.wheel_roi_pct}%`;
+}
+
 // 列显示/隐藏功能
 const COLUMN_CONFIG = [
     { key: 'platform', label: '平台', defaultVisible: true },

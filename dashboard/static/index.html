@@ -215,6 +215,117 @@
             </div>
         </section>
 
+        <!-- Payoff 可视化 & Wheel ROI (v8.0) -->
+        <section id="payoffSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-cyan-500">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-chart-area text-cyan-500"></i>
+                    <h3 class="font-semibold text-lg">Payoff 可视化 & Wheel ROI</h3>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="setPayoffMode('single')" id="payoffModeSingle" class="px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400">单策略</button>
+                    <button onclick="setPayoffMode('wheel')" id="payoffModeWheel" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">Wheel策略</button>
+                </div>
+            </div>
+
+            <!-- 单策略模式 -->
+            <div id="payoffSingleMode">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">方向</label>
+                        <select id="payoffDirection" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            <option value="sell">卖出 (Sell)</option>
+                            <option value="buy">买入 (Buy)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">类型</label>
+                        <select id="payoffOptionType" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            <option value="P">Put</option>
+                            <option value="C">Call</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">数量</label>
+                        <input type="number" id="payoffQuantity" value="1" min="0.1" step="0.1" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">行权价 ($)</label>
+                        <input type="number" id="payoffStrike" value="80000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">权利金 ($)</label>
+                        <input type="number" id="payoffPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                </div>
+                <button onclick="calcPayoff()" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
+                    <i class="fas fa-calculator mr-1"></i>计算 Payoff
+                </button>
+            </div>
+
+            <!-- Wheel策略模式 -->
+            <div id="payoffWheelMode" class="hidden">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div class="p-3 bg-green-500/5 border border-green-500/20 rounded-lg">
+                        <h4 class="text-sm font-semibold text-green-400 mb-2">Step 1: Sell Put</h4>
+                        <div class="space-y-2">
+                            <div>
+                                <label class="block text-gray-400 text-xs">Put 行权价 ($)</label>
+                                <input type="number" id="wheelPutStrike" value="80000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-gray-400 text-xs">Put 权利金 ($)</label>
+                                <input type="number" id="wheelPutPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                        <h4 class="text-sm font-semibold text-blue-400 mb-2">Step 2: Sell Call (被行权后)</h4>
+                        <div class="space-y-2">
+                            <div>
+                                <label class="block text-gray-400 text-xs">Call 行权价 ($)</label>
+                                <input type="number" id="wheelCallStrike" value="90000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-gray-400 text-xs">Call 权利金 ($)</label>
+                                <input type="number" id="wheelCallPremium" value="1500" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button onclick="calcWheelROI()" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
+                    <i class="fas fa-sync-alt mr-1"></i>计算 Wheel ROI
+                </button>
+            </div>
+
+            <!-- Payoff 图表 -->
+            <div class="h-72 mb-4">
+                <canvas id="payoffChart"></canvas>
+            </div>
+
+            <!-- 结果摘要 -->
+            <div id="payoffResult" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
+                    <div class="text-xs text-gray-400 mb-1">最大盈利</div>
+                    <div id="payoffMaxProfit" class="text-lg font-bold text-green-400">--</div>
+                </div>
+                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
+                    <div class="text-xs text-gray-400 mb-1">最大亏损</div>
+                    <div id="payoffMaxLoss" class="text-lg font-bold text-red-400">--</div>
+                </div>
+                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
+                    <div class="text-xs text-gray-400 mb-1">盈亏平衡</div>
+                    <div id="payoffBreakeven" class="text-lg font-bold text-yellow-400">--</div>
+                </div>
+                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
+                    <div class="text-xs text-gray-400 mb-1">Wheel ROI</div>
+                    <div id="payoffWheelROI" class="text-lg font-bold text-cyan-400">--</div>
+                </div>
+            </div>
+        </section>
+
         <!-- 策略计算器 - 合并版 -->
         <section class="card-glass rounded-xl p-5 mb-6 border-l-4 border-orange-500">
             <div class="flex items-center gap-2 mb-4">
@@ -327,15 +438,21 @@
 
         <!-- 网格策略引擎 (v8.0) -->
         <section id="gridStrategySection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-purple-500">
-            <div class="flex items-center gap-2 mb-4">
-                <i class="fas fa-th text-purple-500"></i>
-                <h3 class="font-semibold text-lg">网格策略引擎</h3>
-                <span class="text-xs text-gray-400 ml-2">智能推荐最优Put/Call网格配置</span>
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-th text-purple-500"></i>
+                    <h3 class="font-semibold text-lg">网格策略引擎</h3>
+                    <span class="text-xs text-gray-400 ml-2">智能推荐最优Put/Call网格配置</span>
+                </div>
+                <div id="gridLoading" class="hidden">
+                    <i class="fas fa-spinner fa-spin text-purple-400"></i>
+                    <span class="text-gray-400 text-sm ml-2">加载中...</span>
+                </div>
             </div>
             
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+            <div class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">币种</label>
+                    <label class="block text-gray-400 text-xs mb-1">币种</label>
                     <select id="gridCurrency" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                         <option value="BTC">BTC</option>
                         <option value="ETH">ETH</option>
@@ -343,33 +460,55 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">Put 数量</label>
-                    <input type="number" id="gridPutCount" value="5" min="1" max="10" 
-                           class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    <label class="block text-gray-400 text-xs mb-1">Put 数量</label>
+                    <input type="number" id="gridPutCount" value="5" min="1" max="10" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">Call 数量</label>
-                    <input type="number" id="gridCallCount" value="3" min="1" max="10" 
-                           class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    <label class="block text-gray-400 text-xs mb-1">Call 数量</label>
+                    <input type="number" id="gridCallCount" value="3" min="1" max="10" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-gray-400 text-xs mb-1">最小 DTE</label>
+                    <input type="number" id="gridMinDte" value="7" min="1" max="90" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-gray-400 text-xs mb-1">最大 DTE</label>
+                    <input type="number" id="gridMaxDte" value="45" min="1" max="180" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-gray-400 text-xs mb-1">最小 APR%</label>
+                    <input type="number" id="gridMinApr" value="15" min="0" max="200" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
             </div>
             
+            <button onclick="loadGridStrategy()" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
+                <i class="fas fa-magic mr-1"></i>获取推荐
+            </button>
+            
+            <!-- Put/Call 档位 -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
                 <div>
-                    <h4 class="text-sm font-semibold text-green-400 mb-2">Put 档位</h4>
+                    <h4 class="text-sm font-semibold text-green-400 mb-2">Sell Put 网格</h4>
                     <div id="putLevels" class="space-y-2 max-h-64 overflow-y-auto">
-                        <div class="text-center text-gray-500 py-4">加载中...</div>
+                        <div class="text-center text-gray-500 py-4">点击"获取推荐"加载</div>
                     </div>
                 </div>
                 <div>
-                    <h4 class="text-sm font-semibold text-blue-400 mb-2">Call 档位</h4>
+                    <h4 class="text-sm font-semibold text-blue-400 mb-2">Sell Call 网格</h4>
                     <div id="callLevels" class="space-y-2 max-h-64 overflow-y-auto">
-                        <div class="text-center text-gray-500 py-4">加载中...</div>
+                        <div class="text-center text-gray-500 py-4">点击"获取推荐"加载</div>
                     </div>
                 </div>
             </div>
             
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- 信号 + 图表 + 情景模拟 -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-300 mb-2">波动率信号 & 建议</h4>
+                    <div id="gridSignal">
+                        <div class="text-center text-gray-500 py-4">等待加载</div>
+                    </div>
+                </div>
                 <div>
                     <h4 class="text-sm font-semibold text-gray-300 mb-2">APR 分布图</h4>
                     <div class="h-64">
@@ -377,9 +516,9 @@
                     </div>
                 </div>
                 <div>
-                    <h4 class="text-sm font-semibold text-gray-300 mb-2">信号与建议</h4>
-                    <div id="gridSignal">
-                        <div class="text-center text-gray-500 py-4">加载中...</div>
+                    <h4 class="text-sm font-semibold text-yellow-400 mb-2">情景模拟</h4>
+                    <div id="gridScenarios" class="space-y-2">
+                        <div class="text-center text-gray-500 py-4">等待加载</div>
                     </div>
                 </div>
             </div>
@@ -493,97 +632,6 @@
                 <div class="flex items-center gap-2 ml-auto">
                     <span class="text-gray-400 text-sm">当前参数:</span>
                     <span id="currentParams" class="text-orange-400 text-sm font-mono">BTC | DTE 14-25 | Δ≤0.4 | Sell Put | 标准</span>
-                </div>
-            </div>
-        </section>
-
-        <!-- 网格策略引擎 -->
-        <section id="gridStrategySection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-purple-500">
-            <div class="flex items-center gap-2 mb-4">
-                <i class="fas fa-th text-purple-500"></i>
-                <h3 class="font-semibold text-lg">网格策略引擎</h3>
-                <span class="text-xs text-gray-400 ml-2">智能推荐最优Put/Call网格配置</span>
-            </div>
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-                <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">币种</label>
-                    <select id="gridCurrency" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                        <option value="BTC">BTC</option>
-                        <option value="ETH">ETH</option>
-                        <option value="SOL">SOL</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">Put 数量</label>
-                    <input type="number" id="gridPutCount" value="5" min="1" max="10" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                </div>
-                <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">Call 数量</label>
-                    <input type="number" id="gridCallCount" value="3" min="1" max="10" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                </div>
-                <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">最小 DTE</label>
-                    <input type="number" id="gridMinDte" value="7" min="1" max="90" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                </div>
-                <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">最大 DTE</label>
-                    <input type="number" id="gridMaxDte" value="45" min="1" max="180" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                </div>
-                <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">最小 APR %</label>
-                    <input type="number" id="gridMinApr" value="15" min="0" max="200" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                </div>
-            </div>
-            <div class="flex items-center gap-3 mb-4">
-                <button onclick="fetchGridRecommendation()" class="btn-primary px-5 py-2 rounded-xl font-medium flex items-center gap-2">
-                    <i class="fas fa-magic"></i>
-                    <span>获取推荐</span>
-                </button>
-                <div id="gridLoading" class="hidden">
-                    <i class="fas fa-spinner fa-spin text-purple-400"></i>
-                    <span class="text-gray-400 text-sm ml-2">加载中...</span>
-                </div>
-            </div>
-            <div id="gridResult" class="hidden">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div>
-                        <h4 class="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
-                            <i class="fas fa-arrow-down"></i> Sell Put 网格
-                        </h4>
-                        <div id="gridPutLevels" class="space-y-2"></div>
-                    </div>
-                    <div>
-                        <h4 class="text-sm font-semibold text-green-400 mb-3 flex items-center gap-2">
-                            <i class="fas fa-arrow-up"></i> Sell Call 网格
-                        </h4>
-                        <div id="gridCallLevels" class="space-y-2"></div>
-                    </div>
-                </div>
-                <div class="mt-4 pt-4 border-t border-gray-700/50">
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div class="bg-gray-800/50 p-3 rounded-lg">
-                            <div class="text-xs text-gray-400 mb-1">现货价格</div>
-                            <div id="gridSpotPrice" class="text-lg font-bold text-white">--</div>
-                        </div>
-                        <div class="bg-gray-800/50 p-3 rounded-lg">
-                            <div class="text-xs text-gray-400 mb-1">DVOL 信号</div>
-                            <div id="gridDvolSignal" class="text-lg font-bold text-blue-400">--</div>
-                        </div>
-                        <div class="bg-gray-800/50 p-3 rounded-lg">
-                            <div class="text-xs text-gray-400 mb-1">推荐比例</div>
-                            <div id="gridRatio" class="text-lg font-bold text-purple-400">--</div>
-                        </div>
-                        <div class="bg-gray-800/50 p-3 rounded-lg">
-                            <div class="text-xs text-gray-400 mb-1">潜在权利金</div>
-                            <div id="gridTotalPremium" class="text-lg font-bold text-green-400">--</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="mt-4">
-                    <h4 class="text-sm font-semibold text-yellow-400 mb-3 flex items-center gap-2">
-                        <i class="fas fa-chart-bar"></i> 情景模拟
-                    </h4>
-                    <div id="gridScenarios" class="grid grid-cols-3 gap-3"></div>
                 </div>
             </div>
         </section>
@@ -917,7 +965,7 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=814&t=1775667600"></script>
-    <script src="/static/grid-strategy.js?v=814&t=1775667600"></script>
+    <script src="/static/app.js?v=816&t=1775668000"></script>
+    <script src="/static/grid-strategy.js?v=816&t=1775668000"></script>
 <div style="display:none" data-app-version="v810"></div></body>
 </html>

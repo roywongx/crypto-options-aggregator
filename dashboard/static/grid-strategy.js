@@ -1,141 +1,143 @@
 /**
  * 网格策略前端实现
- * v8.0: 完整的网格策略展示和交互
+ * v8.1: 合并版 - 完整参数 + 情景模拟
  */
 
-// 全局变量
 let gridData = null;
 let gridChart = null;
 
-// 初始化网格策略
 async function initGridStrategy() {
-    console.log('初始化网格策略...');
-    
-    // 绑定事件
     const gridCurrency = document.getElementById('gridCurrency');
     const gridPutCount = document.getElementById('gridPutCount');
     const gridCallCount = document.getElementById('gridCallCount');
+    const gridMinDte = document.getElementById('gridMinDte');
+    const gridMaxDte = document.getElementById('gridMaxDte');
+    const gridMinApr = document.getElementById('gridMinApr');
     
     if (gridCurrency) gridCurrency.addEventListener('change', loadGridStrategy);
     if (gridPutCount) gridPutCount.addEventListener('change', loadGridStrategy);
     if (gridCallCount) gridCallCount.addEventListener('change', loadGridStrategy);
+    if (gridMinDte) gridMinDte.addEventListener('change', loadGridStrategy);
+    if (gridMaxDte) gridMaxDte.addEventListener('change', loadGridStrategy);
+    if (gridMinApr) gridMinApr.addEventListener('change', loadGridStrategy);
     
-    // 初始加载
     await loadGridStrategy();
 }
 
-// 加载网格策略数据
 async function loadGridStrategy() {
     try {
         const currencyEl = document.getElementById('gridCurrency');
-        const putCountEl = document.getElementById('gridPutCount');
-        const callCountEl = document.getElementById('gridCallCount');
-        
         if (!currencyEl) return;
         
         const currency = currencyEl.value;
-        const putCount = putCountEl ? putCountEl.value : 5;
-        const callCount = callCountEl ? callCountEl.value : 3;
+        const putCount = document.getElementById('gridPutCount')?.value || 5;
+        const callCount = document.getElementById('gridCallCount')?.value || 3;
+        const minDte = document.getElementById('gridMinDte')?.value || 7;
+        const maxDte = document.getElementById('gridMaxDte')?.value || 45;
+        const minApr = document.getElementById('gridMinApr')?.value || 15;
         
-        // 调用网格推荐API
+        const loadingEl = document.getElementById('gridLoading');
+        if (loadingEl) loadingEl.classList.remove('hidden');
+        
         const response = await safeFetch(
-            `${API_BASE}/api/grid/recommend?currency=${currency}&put_count=${putCount}&call_count=${callCount}`
+            `${API_BASE}/api/grid/recommend?currency=${currency}&put_count=${putCount}&call_count=${callCount}&min_dte=${minDte}&max_dte=${maxDte}&min_apr=${minApr}`
         );
         
         gridData = await response.json();
         
-        // 更新显示
         updateGridDisplay(gridData);
         renderGridChart(gridData);
+        renderGridScenarios(gridData);
+        
+        if (loadingEl) loadingEl.classList.add('hidden');
         
     } catch (error) {
         console.error('加载网格策略失败:', error);
         if (typeof showAlert === 'function') {
             showAlert(`网格策略加载失败: ${error.message}`, 'error');
         }
+        const loadingEl = document.getElementById('gridLoading');
+        if (loadingEl) loadingEl.classList.add('hidden');
     }
 }
 
-// 更新网格显示
 function updateGridDisplay(data) {
-    // 更新Put档位
     const putLevelsDiv = document.getElementById('putLevels');
     if (putLevelsDiv && data.put_levels) {
-        putLevelsDiv.innerHTML = data.put_levels.map(level => `
-            <div class="bg-gray-800/50 p-3 rounded-lg border-l-4 border-green-500">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <div class="text-sm font-medium">Sell Put</div>
-                        <div class="text-lg font-bold">$${level.strike.toLocaleString()}</div>
-                        <div class="text-xs text-gray-400">${level.dte}天 · Delta ${level.delta}</div>
+        if (data.put_levels.length === 0) {
+            putLevelsDiv.innerHTML = '<div class="text-center text-gray-500 py-4">无符合条件的Put档位</div>';
+        } else {
+            putLevelsDiv.innerHTML = data.put_levels.map(level => `
+                <div class="bg-gray-800/50 p-3 rounded-lg border-l-4 border-green-500">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <div class="text-sm font-medium">Sell Put</div>
+                            <div class="text-lg font-bold">$${level.strike.toLocaleString()}</div>
+                            <div class="text-xs text-gray-400">${level.dte}天 · Delta ${level.delta} · 距离${level.distance_pct}%</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-green-400 font-bold">${level.apr}% APR</div>
+                            <div class="text-xs text-gray-400">$${level.premium_usd}</div>
+                            <div class="text-xs ${getRecommendationColor(level.recommendation)}">${level.recommendation}</div>
+                        </div>
                     </div>
-                    <div class="text-right">
-                        <div class="text-green-400 font-bold">${level.apr}% APR</div>
-                        <div class="text-xs text-gray-400">$${level.premium_usd}</div>
-                    </div>
+                    <div class="mt-1 text-xs text-gray-500">${level.reason || ''}</div>
                 </div>
-                <div class="mt-2 text-xs ${getRecommendationColor(level.recommendation)}">
-                    ${level.reason || '推荐'}
-                </div>
-            </div>
-        `).join('');
+            `).join('');
+        }
     }
     
-    // 更新Call档位
     const callLevelsDiv = document.getElementById('callLevels');
     if (callLevelsDiv && data.call_levels) {
-        callLevelsDiv.innerHTML = data.call_levels.map(level => `
-            <div class="bg-gray-800/50 p-3 rounded-lg border-l-4 border-blue-500">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <div class="text-sm font-medium">Sell Call</div>
-                        <div class="text-lg font-bold">$${level.strike.toLocaleString()}</div>
-                        <div class="text-xs text-gray-400">${level.dte}天 · Delta ${level.delta}</div>
+        if (data.call_levels.length === 0) {
+            callLevelsDiv.innerHTML = '<div class="text-center text-gray-500 py-4">无符合条件的Call档位</div>';
+        } else {
+            callLevelsDiv.innerHTML = data.call_levels.map(level => `
+                <div class="bg-gray-800/50 p-3 rounded-lg border-l-4 border-blue-500">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <div class="text-sm font-medium">Sell Call</div>
+                            <div class="text-lg font-bold">$${level.strike.toLocaleString()}</div>
+                            <div class="text-xs text-gray-400">${level.dte}天 · Delta ${level.delta} · 距离+${Math.abs(level.distance_pct)}%</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-blue-400 font-bold">${level.apr}% APR</div>
+                            <div class="text-xs text-gray-400">$${level.premium_usd}</div>
+                            <div class="text-xs ${getRecommendationColor(level.recommendation)}">${level.recommendation}</div>
+                        </div>
                     </div>
-                    <div class="text-right">
-                        <div class="text-blue-400 font-bold">${level.apr}% APR</div>
-                        <div class="text-xs text-gray-400">$${level.premium_usd}</div>
-                    </div>
+                    <div class="mt-1 text-xs text-gray-500">${level.reason || ''}</div>
                 </div>
-                <div class="mt-2 text-xs ${getRecommendationColor(level.recommendation)}">
-                    ${level.reason || '推荐'}
-                </div>
-            </div>
-        `).join('');
+            `).join('');
+        }
     }
     
-    // 更新信号信息
     const signalDiv = document.getElementById('gridSignal');
     if (signalDiv) {
         const signalLabels = {
-            'FAVOR_PUT': '偏向Put',
-            'FAVOR_CALL': '偏向Call',
-            'NEUTRAL': '中性'
+            'FAVOR_PUT': '偏向Put（恐慌时卖Put收高价）',
+            'FAVOR_CALL': '偏向Call（平静时卖Call收溢价）',
+            'NEUTRAL': '中性均衡'
         };
         
         signalDiv.innerHTML = `
-            <div class="bg-gray-800/50 p-4 rounded-lg">
-                <div class="text-sm text-gray-400 mb-2">波动率方向信号</div>
+            <div class="bg-gray-800/50 p-4 rounded-lg space-y-2">
                 <div class="text-lg font-bold ${getSignalColor(data.dvol_signal)}">${signalLabels[data.dvol_signal] || data.dvol_signal}</div>
-                <div class="text-xs text-gray-500 mt-1">推荐比例: ${data.recommended_ratio || '1:1'}</div>
-                <div class="text-xs text-gray-500">潜在总权利金: $${data.total_potential_premium || 0}</div>
+                <div class="text-sm text-gray-300">推荐比例: <b>${data.recommended_ratio || '5:5'}</b></div>
+                <div class="text-sm text-gray-300">潜在总权利金: <b class="text-green-400">$${(data.total_potential_premium || 0).toLocaleString()}</b></div>
+                <div class="text-sm text-gray-300">现货: <b>$${(data.spot_price || 0).toLocaleString()}</b></div>
             </div>
         `;
     }
 }
 
-// 渲染网格图表
 function renderGridChart(data) {
     const canvas = document.getElementById('gridChart');
     if (!canvas) return;
     
     const ctx = canvas.getContext('2d');
+    if (gridChart) gridChart.destroy();
     
-    if (gridChart) {
-        gridChart.destroy();
-    }
-    
-    // 准备图表数据
     const putStrikes = [];
     const putAprs = [];
     const callStrikes = [];
@@ -155,10 +157,8 @@ function renderGridChart(data) {
         });
     }
     
-    // 合并所有行权价并排序
     const allStrikes = [...new Set([...putStrikes, ...callStrikes])].sort((a, b) => a - b);
     
-    // 为每个行权价匹配Put和Call的APR
     const putData = allStrikes.map(strike => {
         const idx = putStrikes.indexOf(strike);
         return idx >= 0 ? putAprs[idx] : 0;
@@ -172,7 +172,7 @@ function renderGridChart(data) {
     gridChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: allStrikes.map(s => s.toLocaleString()),
+            labels: allStrikes.map(s => '$' + (s / 1000) + 'K'),
             datasets: [
                 {
                     label: 'Put APR %',
@@ -194,38 +194,64 @@ function renderGridChart(data) {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                title: {
-                    display: true,
-                    text: '网格策略 APR 分布'
-                },
+                title: { display: true, text: 'APR 分布' },
                 tooltip: {
                     callbacks: {
-                        label: function(context) {
-                            return `${context.dataset.label}: ${context.parsed.y}%`;
-                        }
+                        label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%`
                     }
                 }
             },
             scales: {
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'APR %'
-                    }
-                },
-                x: {
-                    title: {
-                        display: true,
-                        text: '行权价'
-                    }
-                }
+                y: { beginAtZero: true, title: { display: true, text: 'APR %' } },
+                x: { title: { display: true, text: '行权价' } }
             }
         }
     });
 }
 
-// 辅助函数
+function renderGridScenarios(data) {
+    const scenariosDiv = document.getElementById('gridScenarios');
+    if (!scenariosDiv || !data.spot_price) return;
+    
+    const spot = data.spot_price;
+    const scenarios = [
+        { label: '暴跌 -20%', price: spot * 0.80 },
+        { label: '下跌 -10%', price: spot * 0.90 },
+        { label: '当前价格', price: spot },
+        { label: '上涨 +10%', price: spot * 1.10 },
+        { label: '大涨 +20%', price: spot * 1.20 }
+    ];
+    
+    scenariosDiv.innerHTML = scenarios.map(s => {
+        const putPnl = (data.put_levels || []).reduce((sum, l) => {
+            if (s.price < l.strike) {
+                return sum + l.premium_usd - (l.strike - s.price);
+            }
+            return sum + l.premium_usd;
+        }, 0);
+        
+        const callPnl = (data.call_levels || []).reduce((sum, l) => {
+            if (s.price > l.strike) {
+                return sum + l.premium_usd - (s.price - l.strike);
+            }
+            return sum + l.premium_usd;
+        }, 0);
+        
+        const totalPnl = putPnl + callPnl;
+        const isCurrent = s.price === spot;
+        const pnlColor = totalPnl >= 0 ? 'text-green-400' : 'text-red-400';
+        const bgColor = isCurrent ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800/40';
+        
+        return `
+            <div class="p-3 ${bgColor} rounded-lg border ${isCurrent ? 'border-purple-500/30' : 'border-gray-700/30'}">
+                <div class="text-xs text-gray-400 mb-1">${s.label}</div>
+                <div class="text-sm font-medium">$${s.price.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+                <div class="text-sm font-bold ${pnlColor}">$${totalPnl.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+            </div>
+        `;
+    }).join('');
+}
+
 function getRecommendationColor(recommendation) {
     const colors = {
         'BEST': 'text-green-400',
@@ -246,8 +272,6 @@ function getSignalColor(signal) {
     return colors[signal] || 'text-gray-400';
 }
 
-// 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
-    // 延迟初始化，确保其他组件加载完成
     setTimeout(initGridStrategy, 1500);
 });
