@@ -9,31 +9,20 @@ from services.risk_framework import RiskFramework
 class UnifiedRiskAssessor:
     def __init__(self):
         self.risk_framework = RiskFramework()
-    
+
     def assess_comprehensive_risk(self, spot: float, currency: str = "BTC") -> Dict[str, Any]:
-        """综合风险评估"""
-        
-        # 1. 价格风险
         price_risk = self._assess_price_risk(spot)
-        
-        # 2. 波动率风险
         volatility_risk = self._assess_volatility_risk(currency)
-        
-        # 3. 市场情绪风险
-        sentiment_risk = self._assess_sentiment_risk(currency)
-        
-        # 4. 流动性风险
+        sentiment_risk = self._assess_sentiment_risk(spot, currency)
         liquidity_risk = self._assess_liquidity_risk(currency)
-        
-        # 综合评分 (0-100, 越高风险越大)
+
         composite_score = (
-            price_risk["score"] * 0.4 +
-            volatility_risk["score"] * 0.3 +
-            sentiment_risk["score"] * 0.2 +
-            liquidity_risk["score"] * 0.1
+            price_risk["score"] * 0.30 +
+            volatility_risk["score"] * 0.35 +
+            sentiment_risk["score"] * 0.20 +
+            liquidity_risk["score"] * 0.15
         )
-        
-        # 风险等级
+
         if composite_score < 30:
             risk_level = "LOW"
         elif composite_score < 60:
@@ -42,7 +31,7 @@ class UnifiedRiskAssessor:
             risk_level = "HIGH"
         else:
             risk_level = "EXTREME"
-        
+
         return {
             "composite_score": round(composite_score, 1),
             "risk_level": risk_level,
@@ -55,20 +44,11 @@ class UnifiedRiskAssessor:
             "recommendations": self._generate_risk_recommendations(composite_score),
             "timestamp": __import__('datetime').datetime.now().isoformat()
         }
-    
+
     def _assess_price_risk(self, spot: float) -> Dict[str, Any]:
-        """价格风险评估"""
         status = self.risk_framework.get_status(spot)
-        
-        risk_scores = {
-            "NORMAL": 20,
-            "NEAR_FLOOR": 50,
-            "ADVERSE": 75,
-            "PANIC": 95
-        }
-        
+        risk_scores = {"NORMAL": 20, "NEAR_FLOOR": 50, "ADVERSE": 75, "PANIC": 95}
         floors = self.risk_framework._get_floors()
-        
         return {
             "score": risk_scores.get(status, 50),
             "status": status,
@@ -79,17 +59,14 @@ class UnifiedRiskAssessor:
                 f"风险状态: {status}"
             ]
         }
-    
+
     def _assess_volatility_risk(self, currency: str) -> Dict[str, Any]:
-        """波动率风险评估"""
         try:
-            # 尝试从服务获取DVOL数据
             from services.dvol_analyzer import get_dvol_from_deribit
             dvol_data = get_dvol_from_deribit(currency)
             dvol = dvol_data.get("current", 50)
             z_score = dvol_data.get("z_score", 0)
-            
-            # 计算波动率风险分数
+
             if dvol > 80:
                 score = 90
             elif dvol > 60:
@@ -100,11 +77,10 @@ class UnifiedRiskAssessor:
                 score = 20
             else:
                 score = 10
-            
-            # Z-score 调整
+
             if abs(z_score) > 2:
                 score = min(100, score + 20)
-            
+
             return {
                 "score": score,
                 "dvol": dvol,
@@ -117,7 +93,6 @@ class UnifiedRiskAssessor:
                 ]
             }
         except Exception as e:
-            # 如果无法获取DVOL，使用默认值
             return {
                 "score": 50,
                 "dvol": 50,
@@ -126,48 +101,95 @@ class UnifiedRiskAssessor:
                 "factors": ["无法获取波动率数据"],
                 "error": str(e)
             }
-    
-    def _assess_sentiment_risk(self, currency: str) -> Dict[str, Any]:
-        """市场情绪风险评估"""
-        # 这里可以接入恐惧贪婪指数、社交媒体情绪等
-        # 暂时使用基于价格位置的简单估算
+
+    def _assess_sentiment_risk(self, spot: float, currency: str) -> Dict[str, Any]:
+        factors = []
+        score = 40
+
         try:
-            status = self.risk_framework.get_status(__import__('services').trades.fetch_deribit_summaries(currency)[0].get('mark_price', 50000))
-            
-            sentiment_scores = {
-                "NORMAL": 30,  # 正常情绪
-                "NEAR_FLOOR": 50,  # 谨慎情绪
-                "ADVERSE": 75,  # 恐慌情绪
-                "PANIC": 90  # 极度恐慌
-            }
-            
-            return {
-                "score": sentiment_scores.get(status, 50),
-                "factors": [
-                    f"基于价格位置的情绪评估",
-                    f"当前市场情绪: {status}"
-                ]
-            }
-        except:
-            return {
-                "score": 40,
-                "factors": ["情绪数据待接入"]
-            }
-    
+            import requests
+            resp = requests.get("https://api.alternative.me/fng/?limit=1", timeout=5)
+            if resp.status_code == 200:
+                fng_data = resp.json().get("data", [{}])[0]
+                fng_value = int(fng_data.get("value", 50))
+                fng_label = fng_data.get("value_classification", "Neutral")
+                factors.append(f"恐惧贪婪指数: {fng_value} ({fng_label})")
+
+                if fng_value <= 20:
+                    score = 85
+                elif fng_value <= 35:
+                    score = 65
+                elif fng_value <= 50:
+                    score = 45
+                elif fng_value <= 65:
+                    score = 30
+                else:
+                    score = 15
+        except Exception:
+            factors.append("恐惧贪婪指数: 获取失败")
+
+        try:
+            from services.dvol_analyzer import get_dvol_from_deribit
+            dvol_data = get_dvol_from_deribit(currency)
+            dvol = dvol_data.get("current", 50)
+            dvol_z = dvol_data.get("z_score", 0)
+            factors.append(f"DVOL恐慌代理: {dvol:.1f}% (Z={dvol_z:.2f})")
+            if dvol_z > 2:
+                score = min(100, score + 15)
+            elif dvol_z < -2:
+                score = max(0, score - 10)
+        except Exception:
+            pass
+
+        if not factors:
+            status = self.risk_framework.get_status(spot)
+            sentiment_scores = {"NORMAL": 30, "NEAR_FLOOR": 50, "ADVERSE": 75, "PANIC": 90}
+            score = sentiment_scores.get(status, 40)
+            factors.append(f"基于价格位置的情绪评估: {status}")
+
+        return {"score": score, "factors": factors}
+
     def _assess_liquidity_risk(self, currency: str) -> Dict[str, Any]:
-        """流动性风险评估"""
-        # 这里可以接入买卖价差、深度等数据
-        # 暂时使用默认值
-        return {
-            "score": 30,
-            "factors": [
-                "流动性正常",
-                "Deribit市场深度充足"
-            ]
-        }
-    
+        score = 30
+        factors = []
+
+        try:
+            from db.database import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                import json
+                contracts = json.loads(row[0])
+                if contracts:
+                    spreads = [c.get("spread_pct", 0) for c in contracts if c.get("spread_pct", 0) > 0]
+                    ois = [c.get("open_interest", 0) for c in contracts]
+
+                    if spreads:
+                        avg_spread = sum(spreads) / len(spreads)
+                        factors.append(f"平均买卖价差: {avg_spread:.2f}%")
+                        if avg_spread > 5:
+                            score = min(100, score + 40)
+                        elif avg_spread > 2:
+                            score = min(100, score + 20)
+
+                    low_oi_count = sum(1 for oi in ois if oi < 50)
+                    if low_oi_count > len(contracts) * 0.5:
+                        score = min(100, score + 25)
+                        factors.append(f"低持仓量合约占比: {low_oi_count}/{len(contracts)}")
+                    else:
+                        factors.append(f"持仓量分布正常 ({len(contracts)}个合约)")
+                else:
+                    factors.append("暂无合约数据")
+            else:
+                factors.append("暂无扫描数据")
+        except Exception:
+            factors.append("流动性数据获取失败")
+
+        return {"score": score, "factors": factors}
+
     def _generate_risk_recommendations(self, composite_score: float) -> list:
-        """根据综合风险分数生成建议"""
         if composite_score < 30:
             return [
                 "✅ 风险较低，可适当增加仓位",

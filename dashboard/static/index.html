@@ -232,6 +232,14 @@
                             <div class="text-xs text-red-400 mb-1">极端支撑位</div>
                             <div id="extremeFloor" class="text-lg font-bold text-red-300">--</div>
                         </div>
+                        <div class="p-3 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+                            <div class="text-xs text-emerald-400 mb-1">Put Wall 防线</div>
+                            <div id="putWallInfo" class="text-sm font-bold">--</div>
+                        </div>
+                        <div class="p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
+                            <div class="text-xs text-yellow-400 mb-1">Gamma Flip</div>
+                            <div id="gammaFlipInfo" class="text-sm font-bold">--</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -628,7 +636,13 @@
                     <h2 class="text-lg font-semibold flex items-center gap-2">
                         <i class="fas fa-list-ol text-orange-500"></i>
                         实时机会列表
-                        <div class="relative ml-4">
+                        <div class="flex items-center gap-1 ml-3">
+                            <button onclick="switchView('sellput')" id="viewSellPut" class="px-2.5 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30 transition hover:bg-green-500/30">Sell Put</button>
+                            <button onclick="switchView('coveredcall')" id="viewCoveredCall" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-blue-500/20 hover:text-blue-400 hover:border-blue-500/30">Covered Call</button>
+                            <button onclick="switchView('wheel')" id="viewWheel" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-purple-500/20 hover:text-purple-400 hover:border-purple-500/30">Wheel</button>
+                            <button onclick="switchView('all')" id="viewAll" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-orange-500/20 hover:text-orange-400 hover:border-orange-500/30">全部</button>
+                        </div>
+                        <div class="relative ml-2">
                             <button id="columnToggleBtn" onclick="toggleColumnMenu()" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs flex items-center gap-1">
                                 <i class="fas fa-columns"></i> 列
                             </button>

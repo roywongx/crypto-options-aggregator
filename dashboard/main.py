@@ -276,6 +276,83 @@ async def quick_scan(params: QuickScanParams = None):
     return await run_in_threadpool(_quick_scan_sync, params)
 
 
+@app.get("/api/latest")
+async def get_latest(currency: str = Query(default="BTC")):
+    """获取最新扫描数据（用于页面加载和自动刷新）"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
+               large_trades_count, large_trades_details, contracts_data, raw_output
+        FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
+    """, (currency,))
+    row = cursor.fetchone()
+
+    if not row:
+        return {
+            "success": False,
+            "currency": currency,
+            "spot_price": get_spot_price(currency),
+            "contracts": [],
+            "large_trades_details": [],
+            "large_trades_count": 0,
+            "timestamp": None,
+            "message": "暂无扫描数据，请先执行扫描"
+        }
+
+    try:
+        contracts = json.loads(row[6]) if row[6] else []
+    except Exception:
+        contracts = []
+
+    try:
+        large_trades = json.loads(row[5]) if row[5] else []
+    except Exception:
+        large_trades = []
+
+    raw = {}
+    if row[8]:
+        try:
+            raw = json.loads(row[8])
+        except Exception:
+            raw = {}
+
+    spot_price = row[1] or get_spot_price(currency)
+    floors = RiskFramework._get_floors()
+    regular_floor = floors.get("regular", 0)
+    margin_ratio = 0.20
+
+    for c in contracts:
+        if c.get("margin_required") is None:
+            strike = c.get("strike", 0)
+            prem = c.get("premium_usd", 0) or c.get("premium", 0)
+            c["margin_required"] = round(max(strike * 0.1, (strike - prem) * margin_ratio), 2)
+        if c.get("capital_efficiency") is None:
+            prem = c.get("premium_usd", 0) or c.get("premium", 0)
+            margin = c.get("margin_required", 1)
+            c["capital_efficiency"] = round(prem / margin * 100, 1) if margin > 0 else 0
+        if c.get("support_distance_pct") is None and c.get("option_type") in ("P", "PUT") and regular_floor > 0:
+            c["support_distance_pct"] = round((c.get("strike", 0) - regular_floor) / regular_floor * 100, 1)
+
+    return {
+        "success": True,
+        "currency": currency,
+        "spot_price": row[1] or get_spot_price(currency),
+        "dvol_current": row[2] or 0,
+        "dvol_z_score": row[3] or 0,
+        "dvol_signal": row[4] or '',
+        "dvol_interpretation": raw.get("interpretation", ""),
+        "dvol_trend": raw.get("trend", ""),
+        "dvol_trend_label": raw.get("trend_label", ""),
+        "dvol_confidence": raw.get("confidence", ""),
+        "dvol_percentile_7d": raw.get("percentile_7d", 50),
+        "contracts": contracts,
+        "large_trades_details": large_trades,
+        "large_trades_count": row[5] or 0,
+        "timestamp": row[0]
+    }
+
+
 def _quick_scan_sync(params: QuickScanParams = None):
     """快速扫描：直接获取Deribit数据，不依赖options_aggregator.py"""
     from datetime import datetime
@@ -954,18 +1031,44 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
     risk_data = assessor.assess_comprehensive_risk(spot, currency)
 
     # 最大痛点
+    put_wall = None
+    gamma_flip = None
+    advice = []
+    actions = []
     try:
         from routers.maxpain import _calc_max_pain_internal
         pain_data = await _calc_max_pain_internal(currency)
         nearest_mp = pain_data.get("nearest_mp")
         mm_signal = pain_data.get("mm_overview", "")
+        for exp in pain_data.get("expiries", []):
+            gc = exp.get("gex_curve", [])
+            if gc:
+                max_put_oi_strike = None
+                max_put_oi = 0
+                for g in gc:
+                    put_oi_below = g.get("put_oi_below", 0)
+                    if put_oi_below > max_put_oi:
+                        max_put_oi = put_oi_below
+                        max_put_oi_strike = g.get("strike")
+                if max_put_oi_strike:
+                    put_wall = {"strike": max_put_oi_strike, "oi": max_put_oi, "expiry": exp.get("expiry"), "dte": exp.get("dte")}
+            flip = exp.get("flip_point")
+            if flip:
+                gamma_flip = {"strike": flip, "expiry": exp.get("expiry"), "dte": exp.get("dte")}
+                break
     except Exception:
         nearest_mp = None
         mm_signal = ""
 
+    if put_wall and spot < put_wall["strike"]:
+        advice.append(f"🛡️ Put Wall防线: ${put_wall['strike']:,.0f} (OI={put_wall['oi']:,.0f}) — 机构在此布防")
+    if gamma_flip:
+        if spot > gamma_flip["strike"]:
+            advice.append(f"✅ Gamma Flip ${gamma_flip['strike']:,.0f} — 价格在多头Gamma区，波动受抑")
+        else:
+            advice.append(f"⚠️ Gamma Flip ${gamma_flip['strike']:,.0f} — 价格在空头Gamma区，波动放大")
+
     # 策略建议
-    advice = []
-    actions = []
 
     if status == "NORMAL":
         advice.append(f"当前价格 ${spot:,.0f} 处于常规区间。")
@@ -1016,6 +1119,8 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         "advice": advice,
         "recommended_actions": actions,
         "position_guidance": pos_guide,
+        "put_wall": put_wall,
+        "gamma_flip": gamma_flip,
         "timestamp": risk_data["timestamp"]
     }
 

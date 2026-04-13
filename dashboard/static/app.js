@@ -140,13 +140,13 @@ async function setAutoRefresh(minutes) {
     if (minutes > 0) {
         autoRefreshInterval = setInterval(async () => {
             if (navigator.onLine) {
-                await triggerScan();
+                await loadLatestData();
             } else {
                 showAlert('网络断开，跳过自动刷新', 'warning');
             }
         }, minutes * 60 * 1000);
         
-        showAlert(`已设置 ${minutes} 分钟自动刷新（含扫描）`, 'info');
+        showAlert(`已设置 ${minutes} 分钟自动刷新`, 'info');
     }
 }
 
@@ -741,6 +741,24 @@ function updateRiskDashboardUI(data) {
                 </div>
             `;
         }
+    }
+
+    // Put Wall / Gamma Flip
+    const pwEl = document.getElementById('putWallInfo');
+    const gfEl = document.getElementById('gammaFlipInfo');
+    if (pwEl && data.put_wall) {
+        const pw = data.put_wall;
+        const distPct = ((data.spot - pw.strike) / pw.strike * 100).toFixed(1);
+        pwEl.innerHTML = `<span class="text-emerald-400 font-bold">$${pw.strike.toLocaleString()}</span> <span class="text-gray-500 text-xs">(OI: ${pw.oi.toLocaleString()})</span> <span class="${distPct > 0 ? 'text-emerald-400' : 'text-red-400'} text-xs">${distPct > 0 ? '↑' + distPct + '%' : '↓' + Math.abs(distPct) + '%'}</span>`;
+    } else if (pwEl) {
+        pwEl.innerHTML = '<span class="text-gray-500">--</span>';
+    }
+    if (gfEl && data.gamma_flip) {
+        const gf = data.gamma_flip;
+        const isAbove = data.spot > gf.strike;
+        gfEl.innerHTML = `<span class="${isAbove ? 'text-emerald-400' : 'text-red-400'} font-bold">$${gf.strike.toLocaleString()}</span> <span class="text-xs ${isAbove ? 'text-emerald-400' : 'text-red-400'}">${isAbove ? '✅ 多头Gamma区' : '⚠️ 空头Gamma区'}</span>`;
+    } else if (gfEl) {
+        gfEl.innerHTML = '<span class="text-gray-500">--</span>';
     }
 
     // 更新顶部指标卡
@@ -1579,6 +1597,63 @@ function toggleColumn(key) {
     columnVisibility[key] = !columnVisibility[key];
     localStorage.setItem('columnVisibility', JSON.stringify(columnVisibility));
     applyColumnVisibility();
+}
+
+const VIEW_PRESETS = {
+    sellput: {
+        visible: ['platform', 'option_type', 'expiry', 'dte', 'strike', 'delta', 'theta', 'apr', 'pop', 'premium', 'margin_required', 'capital_efficiency', 'support_distance_pct', 'breakeven_pct'],
+        filter: (c) => c.option_type === 'P' || c.option_type === 'PUT'
+    },
+    coveredcall: {
+        visible: ['platform', 'option_type', 'expiry', 'dte', 'strike', 'delta', 'theta', 'apr', 'pop', 'premium', 'margin_required', 'capital_efficiency', 'breakeven_pct'],
+        filter: (c) => c.option_type === 'C' || c.option_type === 'CALL'
+    },
+    wheel: {
+        visible: ['platform', 'option_type', 'expiry', 'dte', 'strike', 'delta', 'theta', 'apr', 'pop', 'premium', 'margin_required', 'capital_efficiency', 'support_distance_pct', 'breakeven_pct'],
+        filter: null
+    },
+    all: {
+        visible: null,
+        filter: null
+    }
+};
+let _currentView = 'sellput';
+
+function switchView(viewName) {
+    _currentView = viewName;
+    const preset = VIEW_PRESETS[viewName];
+    if (!preset) return;
+
+    document.querySelectorAll('[id^="view"]').forEach(btn => {
+        if (btn.id.startsWith('view')) {
+            btn.className = 'px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition';
+        }
+    });
+    const activeBtn = document.getElementById('view' + viewName.charAt(0).toUpperCase() + viewName.slice(1));
+    if (activeBtn) {
+        const colors = { sellput: 'bg-green-500/20 text-green-400 border-green-500/30', coveredcall: 'bg-blue-500/20 text-blue-400 border-blue-500/30', wheel: 'bg-purple-500/20 text-purple-400 border-purple-500/30', all: 'bg-orange-500/20 text-orange-400 border-orange-500/30' };
+        activeBtn.className = `px-2.5 py-1 rounded text-xs font-medium ${colors[viewName] || ''} border transition`;
+    }
+
+    if (preset.visible) {
+        COLUMN_CONFIG.forEach(col => {
+            columnVisibility[col.key] = preset.visible.includes(col.key);
+        });
+    } else {
+        COLUMN_CONFIG.forEach(col => {
+            columnVisibility[col.key] = col.defaultVisible;
+        });
+    }
+    localStorage.setItem('columnVisibility', JSON.stringify(columnVisibility));
+    renderColumnMenu();
+    applyColumnVisibility();
+
+    if (currentData && currentData.contracts && preset.filter) {
+        const filtered = currentData.contracts.filter(preset.filter);
+        updateOpportunitiesTable(filtered);
+    } else if (currentData && currentData.contracts) {
+        updateOpportunitiesTable(currentData.contracts);
+    }
 }
 
 function applyColumnVisibility() {

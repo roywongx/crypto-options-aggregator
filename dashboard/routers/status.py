@@ -46,7 +46,16 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     """, (currency,))
     row = cursor.fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="暂无数据")
+        return {
+            "success": False,
+            "currency": currency,
+            "spot_price": 0,
+            "contracts": [],
+            "large_trades_details": [],
+            "large_trades_count": 0,
+            "timestamp": None,
+            "message": "暂无扫描数据，请先执行扫描"
+        }
     col_names = [desc[0] for desc in cursor.description] if cursor.description else []
     rd = dict(zip(col_names, row)) if row and col_names else {}
     _dvol_raw = {}
@@ -57,7 +66,30 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
         large_trades = json.loads(rd.get('large_trades_details', '')) if rd.get('large_trades_details') else []
     except Exception:
         large_trades = rd.get('large_trades_details', []) if isinstance(rd.get('large_trades_details'), list) else []
+
+    contracts = json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else []
+
+    try:
+        from services.risk_framework import RiskFramework
+        floors = RiskFramework._get_floors()
+        regular_floor = floors.get("regular", 0)
+        margin_ratio = 0.20
+        for c in contracts:
+            if c.get("margin_required") is None:
+                strike = c.get("strike", 0)
+                prem = c.get("premium_usd", 0) or c.get("premium", 0)
+                c["margin_required"] = round(max(strike * 0.1, (strike - prem) * margin_ratio), 2)
+            if c.get("capital_efficiency") is None:
+                prem = c.get("premium_usd", 0) or c.get("premium", 0)
+                margin = c.get("margin_required", 1)
+                c["capital_efficiency"] = round(prem / margin * 100, 1) if margin > 0 else 0
+            if c.get("support_distance_pct") is None and c.get("option_type") in ("P", "PUT") and regular_floor > 0:
+                c["support_distance_pct"] = round((c.get("strike", 0) - regular_floor) / regular_floor * 100, 1)
+    except Exception:
+        pass
+
     return {
+        "success": True,
         "timestamp": rd.get('timestamp'),
         "currency": rd.get('currency'),
         "spot_price": rd.get('spot_price'),
@@ -68,9 +100,10 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
         "dvol_trend_label": _dvol_raw.get('trend_label', ''),
         "dvol_confidence": _dvol_raw.get('confidence', ''),
         "dvol_interpretation": _dvol_raw.get('interpretation', ''),
+        "dvol_percentile_7d": _dvol_raw.get('percentile_7d', 50),
         "large_trades_count": rd.get('large_trades_count', 0),
         "large_trades_details": large_trades,
-        "contracts": json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else [],
+        "contracts": contracts,
         "dvol_raw": _dvol_raw
     }
 
