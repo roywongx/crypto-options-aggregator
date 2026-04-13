@@ -816,27 +816,58 @@
 
                 <!-- Module 1: IV Term Structure -->
                 <div class="card-glass rounded-xl p-5">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-chart-area text-cyan-400"></i>
-                        IV 期限结构 (Term Structure)
-                    </h2>
-                    <p class="text-xs text-gray-400 mb-3 leading-relaxed">
-                        📊 <b>如何理解此图：</b>X轴为到期天数(DTE)，Y轴为平均隐含波动率(IV)。
-                        正常情况下IV随到期日远而下降(<span class="text-green-400">Contango/升水</span>)；
-                        若近期IV > 远期IV则出现<span class="text-red-400">倒挂(Backwardation)</span>，暗示市场恐慌。
-                        红色数据点标记≤14天短期合约，需特别关注。
-                    </p>
-                    <div id="backwardationAlert" class="hidden mb-3 p-3 rounded-lg bg-red-900/40 border border-red-500/50 text-red-300 text-sm font-medium">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-lg font-semibold flex items-center gap-2">
+                            <i class="fas fa-chart-area text-cyan-400"></i>
+                            IV 期限结构
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <span id="tsStructureLabel" class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">--</span>
+                            <span id="tsSlopeLabel" class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">--</span>
+                        </div>
+                    </div>
+                    <div id="backwardationAlert" class="hidden mb-3 p-2 rounded-lg bg-red-900/40 border border-red-500/50 text-red-300 text-xs font-medium">
                         <span id="bwText"></span>
                     </div>
-                    <div class="grid grid-cols-5 gap-2 mb-3 text-xs text-center">
-                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">7D</div><div id="ts7" class="font-mono">--</div></div>
-                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">14D</div><div id="ts14" class="font-mono">--</div></div>
-                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">30D</div><div id="ts30" class="font-mono">--</div></div>
-                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">60D</div><div id="ts60" class="font-mono">--</div></div>
-                        <div class="bg-gray-800 rounded py-1.5"><div class="text-gray-400">90D</div><div id="ts90" class="font-mono">--</div></div>
+                    <div class="grid grid-cols-6 gap-2 mb-3 text-center">
+                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">1W</div>
+                            <div id="ts7" class="font-mono text-sm font-bold text-cyan-400">--</div>
+                            <div id="ts7dte" class="text-[9px] text-gray-600">--</div>
+                        </div>
+                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">2W</div>
+                            <div id="ts14" class="font-mono text-sm font-bold text-cyan-400">--</div>
+                            <div id="ts14dte" class="text-[9px] text-gray-600">--</div>
+                        </div>
+                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">1M</div>
+                            <div id="ts30" class="font-mono text-sm font-bold text-cyan-400">--</div>
+                            <div id="ts30dte" class="text-[9px] text-gray-600">--</div>
+                        </div>
+                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">2M</div>
+                            <div id="ts60" class="font-mono text-sm font-bold text-cyan-400">--</div>
+                            <div id="ts60dte" class="text-[9px] text-gray-600">--</div>
+                        </div>
+                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">3M</div>
+                            <div id="ts90" class="font-mono text-sm font-bold text-cyan-400">--</div>
+                            <div id="ts90dte" class="text-[9px] text-gray-600">--</div>
+                        </div>
+                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">6M</div>
+                            <div id="ts180" class="font-mono text-sm font-bold text-cyan-400">--</div>
+                            <div id="ts180dte" class="text-[9px] text-gray-600">--</div>
+                        </div>
                     </div>
-                    <canvas id="termStructureChart" height="160"></canvas>
+                    <div class="relative" style="min-height: 180px;">
+                        <canvas id="termStructureChart" height="180"></canvas>
+                    </div>
+                    <div class="flex items-center justify-between mt-2 text-[10px] text-gray-600">
+                        <span>Contango = 远期IV > 近期IV (正常)</span>
+                        <span>Backwardation = 近期IV > 远期IV (恐慌)</span>
+                    </div>
                 </div>
 
                 <!-- Module 2: Max Pain & GEX -->

@@ -2044,24 +2044,80 @@ async function loadTermStructure() {
         const d = await resp.json();
         if (d.error) { console.warn('TS:', d.error); return; }
 
-        [7,14,30,60,90].forEach(dte => {
-            const el = document.getElementById('ts' + dte);
-            if (el) {
-                const ts = (d.term_structure || []).find(t => t.dte === dte);
-                el.textContent = ts && ts.avg_iv ? ts.avg_iv + '%' : '--';
+        const tsData = d.term_structure || [];
+
+        const targetDtes = [
+            {key: '7', target: 7},
+            {key: '14', target: 14},
+            {key: '30', target: 30},
+            {key: '60', target: 60},
+            {key: '90', target: 90},
+            {key: '180', target: 180}
+        ];
+
+        targetDtes.forEach(({key, target}) => {
+            const el = document.getElementById('ts' + key);
+            const dteEl = document.getElementById('ts' + key + 'dte');
+            if (!el) return;
+
+            let best = null;
+            let bestDiff = Infinity;
+            for (const t of tsData) {
+                const diff = Math.abs(t.dte - target);
+                if (diff < bestDiff && t.avg_iv !== null && t.avg_iv > 0) {
+                    bestDiff = diff;
+                    best = t;
+                }
+            }
+
+            const maxAllowedDiff = target * 0.5 + 5;
+            if (best && bestDiff <= maxAllowedDiff) {
+                const iv = best.avg_iv;
+                el.textContent = iv.toFixed(1) + '%';
+                if (iv > 70) el.className = 'font-mono text-sm font-bold text-red-400';
+                else if (iv > 55) el.className = 'font-mono text-sm font-bold text-yellow-400';
+                else el.className = 'font-mono text-sm font-bold text-cyan-400';
+                if (dteEl) dteEl.textContent = best.dte !== target ? `DTE ${best.dte}` : '';
+            } else {
+                el.textContent = '--';
+                el.className = 'font-mono text-sm font-bold text-gray-600';
+                if (dteEl) dteEl.textContent = '';
             }
         });
+
+        const structLabel = document.getElementById('tsStructureLabel');
+        const slopeLabel = document.getElementById('tsSlopeLabel');
+        if (structLabel && slopeLabel && tsData.length >= 2) {
+            const frontIv = tsData[0].avg_iv;
+            const backIv = tsData[tsData.length - 1].avg_iv;
+            if (frontIv && backIv) {
+                if (frontIv > backIv) {
+                    structLabel.textContent = 'Backwardation';
+                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium';
+                } else {
+                    structLabel.textContent = 'Contango';
+                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium';
+                }
+                const slope = ((backIv - frontIv) / frontIv * 100).toFixed(1);
+                slopeLabel.textContent = (slope > 0 ? '+' : '') + slope + '%';
+                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+            }
+        }
 
         const bwEl = document.getElementById('backwardationAlert');
         const bwTxt = document.getElementById('bwText');
         if (bwEl && bwTxt && d.backwardation) {
             bwEl.classList.remove('hidden');
-            bwTxt.textContent = d.alert || '⚠️ 远期IV < 近期IV（倒挂/Backwardation）！';
+            const frontIv = tsData[0]?.avg_iv?.toFixed(1) || '?';
+            const backIv = tsData[tsData.length-1]?.avg_iv?.toFixed(1) || '?';
+            bwTxt.textContent = `⚠️ IV倒挂: 近期${frontIv}% > 远期${backIv}%，市场恐慌信号`;
+        } else if (bwEl) {
+            bwEl.classList.add('hidden');
         }
 
         const ctx = document.getElementById('termStructureChart');
         if (!ctx) return;
-        const validTs = (d.term_structure || []).filter(t => t.avg_iv !== null && t.avg_iv > 0);
+        const validTs = tsData.filter(t => t.avg_iv !== null && t.avg_iv > 0);
         if (validTs.length < 2) {
             ctx.parentElement.innerHTML = '<div class="text-gray-500 text-center py-8 text-sm">数据不足 (' + validTs.length + ' 个到期月份)</div>';
             return;
@@ -2072,6 +2128,10 @@ async function loadTermStructure() {
             return;
         }
 
+        const isBackwardation = d.backwardation;
+        const lineColor = isBackwardation ? '#ef4444' : '#22d3ee';
+        const fillColor = isBackwardation ? 'rgba(239,68,68,0.08)' : 'rgba(34,211,238,0.08)';
+
         if (tsChart) try { tsChart.destroy(); } catch(e) {}
         tsChart = new Chart(ctx, {
             type: 'line',
@@ -2080,39 +2140,54 @@ async function loadTermStructure() {
                 datasets: [{
                     label: 'ATM IV (%)',
                     data: validTs.map(t => t.avg_iv),
-                    borderColor: '#22d3ee',
-                    backgroundColor: 'rgba(34,211,238,0.1)',
+                    borderColor: lineColor,
+                    backgroundColor: fillColor,
                     fill: true,
-                    tension: 0.3,
-                    pointRadius: 5,
-                    pointBackgroundColor: validTs.map(t => t.avg_iv > 80 ? '#ef4444' : t.dte <= 14 ? '#f59e0b' : '#22d3ee'),
-                    pointBorderColor: validTs.map(t => t.avg_iv > 80 ? '#ef4444' : t.dte <= 14 ? '#f59e0b' : '#22d3ee'),
+                    tension: 0.35,
+                    pointRadius: 4,
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: validTs.map(t => t.avg_iv > 80 ? '#ef4444' : t.dte <= 7 ? '#f59e0b' : lineColor),
+                    pointBorderColor: validTs.map(t => t.avg_iv > 80 ? '#ef4444' : t.dte <= 7 ? '#f59e0b' : lineColor),
                     borderWidth: 2
                 }]
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
                     tooltip: {
+                        backgroundColor: 'rgba(17,24,39,0.95)',
+                        borderColor: 'rgba(75,85,99,0.3)',
+                        borderWidth: 1,
+                        titleFont: { size: 11 },
+                        bodyFont: { size: 12, weight: 'bold' },
+                        padding: 10,
                         callbacks: {
                             title: (items) => {
                                 const t = validTs[items[0].dataIndex];
                                 return t.expiry ? `到期: ${t.expiry} (DTE ${t.dte})` : `DTE ${t.dte}`;
                             },
-                            label: (item) => `ATM IV: ${item.raw}%`
+                            label: (item) => `ATM IV: ${item.raw.toFixed(1)}%`
                         }
                     }
                 },
                 scales: {
                     y: {
-                        title: { display: true, text: 'ATM IV (%)', color: '#9ca3af' },
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: '#9ca3af' },
+                        title: { display: true, text: 'ATM IV (%)', color: '#6b7280', font: { size: 10 } },
+                        grid: { color: 'rgba(255,255,255,0.04)' },
+                        ticks: { color: '#6b7280', font: { size: 10 } },
                         suggestedMin: 30,
                         suggestedMax: 80
                     },
-                    x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } }
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.04)' },
+                        ticks: { color: '#6b7280', font: { size: 10 }, maxRotation: 0 }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
                 }
             }
         });
