@@ -2078,21 +2078,40 @@ async function loadTermStructure() {
             data: {
                 labels: validTs.map(t => t.dte + 'D'),
                 datasets: [{
-                    label: '平均隐含波动率 (%)',
+                    label: 'ATM IV (%)',
                     data: validTs.map(t => t.avg_iv),
                     borderColor: '#22d3ee',
                     backgroundColor: 'rgba(34,211,238,0.1)',
                     fill: true,
                     tension: 0.3,
                     pointRadius: 5,
-                    pointBackgroundColor: validTs.map(t => t.dte <= 14 ? '#ef4444' : '#22d3ee')
+                    pointBackgroundColor: validTs.map(t => t.avg_iv > 80 ? '#ef4444' : t.dte <= 14 ? '#f59e0b' : '#22d3ee'),
+                    pointBorderColor: validTs.map(t => t.avg_iv > 80 ? '#ef4444' : t.dte <= 14 ? '#f59e0b' : '#22d3ee'),
+                    borderWidth: 2
                 }]
             },
             options: {
                 responsive: true,
-                plugins: { legend: { display: false } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const t = validTs[items[0].dataIndex];
+                                return t.expiry ? `到期: ${t.expiry} (DTE ${t.dte})` : `DTE ${t.dte}`;
+                            },
+                            label: (item) => `ATM IV: ${item.raw}%`
+                        }
+                    }
+                },
                 scales: {
-                    y: { title: { display: true, text: '隐含波动率 (%)', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                    y: {
+                        title: { display: true, text: 'ATM IV (%)', color: '#9ca3af' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#9ca3af' },
+                        suggestedMin: 30,
+                        suggestedMax: 80
+                    },
                     x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } }
                 }
             }

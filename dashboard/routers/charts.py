@@ -177,10 +177,6 @@ async def get_vol_surface(currency: str = "BTC"):
     if not summaries:
         return {"error": "无法获取Deribit数据", "surface": [], "term_structure": [], "backwardation": False}
 
-    dte_buckets = [7, 14, 30, 60, 90]
-    delta_levels = [-0.4, -0.2, 0.0, 0.2, 0.4]
-    delta_labels = ["-40Delta", "-20Delta", "ATM", "+20Delta", "+40Delta"]
-
     by_expiry = {}
     for s in summaries:
         meta = _parse_inst_name(s.get("instrument_name", ""))
@@ -194,7 +190,9 @@ async def get_vol_surface(currency: str = "BTC"):
             "option_type": meta.option_type,
             "iv": (float(s.get("mark_iv", 0)) or 0) / 100.0,
             "delta": float(s.get("delta", 0)) or 0,
-            "open_interest": float(s.get("open_interest", 0)) or 0
+            "open_interest": float(s.get("open_interest", 0)) or 0,
+            "bid_iv": (float(s.get("bid_iv", 0)) or 0) / 100.0,
+            "ask_iv": (float(s.get("ask_iv", 0)) or 0) / 100.0,
         })
 
     expiry_data = []
@@ -206,47 +204,56 @@ async def get_vol_surface(currency: str = "BTC"):
         puts = [c for c in contracts if c["option_type"] == "P"]
         calls = [c for c in contracts if c["option_type"] == "C"]
 
-        surface_row = {"dte": data["dte"], "expiry": exp}
-        for i, (delta, label) in enumerate(zip(delta_levels, delta_labels)):
-            iv = None
-            if delta < 0:
-                candidates = [c for c in puts if c["delta"] is not None and -0.5 < c["delta"] < 0 and abs(c["delta"] - abs(delta)) < 0.15]
-                if candidates:
-                    candidates.sort(key=lambda c: abs(c["delta"] - abs(delta)))
-                    iv = candidates[0]["iv"]
-            elif delta == 0:
-                atm_iv = None
-                all_cont = puts + calls
-                if all_cont:
-                    all_cont.sort(key=lambda c: abs(c["delta"]))
-                    atm_iv = all_cont[0]["iv"]
-                iv = atm_iv
+        atm_iv = None
+        all_cont = puts + calls
+        if all_cont:
+            valid_atm = [c for c in all_cont if 0 < c["iv"] < 2.0 and abs(c["delta"]) <= 0.55]
+            if valid_atm:
+                valid_atm.sort(key=lambda c: abs(c["delta"]))
+                top3 = valid_atm[:min(3, len(valid_atm))]
+                atm_iv = sum(c["iv"] for c in top3) / len(top3)
+
+        surface_row = {"dte": data["dte"], "expiry": exp, "atm": round(atm_iv * 100, 2) if atm_iv else None}
+
+        delta_levels = [(-0.4, "-40delta", "P"), (-0.2, "-20delta", "P"), (0.2, "+20delta", "C"), (0.4, "+40delta", "C")]
+        for delta_target, label, opt_type in delta_levels:
+            pool = puts if opt_type == "P" else calls
+            candidates = [c for c in pool if 0 < c["iv"] < 2.0 and abs(c["delta"]) > 0.01 and abs(c["delta"] - abs(delta_target)) < 0.15]
+            if candidates:
+                candidates.sort(key=lambda c: abs(c["delta"] - abs(delta_target)))
+                surface_row[label] = round(candidates[0]["iv"] * 100, 2)
             else:
-                candidates = [c for c in calls if c["delta"] is not None and 0 < c["delta"] < 0.5 and abs(c["delta"] - delta) < 0.15]
-                if candidates:
-                    candidates.sort(key=lambda c: abs(c["delta"] - delta))
-                    iv = candidates[0]["iv"]
-            surface_row[label.lower()] = round(iv * 100, 2) if iv else None
+                surface_row[label] = None
 
         expiry_data.append(surface_row)
 
     expiry_data.sort(key=lambda x: x["dte"])
 
     term_structure = []
-    for dte in dte_buckets:
-        nearest = None
-        min_diff = 999
-        for ed in expiry_data:
-            diff = abs(ed["dte"] - dte)
-            if diff < min_diff:
-                min_diff = diff
-                nearest = ed
-        if nearest and min_diff <= 20:
-            atm_iv = nearest.get("atm")
-            term_structure.append({"dte": dte, "avg_iv": atm_iv})
+    for ed in expiry_data:
+        atm = ed.get("atm")
+        if atm and 5 < atm < 200:
+            term_structure.append({"dte": ed["dte"], "avg_iv": atm, "expiry": ed["expiry"]})
+
+    if len(term_structure) >= 3:
+        ivs = [t["avg_iv"] for t in term_structure]
+        median_iv = sorted(ivs)[len(ivs) // 2]
+        for t in term_structure:
+            if t["avg_iv"] > median_iv * 2.0:
+                t["avg_iv"] = None
+        term_structure = [t for t in term_structure if t["avg_iv"] is not None]
+
+    if len(term_structure) >= 3:
+        dtes = [t["dte"] for t in term_structure]
+        ivs = [t["avg_iv"] for t in term_structure]
+        for i in range(1, len(ivs) - 1):
+            if ivs[i] is not None and ivs[i-1] is not None and ivs[i+1] is not None:
+                expected = (ivs[i-1] + ivs[i+1]) / 2
+                if abs(ivs[i] - expected) > expected * 0.5:
+                    term_structure[i]["avg_iv"] = round(expected, 2)
 
     backwardation = False
-    if len(term_structure) >= 3:
+    if len(term_structure) >= 2:
         front_iv = term_structure[0]["avg_iv"]
         back_iv = term_structure[-1]["avg_iv"]
         if front_iv and back_iv and front_iv > back_iv:
