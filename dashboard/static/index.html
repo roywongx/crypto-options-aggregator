@@ -750,12 +750,39 @@
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mt-5">
                 <!-- 大宗异动 -->
                 <div class="card-glass rounded-xl p-5">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-fish text-purple-500"></i>
-                        大宗异动
-                        <span id="largeTradesTitleCount" class="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full hidden"></span>
-                    </h2>
-                    <div id="largeTradesList" class="space-y-2 overflow-y-auto custom-scrollbar pr-1 text-sm" style="max-height: 65vh;">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-lg font-semibold flex items-center gap-2">
+                            <i class="fas fa-fish text-purple-500"></i>
+                            大宗异动
+                            <span id="largeTradesTitleCount" class="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full hidden"></span>
+                        </h2>
+                        <div class="flex items-center gap-2">
+                            <span id="tradesTotalNotional" class="text-xs text-gray-400">--</span>
+                        </div>
+                    </div>
+                    <div id="largeTradesSummary" class="grid grid-cols-4 gap-2 mb-3">
+                        <div class="bg-red-500/10 border border-red-500/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-red-400 uppercase">巨鲸</div>
+                            <div id="ltMegaCount" class="font-mono text-sm font-bold text-red-400">0</div>
+                            <div class="text-[9px] text-gray-500">>$5M</div>
+                        </div>
+                        <div class="bg-orange-500/10 border border-orange-500/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-orange-400 uppercase">大单</div>
+                            <div id="ltHighCount" class="font-mono text-sm font-bold text-orange-400">0</div>
+                            <div class="text-[9px] text-gray-500">>$2M</div>
+                        </div>
+                        <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-yellow-400 uppercase">中单</div>
+                            <div id="ltMediumCount" class="font-mono text-sm font-bold text-yellow-400">0</div>
+                            <div class="text-[9px] text-gray-500">>$500K</div>
+                        </div>
+                        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-blue-400 uppercase">小单</div>
+                            <div id="ltLowCount" class="font-mono text-sm font-bold text-blue-400">0</div>
+                            <div class="text-[9px] text-gray-500">>$100K</div>
+                        </div>
+                    </div>
+                    <div id="largeTradesList" class="space-y-1.5 overflow-y-auto custom-scrollbar pr-1 text-sm" style="max-height: 55vh;">
                         <div class="text-gray-500 text-center py-4">暂无数据</div>
                     </div>
                 </div>

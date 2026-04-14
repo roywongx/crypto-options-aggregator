@@ -1040,35 +1040,69 @@ function updateLargeTrades(trades, count) {
 
     if (!trades || trades.length === 0) {
         container.innerHTML = '<div class="text-gray-500 text-center py-4 text-sm">近1小时无大单成交</div>';
+        ['ltMegaCount','ltHighCount','ltMediumCount','ltLowCount'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '0';
+        });
+        const tnEl = document.getElementById('tradesTotalNotional');
+        if (tnEl) tnEl.textContent = '--';
         return;
     }
 
     const flowNames = {
-        // === Sell PUT = 永远看涨 ===
-        sell_put_deep_itm: '保护性对冲',
-        sell_put_atm_itm: '收权利金',
-        sell_put_otm: '备兑开仓',
-        // === Buy PUT = 看跌/对冲 ===
-        buy_put_deep_itm: '保护性买入',
-        buy_put_atm: '看跌投机',
-        buy_put_otm: '看跌投机',
-        // === Sell CALL = 中性/看不涨 ===
-        sell_call_otm: '备兑开仓',
-        sell_call_itm: '改仓操作',
-        // === Buy CALL = 看涨 ===
-        buy_call_atm_itm: '追涨建仓',
-        buy_call_otm: '看涨投机',
-        // === Legacy / Fallback ===
-        protective_hedge: '保护性对冲',
-        premium_collect: '收权利金',
-        speculative_put: '看跌投机',
-        call_speculative: '看涨投机',
-        call_momentum: '追涨建仓',
-        covered_call: '备兑开仓',
-        call_overwrite: '改仓操作',
-        put_buy_hedge: '保护性买入',
-        unclassified: '未分类',
-        unknown: '未知流向'
+        sell_put_deep_itm: '保护性对冲', sell_put_atm_itm: '收权利金', sell_put_otm: '备兑开仓',
+        buy_put_deep_itm: '保护性买入', buy_put_atm: '看跌投机', buy_put_otm: '看跌投机',
+        sell_call_otm: '备兑开仓', sell_call_itm: '改仓操作',
+        buy_call_atm_itm: '追涨建仓', buy_call_otm: '看涨投机',
+        protective_hedge: '保护性对冲', premium_collect: '收权利金', speculative_put: '看跌投机',
+        call_speculative: '看涨投机', call_momentum: '追涨建仓', covered_call: '备兑开仓',
+        call_overwrite: '改仓操作', put_buy_hedge: '保护性买入',
+        unclassified: '未分类', unknown: '未知流向'
+    };
+
+    const flowHints = {
+        sell_put_deep_itm: '强烈看涨愿接货', sell_put_atm_itm: '温和看涨收权', sell_put_otm: '纯收权利金',
+        buy_put_deep_itm: '机构对冲防跌', buy_put_atm: '短线看跌', buy_put_otm: '投机看跌',
+        sell_call_otm: '备兑锁定收益', sell_call_itm: '调整仓位',
+        buy_call_atm_itm: '顺势追涨', buy_call_otm: '低成本博反弹',
+        protective_hedge: '机构护冲↓', premium_collect: '收权↑', speculative_put: '看跌↓',
+        call_speculative: '看涨↑', call_momentum: '追涨↑', covered_call: '备兑↑',
+        call_overwrite: '改仓↑', put_buy_hedge: '护冲↓'
+    };
+
+    let megaCount = 0, highCount = 0, mediumCount = 0, lowCount = 0, totalNotional = 0;
+    trades.forEach(t => {
+        const n = t.notional_usd || 0;
+        totalNotional += n;
+        const sev = t.severity || _classifySeverity(n);
+        if (sev === 'mega') megaCount++;
+        else if (sev === 'high') highCount++;
+        else if (sev === 'medium') mediumCount++;
+        else if (sev === 'low') lowCount++;
+    });
+
+    const megaEl = document.getElementById('ltMegaCount');
+    const highEl = document.getElementById('ltHighCount');
+    const medEl = document.getElementById('ltMediumCount');
+    const lowEl = document.getElementById('ltLowCount');
+    if (megaEl) megaEl.textContent = megaCount;
+    if (highEl) highEl.textContent = highCount;
+    if (medEl) medEl.textContent = mediumCount;
+    if (lowEl) lowEl.textContent = lowCount;
+
+    const tnEl = document.getElementById('tradesTotalNotional');
+    if (tnEl) {
+        tnEl.textContent = totalNotional >= 1000000
+            ? '总名义 $' + (totalNotional / 1000000).toFixed(1) + 'M'
+            : '总名义 $' + Math.round(totalNotional).toLocaleString();
+    }
+
+    const sevStyles = {
+        mega:   { border: 'border-l-red-500',    bg: 'bg-red-500/15',    badge: 'bg-red-600 text-white',       label: '巨鲸', icon: '🐋' },
+        high:   { border: 'border-l-orange-500',  bg: 'bg-orange-500/10', badge: 'bg-orange-500 text-white',    label: '大单', icon: '🔥' },
+        medium: { border: 'border-l-yellow-500',  bg: 'bg-yellow-500/8',  badge: 'bg-yellow-500 text-gray-900', label: '中单', icon: '⚡' },
+        low:    { border: 'border-l-blue-400',    bg: 'bg-blue-500/5',    badge: 'bg-blue-500 text-white',      label: '小单', icon: '📊' },
+        info:   { border: 'border-l-gray-600',    bg: 'bg-gray-800/30',   badge: 'bg-gray-600 text-white',      label: '',     icon: '' }
     };
 
     container.innerHTML = trades.map(trade => {
@@ -1078,66 +1112,92 @@ function updateLargeTrades(trades, count) {
         const volume = trade.volume || 0;
         const strike = trade.strike || 0;
         const optType = trade.option_type || '';
-        
-        // Estimate notional value from volume and strike (volume is in BTC/ETH, strike is in USD)
-        const notional = trade.notional_usd || (volume * strike) || 0;
+        const notional = trade.notional_usd || 0;
+        const premium = trade.premium_usd || 0;
+        const delta = trade.delta || 0;
+        const iv = trade.iv || 0;
+        const isBlock = trade.is_block || false;
+        const tradePrice = trade.trade_price || 0;
 
-        let directionIcon, directionClass, dirLabel;
+        const sev = trade.severity || _classifySeverity(notional);
+        const sevStyle = sevStyles[sev] || sevStyles.info;
+
+        let dirIcon, dirColor, dirLabel;
         if (dir === 'buy') {
-            directionIcon = '<i class="fas fa-arrow-up text-red-400"></i>'; directionClass = 'border-l-red-500'; dirLabel = '买入';
+            dirIcon = '▲'; dirColor = 'text-red-400'; dirLabel = '买';
         } else if (dir === 'sell') {
-            directionIcon = '<i class="fas fa-arrow-down text-green-400"></i>'; directionClass = 'border-l-green-500'; dirLabel = '卖出';
+            dirIcon = '▼'; dirColor = 'text-green-400'; dirLabel = '卖';
         } else {
-            directionIcon = '<i class="fas fa-minus text-gray-400"></i>'; directionClass = 'border-l-gray-500'; dirLabel = '';
+            dirIcon = '—'; dirColor = 'text-gray-400'; dirLabel = '';
         }
 
-        const severity = trade.severity || (notional >= 2000000 ? 'high' : notional >= 500000 ? 'medium' : 'info');
-        const sevConfig = {
-            high: { bg: 'bg-red-500/20', badge: 'bg-red-500', label: '大单', emoji: '⚠️' },
-            medium: { bg: 'bg-orange-500/20', badge: 'bg-orange-500', label: '中单', emoji: '🟡' },
-            info: { bg: 'bg-blue-500/10', badge: 'bg-blue-500', label: '普通', emoji: '✅' }
-        };
-        const sev = sevConfig[severity] || sevConfig.info;
+        const optIsPut = optType && optType.toUpperCase().startsWith('P');
+        const optTag = optType
+            ? '<span class="px-1 py-0.5 rounded text-[10px] font-bold ' +
+              (optIsPut ? 'bg-purple-500/30 text-purple-300' : 'bg-emerald-500/30 text-emerald-300') +
+              '">' + (optIsPut ? 'P' : 'C') + '</span>'
+            : '';
+
+        const strikeStr = strike ? '$' + strike.toLocaleString() : '';
+        const dteMatch = inst.match(/(\d{1,2}[A-Z]{3}\d{2})/);
+        const dteStr = dteMatch ? dteMatch[1] : '';
+
+        const notionalStr = notional >= 1000000
+            ? '$' + (notional / 1000000).toFixed(2) + 'M'
+            : notional >= 1000
+            ? '$' + (notional / 1000).toFixed(0) + 'K'
+            : '$' + Math.round(notional).toLocaleString();
+
+        const premiumStr = premium >= 1000000
+            ? '$' + (premium / 1000000).toFixed(2) + 'M'
+            : premium >= 1000
+            ? '$' + (premium / 1000).toFixed(0) + 'K'
+            : premium > 0
+            ? '$' + Math.round(premium).toLocaleString()
+            : '';
 
         const flowCN = flowNames[flow] || flow || '';
-        const notionalStr = notional >= 1000000 ? '$' + (notional / 1000000).toFixed(2) + 'M' : '$' + Math.round(notional).toLocaleString();
-        const strikeStr = strike ? '@ $' + strike.toLocaleString() : '';
-        const optIsPut = optType && optType.toUpperCase().startsWith('P');
-        const optTypeTag = optType ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold ' + (optIsPut ? 'bg-purple-500/30 text-purple-300' : 'bg-green-500/30 text-green-300') + '">' + (optIsPut ? 'PUT' : 'CALL') + '</span>' : '';
+        const flowHint = flowHints[flow] || '';
 
-        return `<div class="${sev.bg} border-l-4 ${directionClass} rounded-lg p-3 text-xs hover:bg-white/5 transition cursor-default">
-            <div class="flex items-start gap-2">
-                <div class="flex-shrink-0 mt-0.5">${directionIcon}</div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-1.5 mb-1 flex-wrap">
-                        <span class="font-medium text-white truncate">${inst || '大宗成交'}</span>
-                        ${optTypeTag}
-                        ${dirLabel ? '<span class="text-gray-400">·</span><span class="' + (dir === 'buy' ? 'text-red-400' : 'text-green-400') + '">' + dirLabel + '</span>' : ''}
-                        ${strikeStr ? '<span class="text-gray-500">' + strikeStr + '</span>' : ''}
-                        <span class="${sev.badge} text-white text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0 ml-auto">${sev.label} ${sev.emoji}</span>
-                    </div>
-                    <div class="flex items-center gap-2 flex-wrap">
-                        ${flowCN ? '<span class="text-cyan-300">' + flowCN + '</span>' : ''}
-                        ${flowCN ? '<span class="text-gray-500 text-[10px] ml-1">' + (() => {
-                            const suggestions = {
-                                'protective_hedge': '机构护冲↓ 短期谨慎',
-                                'premium_collect': '收取权利金 ↑ 值好环境',
-                                'speculative_put': '看跌投机 ↓ 风险升',
-                                'call_momentum': '追涨建仓 ↑ 看好行情',
-                                'call_speculative': '看涨投机 ↑ 小单低位入场',
-                                'covered_call': '备兑开仓 ↑ 锁定收益',
-                                'call_overwrite': '改仓操作 ↑ 调整价格',
-                                'unclassified': '',
-                                'unknown': ''
-                            };
-                            return suggestions[flow] || '';
-                        })() + '</span>' : ''}
-                        <span class="text-yellow-300 font-medium">${notionalStr}</span>
-                    </div>
-                </div>
+        const blockTag = isBlock
+            ? '<span class="bg-amber-500/30 text-amber-300 text-[9px] px-1 py-0.5 rounded font-bold">大宗</span>'
+            : '';
+
+        const deltaStr = delta ? 'Δ' + Math.abs(delta).toFixed(2) : '';
+        const ivStr = iv ? 'IV' + iv.toFixed(0) + '%' : '';
+
+        const volStr = volume > 0 ? volume.toFixed(0) + '张' : '';
+
+        return `<div class="${sevStyle.bg} border-l-3 ${sevStyle.border} rounded-lg px-3 py-2 text-xs hover:bg-white/5 transition cursor-default">
+            <div class="flex items-center gap-1.5">
+                <span class="${dirColor} font-bold text-sm">${dirIcon}</span>
+                <span class="font-mono text-white font-medium truncate" style="max-width:130px" title="${safeHTML(inst)}">${inst || '--'}</span>
+                ${optTag}${blockTag}
+                <span class="text-gray-500">${strikeStr}</span>
+                <span class="text-yellow-300 font-bold ml-auto">${notionalStr}</span>
+                ${sevStyle.label ? '<span class="' + sevStyle.badge + ' text-[10px] px-1.5 py-0.5 rounded font-bold ml-1">' + sevStyle.icon + ' ' + sevStyle.label + '</span>' : ''}
+            </div>
+            <div class="flex items-center gap-1.5 mt-0.5 text-[11px]">
+                <span class="${dirColor}">${dirLabel}</span>
+                ${flowCN ? '<span class="text-cyan-300">' + flowCN + '</span>' : ''}
+                ${flowHint ? '<span class="text-gray-500">· ' + flowHint + '</span>' : ''}
+                ${premiumStr ? '<span class="text-gray-400 ml-1">权利金' + premiumStr + '</span>' : ''}
+                ${volStr ? '<span class="text-gray-500">' + volStr + '</span>' : ''}
+                <span class="text-gray-600 ml-auto flex items-center gap-1.5">
+                    ${deltaStr ? '<span>' + deltaStr + '</span>' : ''}
+                    ${ivStr ? '<span>' + ivStr + '</span>' : ''}
+                </span>
             </div>
         </div>`;
     }).join('');
+}
+
+function _classifySeverity(notional) {
+    if (notional >= 5000000) return 'mega';
+    if (notional >= 2000000) return 'high';
+    if (notional >= 500000) return 'medium';
+    if (notional >= 100000) return 'low';
+    return 'info';
 }
 
 function updateLastUpdateTime(timestamp) {

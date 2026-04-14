@@ -43,7 +43,7 @@ INDEXES = [
 ]
 
 SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'raw_output']
-TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name']
+TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
 
 def init_database_schema(conn: sqlite3.Connection):
     """Initialize database schema"""
@@ -65,6 +65,6 @@ def init_database_schema(conn: sqlite3.Connection):
     trade_cols = [col[1] for col in cursor.fetchall()]
     for col in TRADE_HISTORY_COLUMNS:
         if col not in trade_cols:
-            cursor.execute(f"ALTER TABLE large_trades_history ADD COLUMN {col} {'REAL' if col in ('notional_usd','delta') else 'TEXT'}")
+            cursor.execute(f"ALTER TABLE large_trades_history ADD COLUMN {col} {'REAL' if col in ('notional_usd','delta','premium_usd') else 'TEXT'}")
 
     conn.commit()

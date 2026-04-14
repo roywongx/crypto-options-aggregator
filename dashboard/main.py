@@ -102,14 +102,14 @@ def save_scan_record(data: Dict[str, Any]):
             cursor.execute("""
                 INSERT INTO large_trades_history 
                 (timestamp, currency, source, title, message, direction, strike, volume, 
-                 option_type, flow_label, notional_usd, delta, instrument_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 parsed['timestamp'], parsed['currency'], parsed['source'],
                 parsed['title'], parsed['message'], parsed['direction'],
                 parsed['strike'], parsed['volume'], parsed['option_type'],
                 parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
-                parsed['instrument_name']
+                parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
             ))
 
     _cutoff = (datetime.utcnow() - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
@@ -620,14 +620,14 @@ def _quick_scan_sync(params: QuickScanParams = None):
             cursor.execute("""
                 INSERT INTO large_trades_history
                 (timestamp, currency, source, title, message, direction, strike, volume,
-                 option_type, flow_label, notional_usd, delta, instrument_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 parsed['timestamp'], parsed['currency'], parsed['source'],
                 parsed['title'], parsed['message'], parsed['direction'],
                 parsed['strike'], parsed['volume'], parsed['option_type'],
                 parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
-                parsed['instrument_name']
+                parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
             ))
 
     conn.commit()
@@ -803,17 +803,22 @@ def _fetch_deribit_summaries(currency="BTC"):
 
 
 def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
-    """获取大单交易：优先DB，不足时从Deribit实时API补充"""
+    """获取大单交易：优先DB，不足时从Deribit实时API补充
+    
+    关键概念：
+    - notional_usd = 合约数量 × 标的指数价格 (名义价值，代表交易敞口大小)
+    - premium_usd = 合约数量 × 期权价格 × 标的指数价格 (权利金，实际支付金额)
+    """
     import requests as req_lib
     from datetime import datetime, timedelta
     spot = get_spot_price(currency)
     
-    # Step 1: Try DB first
     since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta
+        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta,
+               premium_usd, severity
         FROM large_trades_history
         WHERE currency = ? AND timestamp > ?
           AND instrument_name IS NOT NULL AND instrument_name != '' 
@@ -821,10 +826,10 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
         ORDER BY notional_usd DESC LIMIT ?
     """, (currency, since, limit))
     rows = cursor.fetchall()
-    # conn.close()  # threading.local() manages per-thread connection lifecycle
 
     results = []
     seen = set()
+    results_by_inst = {}
     for r in rows:
         inst = (r[0] or '').strip()
         strike = r[4] or 0
@@ -837,16 +842,27 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
         delta_val = r[7] or 0
         if not fl or fl == 'unknown':
             fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
-        results.append({
+        
+        notional = r[2] or 0
+        if notional <= 0 and (r[3] or 0) > 0 and strike > 0:
+            notional = float(r[3]) * spot
+        
+        entry = {
             "instrument_name": inst, "direction": direction,
-            "notional_usd": r[2] or 0, "volume": r[3] or 0,
+            "notional_usd": round(float(notional), 2),
+            "volume": r[3] or 0,
             "strike": strike, "option_type": opt_type, "flow_label": fl,
-            "delta": delta_val
-        })
+            "delta": delta_val,
+            "premium_usd": r[8] or 0,
+            "severity": r[9] or ''
+        }
+        results.append(entry)
+        results_by_inst[inst] = entry
 
-    # Step 2: If DB has < limit/2 records, fetch live from Deribit API
-    MIN_NOTIONAL = 10000
-    if len(results) < max(5, limit // 2):
+    MIN_NOTIONAL = 100000
+    db_missing_premium = sum(1 for r in results if not r.get('premium_usd'))
+    need_api = len(results) < max(5, limit // 2) or db_missing_premium > len(results) * 0.5
+    if need_api:
         try:
             api_url = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency"
             payload = req_lib.get(api_url, params={
@@ -856,7 +872,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
             
             for t in trades:
                 inst = t.get("instrument_name", "")
-                if not inst or inst in seen:
+                if not inst:
                     continue
                 
                 meta = None
@@ -869,13 +885,15 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
                     
                 direction = t.get("direction", "")
                 trade_amount = float(t.get("amount", 0))
-                index_price = float(t.get("index_price", 0) or 0)
-                premium_usd = float(t.get("price", 0)) * trade_amount * (index_price or spot)
+                index_price = float(t.get("index_price", 0) or spot)
+                option_price = float(t.get("price", 0))
                 
-                if premium_usd < MIN_NOTIONAL:
+                notional_usd = trade_amount * index_price
+                premium_usd = trade_amount * option_price * index_price
+                
+                if notional_usd < MIN_NOTIONAL:
                     continue
                 
-                # Use calc_delta_bs (skip slow order book API call)
                 trade_iv = float(t.get("iv") or 50) / 100.0
                 delta_val = abs(calc_delta_bs(meta.strike, spot,
                     trade_iv, meta.dte, meta.option_type))
@@ -883,24 +901,48 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
                 fl = _classify_flow_heuristic(
                     direction, meta.option_type, delta_val, meta.strike, spot)
                 
-                seen.add(inst)
-                results.append({
+                is_block = t.get("block_trade", False) or t.get("block_trade_id") is not None
+                
+                api_entry = {
                     "instrument_name": inst, "direction": direction,
-                    "notional_usd": round(premium_usd, 2),
+                    "notional_usd": round(notional_usd, 2),
+                    "premium_usd": round(premium_usd, 2),
                     "volume": round(trade_amount, 4),
                     "strike": meta.strike,
                     "option_type": meta.option_type,
                     "flow_label": fl,
-                    "delta": delta_val
-                })
+                    "delta": delta_val,
+                    "iv": round(trade_iv * 100, 1),
+                    "is_block": is_block,
+                    "trade_price": option_price
+                }
+                
+                if inst in results_by_inst:
+                    db_entry = results_by_inst[inst]
+                    if not db_entry.get('premium_usd'):
+                        db_entry['premium_usd'] = round(premium_usd, 2)
+                    if not db_entry.get('iv'):
+                        db_entry['iv'] = round(trade_iv * 100, 1)
+                    if not db_entry.get('is_block'):
+                        db_entry['is_block'] = is_block
+                    if not db_entry.get('trade_price'):
+                        db_entry['trade_price'] = option_price
+                    if not db_entry.get('notional_usd') or db_entry['notional_usd'] < notional_usd:
+                        db_entry['notional_usd'] = round(notional_usd, 2)
+                        db_entry['volume'] = round(trade_amount, 4)
+                else:
+                    seen.add(inst)
+                    results.append(api_entry)
+                    results_by_inst[inst] = api_entry
+                    
                 if len(results) >= limit:
                     break
         except Exception as e:
             print(f"Deribit live trades fallback error: {e}")
 
-    # Sort by notional and return top N
     for t in results:
-        t["severity"] = _severity_from_notional(t.get("notional_usd", 0) or 0)
+        if not t.get("severity"):
+            t["severity"] = _severity_from_notional(t.get("notional_usd", 0) or 0)
         t["risk_level"] = _risk_emoji(abs(t.get("delta", 0) or 0))
     
     results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)

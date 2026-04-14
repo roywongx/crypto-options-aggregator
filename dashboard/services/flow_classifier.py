@@ -54,10 +54,14 @@ def _classify_flow_heuristic(direction: str, option_type: str, delta: float, str
     return "unknown"
 
 def _severity_from_notional(notional: float) -> str:
+    if notional >= 5_000_000:
+        return "mega"
     if notional >= 2_000_000:
         return "high"
     if notional >= 500_000:
         return "medium"
+    if notional >= 100_000:
+        return "low"
     return "info"
 
 def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> Dict[str, Any]:
@@ -105,41 +109,29 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
         elif 'CALL' in message.upper() or 'call' in message.lower():
             option_type = 'CALL'
 
-    volume = trade.get('amount', 0) or trade.get('volume', 0) or 0
-    # Only parse from message if volume is still 0 and message contains contract count
-    if not volume or volume == 0:
-        # First try to find explicit contract count (e.g., "100 contracts", "100张")
-        contract_match = re.search(r'(\d+(?:,\d{3})*)\s*(?:contracts?|张)', message, re.IGNORECASE)
-        if contract_match:
-            try:
-                volume = float(contract_match.group(1).replace(',', ''))
-            except ValueError:
-                pass
-        # If no contract count found, try to extract from crypto amount (e.g., "5.2 BTC worth")
-        if not volume:
-            crypto_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:BTC|ETH|SOL)\s*(?:worth|价值)', message, re.IGNORECASE)
-            if crypto_match:
-                try:
-                    volume = float(crypto_match.group(1))
-                except ValueError:
-                    pass
-        # Note: We intentionally do NOT parse $ amounts as volume, since that's notional value
+    volume = float(trade.get('amount', 0) or 0)
+    if not volume:
+        volume = float(trade.get('volume', 0) or 0)
 
-    notional_usd = trade.get('underlying_notional_usd', 0) or 0
-    if not notional_usd or notional_usd == 0:
-        notional_match = re.search(r'\$([\d,]+(?:\.\d+)?)\s*(?:USD|usd)?', message)
-        if notional_match:
-            try:
-                notional_usd = float(notional_match.group(1).replace(',', ''))
-                if 'M' in message.upper():
-                    notional_usd *= 1_000_000
-                elif 'K' in message.upper():
-                    notional_usd *= 1_000
-            except ValueError:
-                pass
+    notional_usd = float(trade.get('underlying_notional_usd', 0) or 0)
+    if not notional_usd:
+        notional_usd = float(trade.get('notional_usd', 0) or 0)
+    if not notional_usd and volume:
+        index_price = float(trade.get('index_price', 0) or 0)
+        if index_price > 0:
+            notional_usd = volume * index_price
 
-    delta = trade.get('delta', 0) or 0
+    premium_usd = float(trade.get('premium_usd', 0) or 0)
+    if not premium_usd and volume:
+        option_price = float(trade.get('price', 0) or trade.get('trade_price', 0) or 0)
+        if option_price > 0:
+            index_price = float(trade.get('index_price', 0) or 0)
+            if index_price > 0:
+                premium_usd = volume * option_price * index_price
+
+    delta = float(trade.get('delta', 0) or 0)
     flow_label = trade.get('flow_label', '')
+    severity = trade.get('severity', '') or _severity_from_notional(notional_usd)
 
     return {
         'timestamp': timestamp,
@@ -152,9 +144,11 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
         'volume': volume,
         'option_type': option_type,
         'flow_label': flow_label,
-        'notional_usd': float(notional_usd) if notional_usd else 0,
-        'delta': float(delta) if delta else 0,
+        'notional_usd': round(float(notional_usd), 2),
+        'premium_usd': round(float(premium_usd), 2),
+        'delta': float(delta),
         'instrument_name': ins_name,
+        'severity': severity,
     }
 
 def get_flow_label_info(flow_key: str) -> tuple:
