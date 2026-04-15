@@ -109,17 +109,68 @@ async def _calc_max_pain_internal(currency: str):
         elif dist < -3:
             sig = "偏空: 价格在最大痛点上方"
         mm = ""
+        gamma_status = {}
+        gamma_advice = {}
         if flip:
-            if spot < flip:
-                mm = f"⚠️ 危险: 现货 ${spot:,.0f} < Flip点 ${flip:,.0f} | 空头Gamma区，波动放大风险"
+            is_above = spot > flip
+            dist_to_flip = ((spot - flip) / flip * 100) if flip > 0 else 0
+            if is_above:
+                mm = f"✅ 安全：现货 ${spot:,.0f} > Flip 点 ${flip:,.0f} | 多头 Gamma 区，波动受抑"
+                gamma_status = {
+                    "region": "long",
+                    "region_cn": "多头 Gamma 区",
+                    "icon": "✅",
+                    "volatility": "波动受抑制",
+                    "institutional": "机构温和看多",
+                    "distance_pct": round(dist_to_flip, 2),
+                    "flip_strike": round(flip, 0)
+                }
+                gamma_advice = {
+                    "text": "价格在 Gamma Flip 上方，处于多头 Gamma 区域。适合卖出 OTM Put 收取权利金，或构建牛市价差。避免追涨买入 Call。",
+                    "position_pct": 30,
+                    "strategy": "卖出 OTM Put / 牛市价差",
+                    "delta_range": "0.15-0.25"
+                }
             else:
-                mm = f"✅ 安全: 现货 ${spot:,.0f} > Flip点 ${flip:,.0f} | 多头Gamma区，波动受抑"
+                mm = f"⚠️ 危险：现货 ${spot:,.0f} < Flip 点 ${flip:,.0f} | 空头 Gamma 区，波动放大风险"
+                gamma_status = {
+                    "region": "short",
+                    "region_cn": "空头 Gamma 区",
+                    "icon": "⚠️",
+                    "volatility": "波动易放大",
+                    "institutional": "机构谨慎看空",
+                    "distance_pct": round(abs(dist_to_flip), 2),
+                    "flip_strike": round(flip, 0)
+                }
+                gamma_advice = {
+                    "text": "价格在 Gamma Flip 下方，处于空头 Gamma 区域。建议降低仓位，优先保护本金。可考虑买入 Put 对冲或观望。",
+                    "position_pct": 15,
+                    "strategy": "买入 Put 对冲 / 观望",
+                    "delta_range": "0.20-0.30"
+                }
+        else:
+            gamma_status = {
+                "region": "neutral",
+                "region_cn": "中性区域",
+                "icon": "⚖️",
+                "volatility": "波动正常",
+                "institutional": "多空平衡",
+                "distance_pct": 0,
+                "flip_strike": None
+            }
+            gamma_advice = {
+                "text": "市场处于 Gamma 中性区域，无明显方向性优势。建议以收取权利金为主，选择 ATM 附近合约。",
+                "position_pct": 25,
+                "strategy": "卖出 ATM 期权 / 铁鹰",
+                "delta_range": "0.30-0.40"
+            }
 
         results.append({"expiry": exp_name, "dte": exp_dte, "max_pain": round(mp_strike, 0),
             "dist_pct": round(dist, 2), "pain_at_spot": round(pain_at_s, 0),
             "pcr": round(pcr, 3), "call_oi": round(tco, 0), "put_oi": round(tpo, 0),
             "signal": sig, "pain_curve": pc, "gex_curve": gc,
-            "flip_point": flip, "mm_signal": mm})
+            "flip_point": flip, "mm_signal": mm,
+            "gamma_status": gamma_status, "gamma_advice": gamma_advice})
 
     best = results[0] if results else {}
     return {"currency": currency, "spot": round(spot, 0), "expiries": results,

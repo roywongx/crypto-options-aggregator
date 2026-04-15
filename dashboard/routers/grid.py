@@ -53,7 +53,8 @@ async def get_grid_recommend(
     call_count: int = Query(3, ge=1, le=10),
     min_dte: int = Query(7, ge=1, le=90),
     max_dte: int = Query(45, ge=1, le=180),
-    min_apr: float = Query(15.0, ge=0, le=200)
+    min_apr: float = Query(15.0, ge=0, le=200),
+    use_smart: bool = Query(False, description="是否使用智能推荐")
 ):
     try:
         from main import get_spot_price
@@ -63,6 +64,33 @@ async def get_grid_recommend(
             spot_price = 83000.0
 
         contracts = _get_contracts_from_db(currency)
+
+        # 智能推荐模式：根据市场状态自动调整参数
+        if use_smart:
+            vol_signal = get_vol_direction_signal(contracts, currency)
+            dvol_pct = vol_signal.dvol_percentile
+            
+            # 根据 DVOL 分位数调整参数
+            if dvol_pct > 70:
+                # 高波动环境：激进策略
+                min_dte = max(7, min_dte)
+                max_dte = max(45, max_dte)
+                min_apr = max(10.0, min_apr - 5)
+                put_count = min(put_count + 2, 10)
+                call_count = min(call_count + 2, 10)
+            elif dvol_pct < 30:
+                # 低波动环境：保守策略
+                min_dte = max(14, min_dte)
+                max_dte = min(30, max_dte)
+                min_apr = max(20.0, min_apr + 5)
+                put_count = max(3, put_count - 2)
+                call_count = max(2, call_count - 1)
+            
+            # 根据波动方向调整 Put/Call 比例
+            if vol_signal.signal == "FAVOR_PUT":
+                put_count = max(put_count, call_count + 2)
+            elif vol_signal.signal == "FAVOR_CALL":
+                call_count = max(call_count, put_count - 1)
 
         recommendation = recommend_grid(
             contracts=contracts,
@@ -79,6 +107,12 @@ async def get_grid_recommend(
             "currency": recommendation.currency,
             "spot_price": recommendation.spot_price,
             "timestamp": recommendation.timestamp,
+            "smart_mode": use_smart,
+            "market_context": {
+                "dvol_percentile": vol_signal.dvol_percentile if use_smart else None,
+                "vol_signal": vol_signal.signal if use_smart else None,
+                "adjusted_reason": vol_signal.reason if use_smart else None
+            },
             "put_levels": [
                 {
                     "direction": l.direction.value,
@@ -94,7 +128,8 @@ async def get_grid_recommend(
                     "volume": l.volume,
                     "liquidity_score": round(l.liquidity_score, 2),
                     "recommendation": l.recommendation.name,
-                    "reason": l.reason
+                    "reason": l.reason,
+                    "suggested_position_pct": _calc_suggested_position(l)
                 }
                 for l in recommendation.put_levels
             ],
@@ -113,18 +148,72 @@ async def get_grid_recommend(
                     "volume": l.volume,
                     "liquidity_score": round(l.liquidity_score, 2),
                     "recommendation": l.recommendation.name,
-                    "reason": l.reason
+                    "reason": l.reason,
+                    "suggested_position_pct": _calc_suggested_position(l)
                 }
                 for l in recommendation.call_levels
             ],
             "dvol_signal": recommendation.dvol_signal,
             "recommended_ratio": recommendation.recommended_ratio,
-            "total_potential_premium": recommendation.total_potential_premium
+            "total_potential_premium": recommendation.total_potential_premium,
+            "strategy_advice": _generate_strategy_advice(recommendation, use_smart)
         }
     except Exception as e:
         import sys
         print(f"[ERROR] /api/grid/recommend: {e}", file=sys.stderr)
         return {"error": str(e)}
+
+def _calc_suggested_position(level) -> int:
+    """根据合约评分计算建议仓位百分比"""
+    score = level.recommendation
+    if score == "BEST":
+        return 20
+    elif score == "GOOD":
+        return 15
+    elif score == "OK":
+        return 10
+    elif score == "CAUTION":
+        return 5
+    return 0
+
+def _generate_strategy_advice(recommendation, use_smart: bool) -> dict:
+    """生成策略建议"""
+    total_premium = recommendation.total_potential_premium
+    put_count = len(recommendation.put_levels)
+    call_count = len(recommendation.call_levels)
+    
+    # 计算平均 APR 和 DTE
+    all_levels = recommendation.put_levels + recommendation.call_levels
+    avg_apr = sum(l.apr for l in all_levels) / len(all_levels) if all_levels else 0
+    avg_dte = sum(l.dte for l in all_levels) / len(all_levels) if all_levels else 0
+    
+    # 根据市场状态生成建议
+    if use_smart:
+        advice_text = f"智能推荐模式已启用。当前 DVOL 分位{recommendation.dvol_signal}，建议{recommendation.recommended_ratio}配置。"
+    else:
+        advice_text = f"手动配置模式。共推荐{put_count + call_count}个合约，总权利金${total_premium:,.0f}。"
+    
+    return {
+        "summary": advice_text,
+        "key_metrics": {
+            "avg_apr": round(avg_apr, 1),
+            "avg_dte": round(avg_dte, 0),
+            "total_premium": round(total_premium, 2),
+            "put_count": put_count,
+            "call_count": call_count
+        },
+        "action_items": [
+            "根据建议仓位分配资金",
+            "设置价格提醒，关注关键支撑/阻力位",
+            "定期检查合约状态，适时调整",
+            "注意风险控制，避免过度杠杆"
+        ],
+        "risk_warnings": [
+            "价格突破行权价可能被行权",
+            "极端行情下亏损可能放大",
+            "注意到期日管理，避免遗忘"
+        ]
+    }
 
 @router.get("/vol-direction")
 async def get_vol_direction(
@@ -274,35 +363,83 @@ async def get_revenue_summary(
 
 @router.get("/presets")
 async def get_grid_presets():
-    """获取网格策略预设配置"""
+    """获取网格策略预设配置（增强版）"""
     return {
         "presets": [
             {
+                "id": "conservative",
                 "name": "保守型",
-                "description": "低风险，稳定收益",
+                "description": "低风险，稳定收益 - 适合震荡市",
                 "put_count": 3,
                 "call_count": 2,
                 "min_dte": 14,
                 "max_dte": 30,
-                "min_apr": 20.0
+                "min_apr": 20.0,
+                "suggested_position": "30-50%",
+                "features": ["安全距离充足", "流动性好", "Theta 衰减快"]
             },
             {
+                "id": "balanced",
                 "name": "均衡型",
-                "description": "平衡风险与收益",
+                "description": "平衡风险与收益 - 适合温和波动",
                 "put_count": 5,
                 "call_count": 3,
                 "min_dte": 7,
                 "max_dte": 45,
-                "min_apr": 15.0
+                "min_apr": 15.0,
+                "suggested_position": "50-70%",
+                "features": ["收益适中", "分散风险", "灵活调整"]
             },
             {
+                "id": "aggressive",
                 "name": "激进型",
-                "description": "高风险，高收益",
+                "description": "高风险，高收益 - 适合高波动环境",
                 "put_count": 7,
                 "call_count": 5,
                 "min_dte": 7,
                 "max_dte": 60,
-                "min_apr": 10.0
+                "min_apr": 10.0,
+                "suggested_position": "70-100%",
+                "features": ["权利金收入高", "覆盖范围广", "需密切监控"]
+            },
+            {
+                "id": "smart",
+                "name": "智能推荐",
+                "description": "根据当前市场状态自动调整参数",
+                "auto_adjust": True,
+                "features": ["动态调整", "市场适应", "最优配置"]
             }
-        ]
+        ],
+        "parameter_guide": {
+            "min_dte": {
+                "label": "最短到期天数",
+                "description": "小于此天数的合约不会被推荐",
+                "suggested_range": "7-21 天",
+                "tips": "较短 DTE Theta 衰减快，但风险较高；较长 DTE 权利金高，但资金占用时间长"
+            },
+            "max_dte": {
+                "label": "最长到期天数",
+                "description": "大于此天数的合约不会被推荐",
+                "suggested_range": "30-60 天",
+                "tips": "限制最大 DTE 可避免资金长期占用，提高资金利用率"
+            },
+            "min_apr": {
+                "label": "最低年化收益率",
+                "description": "低于此 APR 的合约不会被推荐",
+                "suggested_range": "10-30%",
+                "tips": "较高的 APR 要求会减少可选合约数量，但提高整体收益质量"
+            },
+            "put_count": {
+                "label": "Put 网格数量",
+                "description": "推荐多少个 Put 合约",
+                "suggested_range": "3-7 个",
+                "tips": "较多数量可分散风险，但管理复杂度增加"
+            },
+            "call_count": {
+                "label": "Call 网格数量",
+                "description": "推荐多少个 Call 合约",
+                "suggested_range": "2-5 个",
+                "tips": "Call 端通常少于 Put 端，因为上涨风险理论上无限"
+            }
+        }
     }

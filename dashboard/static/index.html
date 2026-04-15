@@ -254,7 +254,8 @@
                 </div>
                 <div class="flex gap-2">
                     <button onclick="setPayoffMode('single')" id="payoffModeSingle" class="px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400">单策略</button>
-                    <button onclick="setPayoffMode('wheel')" id="payoffModeWheel" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">Wheel策略</button>
+                    <button onclick="setPayoffMode('wheel')" id="payoffModeWheel" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">Wheel 策略</button>
+                    <button onclick="setPayoffMode('compare')" id="payoffModeCompare" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">对比模式</button>
                 </div>
             </div>
 
@@ -280,22 +281,93 @@
                         <input type="number" id="payoffQuantity" value="1" min="0.1" step="0.1" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                     <div>
                         <label class="block text-gray-400 text-xs mb-1">行权价 ($)</label>
                         <input type="number" id="payoffStrike" value="80000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
                     <div>
                         <label class="block text-gray-400 text-xs mb-1">权利金 ($)</label>
-                        <input type="number" id="payoffPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                        <div class="flex gap-2">
+                            <input type="number" id="payoffPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            <button onclick="estimatePremium()" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-lg text-sm font-medium" title="智能估算权利金">
+                                <i class="fas fa-magic"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">DTE (天)</label>
+                        <input type="number" id="payoffDTE" value="30" min="1" max="365" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
                 </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 hidden" id="advancedParams">
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">隐含波动率 IV (%)</label>
+                        <input type="number" id="payoffIV" value="50" min="10" max="200" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">现货价格 ($)</label>
+                        <input type="number" id="payoffSpot" value="73000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <button onclick="calcPayoff()" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                        <i class="fas fa-calculator mr-1"></i>计算 Payoff
+                    </button>
+                    <button onclick="toggleAdvancedParams()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                        <i class="fas fa-cog mr-1"></i>高级参数
+                    </button>
+                </div>
+                
+                <!-- 策略评分和实操建议 -->
+                <div id="strategyAdviceCard" class="hidden mb-4 p-3 rounded-lg border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <span id="strategyRating" class="text-lg font-bold"></span>
+                            <span id="strategyScenario" class="text-xs text-gray-400"></span>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs text-gray-400">策略评分</div>
+                            <div id="strategyScore" class="text-2xl font-bold text-cyan-400"></div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2 mb-2 text-xs">
+                        <div class="bg-gray-800/50 rounded px-2 py-1">
+                            <div class="text-gray-500">收益性</div>
+                            <div id="scoreRoi" class="font-bold text-white"></div>
+                        </div>
+                        <div class="bg-gray-800/50 rounded px-2 py-1">
+                            <div class="text-gray-500">风险性</div>
+                            <div id="scoreRisk" class="font-bold text-white"></div>
+                        </div>
+                        <div class="bg-gray-800/50 rounded px-2 py-1">
+                            <div class="text-gray-500">胜率</div>
+                            <div id="scoreWinRate" class="font-bold text-white"></div>
+                        </div>
+                        <div class="bg-gray-800/50 rounded px-2 py-1">
+                            <div class="text-gray-500">流动性</div>
+                            <div id="scoreLiquidity" class="font-bold text-white"></div>
+                        </div>
+                    </div>
+                    <div class="text-xs text-gray-300 mb-2" id="strategyAdviceText"></div>
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                            <div class="text-red-400 font-semibold mb-1">⚠️ 主要风险</div>
+                            <ul id="strategyRisks" class="list-disc list-inside text-gray-400 space-y-0.5"></ul>
+                        </div>
+                        <div>
+                            <div class="text-green-400 font-semibold mb-1">💡 优化建议</div>
+                            <ul id="strategyOptimizations" class="list-disc list-inside text-gray-400 space-y-0.5"></ul>
+                        </div>
+                    </div>
+                </div>
+                
                 <button onclick="calcPayoff()" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
                     <i class="fas fa-calculator mr-1"></i>计算 Payoff
                 </button>
             </div>
 
-            <!-- Wheel策略模式 -->
+            <!-- Wheel 策略模式 -->
             <div id="payoffWheelMode" class="hidden">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div class="p-3 bg-green-500/5 border border-green-500/20 rounded-lg">
@@ -308,6 +380,10 @@
                             <div>
                                 <label class="block text-gray-400 text-xs">Put 权利金 ($)</label>
                                 <input type="number" id="wheelPutPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-gray-400 text-xs">Put DTE (天)</label>
+                                <input type="number" id="wheelPutDTE" value="30" min="1" max="365" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                             </div>
                         </div>
                     </div>
@@ -322,6 +398,10 @@
                                 <label class="block text-gray-400 text-xs">Call 权利金 ($)</label>
                                 <input type="number" id="wheelCallPremium" value="1500" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                             </div>
+                            <div>
+                                <label class="block text-gray-400 text-xs">Call DTE (天)</label>
+                                <input type="number" id="wheelCallDTE" value="30" min="1" max="365" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -335,8 +415,8 @@
                 <canvas id="payoffChart"></canvas>
             </div>
 
-            <!-- 结果摘要 -->
-            <div id="payoffResult" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <!-- 结果摘要（增强版） -->
+            <div id="payoffResult" class="grid grid-cols-2 md:grid-cols-6 gap-3">
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">最大盈利</div>
                     <div id="payoffMaxProfit" class="text-lg font-bold text-green-400">--</div>
@@ -350,8 +430,36 @@
                     <div id="payoffBreakeven" class="text-lg font-bold text-yellow-400">--</div>
                 </div>
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
-                    <div class="text-xs text-gray-400 mb-1">Wheel ROI</div>
-                    <div id="payoffWheelROI" class="text-lg font-bold text-cyan-400">--</div>
+                    <div class="text-xs text-gray-400 mb-1">ROI</div>
+                    <div id="payoffROI" class="text-lg font-bold text-cyan-400">--</div>
+                </div>
+                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
+                    <div class="text-xs text-gray-400 mb-1">胜率</div>
+                    <div id="payoffWinRate" class="text-lg font-bold text-purple-400">--</div>
+                </div>
+                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
+                    <div class="text-xs text-gray-400 mb-1">风险回报比</div>
+                    <div id="payoffRiskReward" class="text-lg font-bold text-orange-400">--</div>
+                </div>
+            </div>
+            
+            <!-- Wheel 专用结果 -->
+            <div id="wheelResult" class="hidden mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
+                    <div class="text-xs text-green-400 mb-1">Put 收入</div>
+                    <div id="wheelPutIncome" class="text-lg font-bold text-green-400">--</div>
+                </div>
+                <div class="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-center">
+                    <div class="text-xs text-blue-400 mb-1">Call 收入</div>
+                    <div id="wheelCallIncome" class="text-lg font-bold text-blue-400">--</div>
+                </div>
+                <div class="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg text-center">
+                    <div class="text-xs text-purple-400 mb-1">Wheel ROI</div>
+                    <div id="wheelROI" class="text-lg font-bold text-purple-400">--</div>
+                </div>
+                <div class="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-center">
+                    <div class="text-xs text-yellow-400 mb-1">年化 ROI</div>
+                    <div id="wheelAnnualizedROI" class="text-lg font-bold text-yellow-400">--</div>
                 </div>
             </div>
         </section>
@@ -897,39 +1005,103 @@
                     </div>
                 </div>
 
-                <!-- Module 2: Max Pain & GEX -->
+                <!-- Module 2: Max Pain & Gamma Flip -->
                 <div class="card-glass rounded-xl p-5">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-crosshairs text-orange-400"></i>
-                        最大痛点 / Gamma Flip (Max Pain)
+                        最大痛点 / Gamma Flip
                     </h2>
-                    <p class="text-xs text-gray-400 mb-3 leading-relaxed">
-                        🎯 <b>如何理解此图：</b>
-                        <span class="text-yellow-400">橙色线(左轴)</span> = 痛点曲线，最低点即<b>最大痛点(Max Pain)</b>，
-                        到期时做市商损失最小的价格，价格常被吸引向此收敛。
-                        <span class="text-cyan-400/70">柱状图(右轴)</span> = <b>OI净敞口(≈Gamma效应)</b>：
-                        <span class="text-green-400">绿色柱</span>=Call OI &gt; Put OI(多头Gamma区)→机构看多→<b>波动受抑制</b>；
-                        <span class="text-red-400">红色柱</span>=Put OI &gt; Call OI(空头Gamma区)→机构看空→<b>波动易放大</b>。
-                        <b>⭐ Gamma Flip点(红绿交界)</b>是多空分界线，突破后波动模式可能剧变！
-                        当橙色痛点线穿过红色空头Gamma区时，市场面临较大波动风险。
-                    </p>
-                    <details class="text-xs text-gray-400 mb-3 bg-gray-800/50 rounded p-2">
-                        <summary class="cursor-pointer text-cyan-400 font-semibold">💡 Gamma Flip 深度解析</summary>
-                        <div class="mt-2 space-y-1 leading-relaxed">
-                            <p><b>什么是Gamma Flip？</b>Gamma Flip是期权持仓中Call和Put的Gamma敞口互相转换的临界点。在此价格水平，做市商的Gamma对冲压力从"抑制波动"转变为"放大波动"。</p>
-                            <p><b>为什么重要？</b>当价格高于Gamma Flip点：机构多头主导，期权商倾向于高抛低吸，<span class="text-green-400">波动受抑制</span>。
-                               当价格低于Gamma Flip点：机构空头主导，期权商倾向于追涨杀跌，<span class="text-red-400">波动易放大</span>。</p>
-                            <p><b>实战用法：</b>①判断突破时机——价格突破Gamma Flip后，波动可能剧烈放大；②选择策略——在多头Gamma区更适合卖出期权收权利金；③风险管理——在空头Gamma区注意止损和仓位控制。</p>
+                    
+                    <!-- 市场状态指示器 -->
+                    <div id="gammaStatusCard" class="mb-3 p-3 rounded-lg border hidden">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span id="gammaStatusIcon" class="text-xl"></span>
+                            <span id="gammaStatusText" class="text-sm font-bold"></span>
+                        </div>
+                        <div class="text-xs text-gray-400">
+                            <span id="gammaDistance"></span>
+                            <span class="mx-1">|</span>
+                            <span id="gammaVolatility"></span>
+                            <span class="mx-1">|</span>
+                            <span id="gammaInstitutional"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- 方向性建议 -->
+                    <div id="gammaAdviceCard" class="mb-3 p-2.5 rounded-lg border hidden">
+                        <div class="text-xs font-semibold mb-1">💡 策略建议</div>
+                        <div class="text-xs text-gray-300" id="gammaAdviceText"></div>
+                        <div class="grid grid-cols-3 gap-2 mt-2 text-[11px]">
+                            <div class="bg-gray-800/50 rounded px-2 py-1">
+                                <div class="text-gray-500">建议仓位</div>
+                                <div id="advicePosition" class="font-bold text-white"></div>
+                            </div>
+                            <div class="bg-gray-800/50 rounded px-2 py-1">
+                                <div class="text-gray-500">策略方向</div>
+                                <div id="adviceStrategy" class="font-bold text-cyan-400"></div>
+                            </div>
+                            <div class="bg-gray-800/50 rounded px-2 py-1">
+                                <div class="text-gray-500">Delta 范围</div>
+                                <div id="adviceDelta" class="font-bold text-yellow-400"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 关键数据卡片 -->
+                    <div id="mpOverview" class="grid grid-cols-6 gap-2 mb-3 text-xs">
+                        <div class="bg-gray-800 rounded p-2 text-center">
+                            <div class="text-gray-400 text-[10px]">现货价</div>
+                            <div id="mpSpot" class="font-mono text-white text-xs">$--</div>
+                        </div>
+                        <div class="bg-gray-800 rounded p-2 text-center">
+                            <div class="text-gray-400 text-[10px]">Gamma Flip</div>
+                            <div id="mpFlip" class="font-mono text-emerald-400 text-xs font-bold">$--</div>
+                        </div>
+                        <div class="bg-gray-800 rounded p-2 text-center">
+                            <div class="text-gray-400 text-[10px]">最大痛点</div>
+                            <div id="mpPrice" class="font-mono text-yellow-400 text-xs">$--</div>
+                        </div>
+                        <div class="bg-gray-800 rounded p-2 text-center">
+                            <div class="text-gray-400 text-[10px]">偏离度</div>
+                            <div id="mpDist" class="font-mono text-xs">--%</div>
+                        </div>
+                        <div class="bg-gray-800 rounded p-2 text-center">
+                            <div class="text-gray-400 text-[10px]">区域距离</div>
+                            <div id="mpRegionDist" class="font-mono text-xs">--</div>
+                        </div>
+                        <div class="bg-gray-800 rounded p-2 text-center">
+                            <div class="text-gray-400 text-[10px]">PCR</div>
+                            <div id="mpPCR" class="font-mono text-xs">--</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 风险预警 -->
+                    <div id="mmAlert" class="hidden mb-3 p-2 rounded text-xs"></div>
+                    
+                    <!-- 图表 -->
+                    <canvas id="painGexChart" height="180"></canvas>
+                    
+                    <!-- 详细说明（可折叠） -->
+                    <details class="text-xs text-gray-400 mt-3 bg-gray-800/50 rounded p-2.5">
+                        <summary class="cursor-pointer text-cyan-400 font-semibold mb-2">📚 如何解读此图</summary>
+                        <div class="space-y-1.5 leading-relaxed">
+                            <p><b>橙色线 (左轴)</b> = 痛点曲线，最低点即<b>最大痛点</b>，到期时价格常被吸引向此收敛。</p>
+                            <p><b>柱状图 (右轴)</b> = <b>OI 净敞口 (Gamma 效应)</b>：<span class="text-green-400">绿色柱</span>=Call OI > Put OI(多头 Gamma 区)→<b>波动受抑制</b>；<span class="text-red-400">红色柱</span>=Put OI > Call OI(空头 Gamma 区)→<b>波动易放大</b>。</p>
+                            <p><b>⭐ Gamma Flip 点</b>（红绿交界）是多空分界线，突破后波动模式可能剧变！</p>
+                            <p><b>垂直虚线</b>：绿色=Gamma Flip，橙色=最大痛点，白色=现货价格。</p>
                         </div>
                     </details>
-                    <div id="mpOverview" class="grid grid-cols-4 gap-2 mb-3 text-xs">
-                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">现货价</div><div id="mpSpot" class="font-mono text-white">$--</div></div>
-                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">最大痛点</div><div id="mpPrice" class="font-mono text-yellow-400">$--</div></div>
-                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">偏离度</div><div id="mpDist" class="font-mono">--%</div></div>
-                        <div class="bg-gray-800 rounded p-2 text-center"><div class="text-gray-400">看跌/看涨比</div><div id="mpPCR" class="font-mono">--</div></div>
-                    </div>
-                    <div id="mmAlert" class="hidden mb-3 p-2 rounded text-xs"></div>
-                    <canvas id="painGexChart" height="180"></canvas>
+                    
+                    <!-- 深度解析（可折叠） -->
+                    <details class="text-xs text-gray-400 mt-2 bg-gray-800/50 rounded p-2.5">
+                        <summary class="cursor-pointer text-purple-400 font-semibold mb-2">💡 Gamma Flip 深度解析</summary>
+                        <div class="space-y-1.5 leading-relaxed">
+                            <p><b>什么是 Gamma Flip？</b>Gamma Flip 是 Call 和 Put 的 Gamma 敞口互相转换的临界点。在此价格水平，做市商的 Gamma 对冲压力从"抑制波动"转变为"放大波动"。</p>
+                            <p><b>为什么重要？</b>当价格高于 Gamma Flip：机构多头主导，期权商高抛低吸，<span class="text-green-400">波动受抑制</span>。当价格低于 Gamma Flip：机构空头主导，期权商追涨杀跌，<span class="text-red-400">波动易放大</span>。</p>
+                            <p><b>实战用法：</b>①判断突破时机——突破 Gamma Flip 后波动可能剧烈放大；②选择策略——在多头 Gamma 区更适合卖出期权收权利金；③风险管理——在空头 Gamma 区注意止损和仓位控制。</p>
+                        </div>
+                    </details>
+                    
                     <div id="mpSignal" class="mt-2 text-xs text-center text-gray-400"></div>
                 </div>
 

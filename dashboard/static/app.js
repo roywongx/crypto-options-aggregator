@@ -1349,17 +1349,25 @@ function setPayoffMode(mode) {
     const wheelMode = document.getElementById('payoffWheelMode');
     const singleBtn = document.getElementById('payoffModeSingle');
     const wheelBtn = document.getElementById('payoffModeWheel');
+    const compareBtn = document.getElementById('payoffModeCompare');
     
     if (mode === 'single') {
         singleMode.classList.remove('hidden');
         wheelMode.classList.add('hidden');
         singleBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400';
         wheelBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
-    } else {
+        compareBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+    } else if (mode === 'wheel') {
         singleMode.classList.add('hidden');
         wheelMode.classList.remove('hidden');
         wheelBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400';
         singleBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+        compareBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+    } else if (mode === 'compare') {
+        showAlert('对比模式开发中...', 'info');
+        compareBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400';
+        singleBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+        wheelBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
     }
 }
 
@@ -1370,7 +1378,9 @@ async function calcPayoff() {
         const quantity = parseFloat(document.getElementById('payoffQuantity').value) || 1;
         const strike = parseFloat(document.getElementById('payoffStrike').value);
         const premium = parseFloat(document.getElementById('payoffPremium').value);
-        const spot = currentSpotPrice || 85000;
+        const dte = parseFloat(document.getElementById('payoffDTE').value) || 30;
+        const iv = parseFloat(document.getElementById('payoffIV').value) || 50;
+        const spot = parseFloat(document.getElementById('payoffSpot').value) || currentSpotPrice || 73000;
         
         const response = await safeFetch(`${API_BASE}/api/payoff/calc`, {
             method: 'POST',
@@ -1386,19 +1396,102 @@ async function calcPayoff() {
         const data = await response.json();
         renderPayoffChart(data);
         updatePayoffResult(data);
+        
+        // 计算策略评分和实操建议
+        await calcStrategyScore({ direction, option_type: optionType, strike, premium, quantity }, spot, dte, iv);
     } catch (error) {
-        console.error('Payoff计算失败:', error);
-        showAlert('Payoff计算失败', 'error');
+        console.error('Payoff 计算失败:', error);
+        showAlert('Payoff 计算失败', 'error');
     }
+}
+
+async function calcStrategyScore(leg, spot, dte, iv) {
+    try {
+        const response = await safeFetch(`${API_BASE}/api/payoff/score`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                legs: [leg],
+                spot, dte, iv
+            })
+        });
+        
+        const data = await response.json();
+        renderStrategyAdvice(data);
+    } catch (error) {
+        console.error('策略评分计算失败:', error);
+    }
+}
+
+function renderStrategyAdvice(data) {
+    const scoreData = data.score;
+    const adviceData = data.advice;
+    
+    if (!scoreData || !adviceData) return;
+    
+    document.getElementById('strategyAdviceCard').classList.remove('hidden');
+    document.getElementById('strategyAdviceCard').className = `mb-4 p-3 rounded-lg border ${adviceData.bg_color}`;
+    
+    document.getElementById('strategyRating').textContent = adviceData.rating;
+    document.getElementById('strategyRating').className = `text-lg font-bold ${adviceData.rating_color}`;
+    document.getElementById('strategyScenario').textContent = adviceData.scenario;
+    
+    document.getElementById('strategyScore').textContent = `${scoreData.total_score}/100`;
+    document.getElementById('scoreRoi').textContent = `${scoreData.components.roi_score}分`;
+    document.getElementById('scoreRisk').textContent = `${scoreData.components.risk_score}分`;
+    document.getElementById('scoreWinRate').textContent = `${scoreData.components.win_rate_score}分`;
+    document.getElementById('scoreLiquidity').textContent = `${scoreData.components.liquidity_score}分`;
+    
+    document.getElementById('strategyAdviceText').textContent = adviceData.advice_text;
+    
+    const risksList = document.getElementById('strategyRisks');
+    risksList.innerHTML = adviceData.risks.map(risk => `<li>${risk}</li>`).join('');
+    
+    const optList = document.getElementById('strategyOptimizations');
+    optList.innerHTML = adviceData.optimizations.map(opt => `<li>${opt}</li>`).join('');
+}
+
+async function estimatePremium() {
+    try {
+        const optionType = document.getElementById('payoffOptionType').value;
+        const strike = parseFloat(document.getElementById('payoffStrike').value);
+        const dte = parseFloat(document.getElementById('payoffDTE').value) || 30;
+        const iv = parseFloat(document.getElementById('payoffIV').value) || 50;
+        const spot = parseFloat(document.getElementById('payoffSpot').value) || currentSpotPrice || 73000;
+        
+        const response = await safeFetch(`${API_BASE}/api/payoff/estimate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ option_type: optionType, strike, spot, dte, iv })
+        });
+        
+        const data = await response.json();
+        if (data.estimated_premium) {
+            document.getElementById('payoffPremium').value = data.estimated_premium;
+            showAlert(`估算完成：权利金 ≈ $${data.estimated_premium.toLocaleString()} (Delta: ${data.delta})`, 'success');
+        } else if (data.error) {
+            showAlert(data.error, 'error');
+        }
+    } catch (error) {
+        console.error('权利金估算失败:', error);
+        showAlert('权利金估算失败', 'error');
+    }
+}
+
+function toggleAdvancedParams() {
+    const panel = document.getElementById('advancedParams');
+    panel.classList.toggle('hidden');
 }
 
 async function calcWheelROI() {
     try {
         const putStrike = parseFloat(document.getElementById('wheelPutStrike').value);
         const putPremium = parseFloat(document.getElementById('wheelPutPremium').value);
+        const putDTE = parseFloat(document.getElementById('wheelPutDTE').value) || 30;
         const callStrike = parseFloat(document.getElementById('wheelCallStrike').value);
         const callPremium = parseFloat(document.getElementById('wheelCallPremium').value);
-        const spot = currentSpotPrice || 85000;
+        const callDTE = parseFloat(document.getElementById('wheelCallDTE').value) || 30;
+        const spot = parseFloat(document.getElementById('payoffSpot').value) || currentSpotPrice || 73000;
         
         const response = await safeFetch(`${API_BASE}/api/payoff/wheel`, {
             method: 'POST',
@@ -1406,8 +1499,10 @@ async function calcWheelROI() {
             body: JSON.stringify({
                 put_strike: putStrike,
                 put_premium: putPremium,
+                put_dte: putDTE,
                 call_strike: callStrike,
                 call_premium: callPremium,
+                call_dte: callDTE,
                 spot,
                 quantity: 1
             })
@@ -1417,8 +1512,8 @@ async function calcWheelROI() {
         renderWheelChart(data);
         updateWheelResult(data);
     } catch (error) {
-        console.error('Wheel ROI计算失败:', error);
-        showAlert('Wheel ROI计算失败', 'error');
+        console.error('Wheel ROI 计算失败:', error);
+        showAlert('Wheel ROI 计算失败', 'error');
     }
 }
 
@@ -1572,17 +1667,39 @@ function renderWheelChart(data) {
 
 function updatePayoffResult(data) {
     document.getElementById('payoffMaxProfit').textContent = `$${data.max_profit.toLocaleString()}`;
-    document.getElementById('payoffMaxLoss').textContent = `$${data.max_loss.toLocaleString()}`;
+    document.getElementById('payoffMaxLoss').textContent = `$${Math.abs(data.max_loss).toLocaleString()}`;
     document.getElementById('payoffBreakeven').textContent = data.breakevens.length > 0 ? `$${data.breakevens.map(b => b.toLocaleString()).join(', ')}` : '无';
-    document.getElementById('payoffWheelROI').textContent = '--';
+    
+    const capitalAtRisk = Math.abs(data.max_loss) || data.max_profit;
+    const roi = capitalAtRisk > 0 ? ((data.max_profit / capitalAtRisk) * 100).toFixed(1) : 0;
+    const riskReward = data.max_loss !== 0 ? (data.max_profit / Math.abs(data.max_loss)).toFixed(2) : 0;
+    
+    document.getElementById('payoffROI').textContent = `${roi}%`;
+    document.getElementById('payoffWinRate').textContent = '--';
+    document.getElementById('payoffRiskReward').textContent = `1:${riskReward}`;
+    
+    document.getElementById('wheelResult').classList.add('hidden');
 }
 
 function updateWheelResult(data) {
     const s = data.summary;
+    
     document.getElementById('payoffMaxProfit').textContent = `$${s.total_income.toLocaleString()}`;
     document.getElementById('payoffMaxLoss').textContent = `$${s.capital_at_risk.toLocaleString()}`;
     document.getElementById('payoffBreakeven').textContent = `$${s.breakeven_stock.toLocaleString()}`;
-    document.getElementById('payoffWheelROI').textContent = `${s.wheel_roi_pct}%`;
+    
+    const roi = s.wheel_roi_pct ? `${s.wheel_roi_pct.toFixed(1)}%` : '--';
+    const riskReward = s.capital_at_risk > 0 ? (s.total_income / s.capital_at_risk).toFixed(2) : 0;
+    
+    document.getElementById('payoffROI').textContent = roi;
+    document.getElementById('payoffWinRate').textContent = s.win_rate_pct ? `${s.win_rate_pct.toFixed(0)}%` : '--';
+    document.getElementById('payoffRiskReward').textContent = `1:${riskReward}`;
+    
+    document.getElementById('wheelResult').classList.remove('hidden');
+    document.getElementById('wheelPutIncome').textContent = `$${s.put_income.toLocaleString()}`;
+    document.getElementById('wheelCallIncome').textContent = `$${s.call_income.toLocaleString()}`;
+    document.getElementById('wheelROI').textContent = `${s.wheel_roi_pct.toFixed(1)}%`;
+    document.getElementById('wheelAnnualizedROI').textContent = `${s.annualized_roi_pct.toFixed(1)}%`;
 }
 
 // 列显示/隐藏功能
@@ -2273,17 +2390,69 @@ async function loadMaxPain() {
         if (d.error || !d.expiries) { console.warn('MP:', d.error || 'no expiries'); return; }
 
         const exp = d.expiries[0];
+        
+        // 更新关键数据卡片
         document.getElementById('mpSpot').textContent = '$' + (d.spot || 0).toLocaleString();
+        document.getElementById('mpFlip').textContent = exp.gamma_status && exp.gamma_status.flip_strike ? '$' + exp.gamma_status.flip_strike.toLocaleString() : '--';
         document.getElementById('mpPrice').textContent = '$' + (exp.max_pain || 0).toLocaleString();
         document.getElementById('mpDist').textContent = (exp.dist_pct || 0).toFixed(1) + '%';
         document.getElementById('mpPCR').textContent = (exp.pcr || 0).toFixed(2);
         document.getElementById('mpSignal').textContent = exp.signal || '';
+        
+        // 更新 Gamma 状态指示器
+        const statusCard = document.getElementById('gammaStatusCard');
+        const adviceCard = document.getElementById('gammaAdviceCard');
+        if (exp.gamma_status && statusCard) {
+            statusCard.classList.remove('hidden');
+            statusCard.className = 'mb-3 p-3 rounded-lg border ' + 
+                (exp.gamma_status.region === 'long' ? 'border-emerald-500/30 bg-emerald-500/5' :
+                 exp.gamma_status.region === 'short' ? 'border-red-500/30 bg-red-500/5' :
+                 'border-gray-500/30 bg-gray-500/5');
+            
+            document.getElementById('gammaStatusIcon').textContent = exp.gamma_status.icon || '⚖️';
+            document.getElementById('gammaStatusText').textContent = exp.gamma_status.region_cn || '中性区域';
+            document.getElementById('gammaStatusText').className = 'text-sm font-bold ' + 
+                (exp.gamma_status.region === 'long' ? 'text-emerald-400' :
+                 exp.gamma_status.region === 'short' ? 'text-red-400' : 'text-gray-400');
+            
+            const distText = exp.gamma_status.distance_pct ? 
+                (exp.gamma_status.region === 'long' ? '现货高于 Flip 点 ' : '现货低于 Flip 点 ') + exp.gamma_status.distance_pct.toFixed(1) + '%' : '';
+            document.getElementById('gammaDistance').textContent = distText;
+            document.getElementById('gammaVolatility').textContent = exp.gamma_status.volatility || '';
+            document.getElementById('gammaInstitutional').textContent = exp.gamma_status.institutional || '';
+            
+            // 更新区域距离卡片
+            const regionDistEl = document.getElementById('mpRegionDist');
+            if (regionDistEl && exp.gamma_status.distance_pct !== undefined) {
+                regionDistEl.textContent = (exp.gamma_status.distance_pct > 0 ? '+' : '') + exp.gamma_status.distance_pct.toFixed(1) + '%';
+                regionDistEl.className = 'font-mono text-xs ' + 
+                    (exp.gamma_status.distance_pct > 5 ? 'text-emerald-400' :
+                     exp.gamma_status.distance_pct < -5 ? 'text-red-400' : 'text-gray-400');
+            }
+        }
+        
+        // 更新方向性建议
+        if (exp.gamma_advice && adviceCard) {
+            adviceCard.classList.remove('hidden');
+            adviceCard.className = 'mb-3 p-2.5 rounded-lg border ' + 
+                (exp.gamma_status && exp.gamma_status.region === 'long' ? 'border-emerald-500/20 bg-emerald-500/5' :
+                 exp.gamma_status && exp.gamma_status.region === 'short' ? 'border-red-500/20 bg-red-500/5' :
+                 'border-gray-500/20 bg-gray-500/5');
+            
+            document.getElementById('gammaAdviceText').textContent = exp.gamma_advice.text || '';
+            document.getElementById('advicePosition').textContent = exp.gamma_advice.position_pct ? exp.gamma_advice.position_pct + '%' : '--';
+            document.getElementById('adviceStrategy').textContent = exp.gamma_advice.strategy || '--';
+            document.getElementById('adviceDelta').textContent = exp.gamma_advice.delta_range || '--';
+        }
 
+        // 风险预警
         const mmEl = document.getElementById('mmAlert');
         if (exp.mm_signal && mmEl) {
             mmEl.classList.remove('hidden');
-            mmEl.className = exp.mm_signal.includes('DANGER') ? 'mb-3 p-2 rounded text-xs bg-red-900/40 border border-red-500/50 text-red-300' : 'mb-3 p-2 rounded text-xs bg-green-900/30 border border-green-500/30 text-green-300';
+            mmEl.className = exp.mm_signal.includes('DANGER') || exp.mm_signal.includes('危险') ? 'mb-3 p-2 rounded text-xs bg-red-900/40 border border-red-500/50 text-red-300' : 'mb-3 p-2 rounded text-xs bg-green-900/30 border border-green-500/30 text-green-300';
             mmEl.textContent = exp.mm_signal;
+        } else if (mmEl) {
+            mmEl.classList.add('hidden');
         }
 
         const ctx = document.getElementById('painGexChart');
