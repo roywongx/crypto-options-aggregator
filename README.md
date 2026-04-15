@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v6.0-BTC%E9%A3%8E%E9%99%A9%E6%A1%86%E6%9E%B6+%E5%B9%B6%E8%A1%8C%E6%89%AB%E6%8F%8F+%E6%8A%84%E5%BA%95%E5%BB%BA%E8%AE%AE-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v7.0-智能策略引擎 + 可视化 Payoff+ 专业分析-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator (期权监控聚合面板)</h1>
@@ -18,16 +18,32 @@
 
 ## 🌟 核心特性与优势
 
+### 📊 专业分析工具
+
 | 功能模块 | 详细说明 |
 |------|------|
 | 🔗 **双平台统一视图** | 消除 Binance + Deribit 之间的差异，在同一面板对比真实收益。 |
-| 💰 **真实 Margin-APR** | 摒弃传统面值收益率，采用真实**保证金占用回报率**（如锁定20%资金计算APR），反映资金真实效率。 |
+| 💰 **真实 Margin-APR** | 摒弃传统面值收益率，采用真实**保证金占用回报率**（如锁定 20% 资金计算 APR），反映资金真实效率。 |
 | 🌊 **DVOL 波动率引擎** | 基于 Deribit 波动率指数，自动计算 Z-Score 和历史分位数。高波收紧参数，低波放宽，实现策略自动适配。 |
-| 🛡️ **动态风险框架(v6.0)** | 引入 BTC 风险阶梯（如 55k 常规底，45k 极限底），为不同市场阶段提供精确的参数权重修正。 |
-| 💡 **智能抄底助手(v6.0)** | 融合当前水位、Max Pain (最大痛点)、GEX (Gamma Exposure)，输出实时的建仓/滚仓/平仓操作指令。 |
-| 🔄 **正收益滚仓计算器** | 当持仓遇险时，自动寻找更低行权价、更远到期日的新合约，并测算所需保证金，确保净信用(Net Credit)大于零。 |
+| 🛡️ **动态风险框架** | 引入 BTC 风险阶梯（如 55k 常规底，45k 极限底），为不同市场阶段提供精确的参数权重修正。 |
+| 💡 **智能抄底助手** | 融合当前水位、Max Pain (最大痛点)、GEX (Gamma Exposure)，输出实时的建仓/滚仓/平仓操作指令。 |
+| 🔄 **正收益滚仓计算器** | 当持仓遇险时，自动寻找更低行权价、更远到期日的新合约，并测算所需保证金，确保净信用 (Net Credit) 大于零。 |
 | 🌊 **大单风向标 & 资金流** | 监控百万级大单，基于 Delta 深度解析真实交易意图（备兑、保护性买入、追涨等），透视主力底牌。 |
-| 📊 **多维数据图表分析** | 实时生成 APR 分位图、DVOL 趋势图、波动率曲面(Term Structure) 以及 PCR (Put/Call Ratio) 面板。 |
+| 📊 **多维数据图表分析** | 实时生成 APR 分位图、DVOL 趋势图、波动率曲面 (Term Structure) 以及 PCR (Put/Call Ratio) 面板。 |
+
+### 🎯 智能策略引擎 (v7.0 新增)
+
+| 功能模块 | 详细说明 |
+|------|------|
+| 📈 **Payoff 可视化** | 交互式盈亏曲线图，支持 Sell Put/Call、Buy Put/Call 策略，实时显示最大盈亏、盈亏平衡点。 |
+| 🤖 **智能权利金估算** | 基于 Black-Scholes 公式自动估算合理权利金，支持输入 IV 和 DTE 参数。 |
+| ⭐ **策略评分系统** | 0-100 分综合评分，4 个维度：收益性 (30%)、风险性 (30%)、胜率 (25%)、流动性 (15%)。 |
+| 💡 **实操建议引擎** | 根据评分生成推荐程度（强烈推荐/推荐/中性/谨慎/不推荐）、适用场景、风险提示和优化建议。 |
+| 🎡 **Wheel ROI 计算器** | 完整 Wheel 策略收益分析，包含年化 ROI、胜率估算、Put/Call 收入分解。 |
+| 🆚 **策略对比模式** | 同时对比最多 5 个不同参数组合，直观比较 ROI、胜率和风险回报比。 |
+| 📐 **网格策略引擎** | 4 种预设配置（保守/均衡/激进/智能推荐），参数指导系统，根据 DVOL 自动调整的智能推荐模式。 |
+| 🎯 **最大痛点/Gamma Flip** | 市场状态指示器（多头/空头 Gamma 区），方向性建议（仓位/策略/Delta 范围），图表标记优化。 |
+| 🐋 **大宗异动监控** | 5 级严重度分类（巨鲸/大单/中单/小单/信息），权利金/IV/Delta 显示，大宗交易标记和流向提示。 |
 
 ---
 
@@ -88,13 +104,55 @@ python -m uvicorn main:app --reload --port 8080
 
 ## 💡 更新日志
 
+### v7.0 (2024-04) - 智能策略引擎重大升级
+
+**🎯 Payoff 可视化 & Wheel ROI 专业增强版**
+- ✨ 智能权利金估算：基于 Black-Scholes 公式，输入 IV/DTE 自动计算
+- ⭐ 策略评分系统：0-100 分，4 个维度（收益性 30%、风险性 30%、胜率 25%、流动性 15%）
+- 💡 实操建议引擎：5 级推荐程度（强烈推荐→不推荐），适用场景，风险提示，优化建议
+- 🎡 Wheel ROI 增强：年化 ROI 计算，胜率估算，Put/Call 收入分解
+- 🆚 对比模式：同时对比最多 5 个策略组合
+- 📊 结果展示：6 个指标卡片（最大盈利/亏损、盈亏平衡、ROI、胜率、风险回报比）
+
+**📐 网格策略引擎优化**
+- 🎯 4 种预设配置：保守型/均衡型/激进型/智能推荐
+- 📚 参数指导系统：每个参数都有详细说明、建议范围和使用技巧
+- 🤖 智能推荐模式：根据 DVOL 分位数自动调整参数
+  - 高波动（>70 分位）：激进策略，降低 APR 要求，增加合约数量
+  - 低波动（<30 分位）：保守策略，提高 APR 要求，减少合约数量
+- 💰 建议仓位计算：BEST=20%、GOOD=15%、OK=10%、CAUTION=5%
+- 📊 策略建议卡片：关键指标、操作项、风险警告
+
+**🎯 最大痛点/Gamma Flip 重新设计**
+- 📊 市场状态指示器：多头 Gamma 区/空头 Gamma 区，波动特征，机构态度
+- 💡 方向性建议：建议仓位、策略方向、Delta 范围
+- 📈 数据卡片增强：从 4 个扩展到 6 个（增加 Gamma Flip 价格、区域距离）
+- 🎨 图表标记：Gamma Flip 点、最大痛点、现货价格标记
+
+**🐋 大宗异动重新设计**
+- 🔧 修复 notional 计算错误：使用 amount×index_price 替代错误的 premium 计算
+- 📊 5 级严重度分类：巨鲸 (>$5M)/大单 (>$2M)/中单 (>$500K)/小单 (>$100K)/信息
+- 💰 新增数据显示：权利金、IV、Delta、大宗交易标记
+- 🎯 流向提示：保护性对冲、收权利金、看跌投机等中文翻译
+
+**🛠️ 其他改进**
+- 🖥️ 桌面快捷方式创建脚本（支持 Windows）
+- 📚 参数指导 UI 组件
+- 🎨 策略建议渲染引擎
+- 🐛 修复多个已知问题
+
+### v6.x - 风险框架与数据优化
+
 | 版本 | 核心更新内容 |
 |------|---------|
 | **v6.0.2** | **P0**: 实现 `DeribitOptionsMonitor` 单例模式，消除每请求重复实例化；**P1**: Binance Greeks 现在直接使用 API 返回的 delta/gamma/theta/vega；**P2**: 风险阈值统一到 `config.py`（DVOL_PANIC_THRESHOLD=80, DVOL_LOW_THRESHOLD=20 等）。 |
-| **v6.0.1** | 修复 `_parse_inst_name` option_type 返回值不统一问题（'CALL'/'PUT' vs 'C'/'P'）；修复 `get_dvol_from_deribit` DVOL字段名映射错误（current_dvol, z_score_7d, history_points, iv_percentile_7d）。 |
-| **v6.0** | 新增 **BTC动态风险框架** (55k常规底/45k极限底)；新增**抄底建议模块**，结合 Max Pain 与 GEX 生成策略指令；全面启用**并发网络请求**，大幅缩短加载延迟。 |
-| **v5.11** | DVOL实现统一为DeribitOptionsMonitor高级版(动态阈值+置信度+风险笔记)；instrument name解析统一为Monitor版本(缓存+动态DTE) |
-| **v5.10** | 修复sentiment_score中英文key不匹配；sandbox KeyError；roll计算器NameError；PCR月份误匹配；delta缺失导致risk_level恒低；_get_spot_from_scan查错字段 |
+| **v6.0.1** | 修复 `_parse_inst_name` option_type 返回值不统一问题（'CALL'/'PUT' vs 'C'/'P'）；修复 `get_dvol_from_deribit` DVOL 字段名映射错误（current_dvol, z_score_7d, history_points, iv_percentile_7d）。 |
+| **v6.0** | 新增 **BTC 动态风险框架** (55k 常规底/45k 极限底)；新增**抄底建议模块**，结合 Max Pain 与 GEX 生成策略指令；全面启用**并发网络请求**，大幅缩短加载延迟。 |
+| **v5.11** | DVOL 实现统一为 DeribitOptionsMonitor 高级版 (动态阈值 + 置信度 + 风险笔记)；instrument name 解析统一为 Monitor 版本 (缓存 + 动态 DTE) |
+| **v5.10** | 修复 sentiment_score 中英文 key 不匹配；sandbox KeyError；roll 计算器 NameError；PCR 月份误匹配；delta 缺失导致 risk_level 恒低；_get_spot_from_scan 查错字段 |
+| **v5.9** | 重构大单监控系统，引入交易意图智能判定（如识别"深度 ITM 保护性买入"）。 |
+| **v5.7** | 重构配置引擎，抽离全局 `config.py`，彻底消除硬编码散落。 |
+| **v5.3** | 引入 `Calculation Engine` 和加权评分系统 (POP, Breakeven, Liquidity)。 |ent_score中英文key不匹配；sandbox KeyError；roll计算器NameError；PCR月份误匹配；delta缺失导致risk_level恒低；_get_spot_from_scan查错字段 |
 | **v5.9** | 重构大单监控系统，引入交易意图智能判定（如识别“深度ITM保护性买入”）。 |
 | **v5.7** | 重构配置引擎，抽离全局 `config.py`，彻底消除硬编码散落。 |
 | **v5.3** | 引入 `Calculation Engine` 和加权评分系统 (POP, Breakeven, Liquidity)。 |
