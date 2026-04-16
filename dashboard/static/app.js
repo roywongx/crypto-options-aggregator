@@ -59,7 +59,6 @@ async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
 
 
 document.addEventListener('DOMContentLoaded', () => {
-    initColumnVisibility();
     initCharts();
     loadLatestData();
     loadStats();
@@ -425,12 +424,12 @@ async function submitStrategyCalc() {
         const result = await response.json();
 
         if (!result.success) {
-            wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>${result.error || '计算失败'}</p></div>`;
+            wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>${safeHTML(result.error || '计算失败')}</p></div>`;
         } else {
             displayStrategyCalcResult(result, wrapper);
         }
     } catch (error) {
-        wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>错误: ${error.message}</p></div>`;
+        wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>错误: ${safeHTML(error.message)}</p></div>`;
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-magic"></i> 计算方案';
@@ -470,7 +469,7 @@ function displayStrategyCalcResult(result, wrapper) {
         const isBest = idx === 0;
         html += `<tr class="hover:bg-white/5 transition ${isBest ? 'bg-green-500/10' : ''}">
             <td class="py-3 px-2">${isBest ? '<i class="fas fa-crown text-yellow-400"></i>' : idx + 1}</td>
-            <td class="py-3 px-2"><span class="font-mono text-white">${plan.symbol}</span><br><span class="text-[10px] text-gray-500">${plan.platform}</span></td>
+            <td class="py-3 px-2"><span class="font-mono text-white">${safeHTML(plan.symbol)}</span><br><span class="text-[10px] text-gray-500">${safeHTML(plan.platform)}</span></td>
             <td class="py-3 px-2 text-right font-mono text-orange-400">${plan.strike?.toLocaleString()}</td>
             <td class="py-3 px-2 text-center">${plan.dte}</td>
             <td class="py-3 px-2 text-right">${plan.delta?.toFixed(3)}</td>
@@ -903,10 +902,6 @@ function updateOpportunitiesTable(contracts) {
             riskLevel = '正常';
         }
 
-        if (riskLevel === '极高' || riskLevel === '高') {
-            highRiskContracts.push({ symbol, reason: `Delta(${deltaAbs.toFixed(3)})>0.45` });
-        }
-
         // 精简版12列表格数据
         const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
         const lossVal = Math.abs(contract.loss_at_10pct || 0);
@@ -1300,7 +1295,11 @@ function showAlert(message, type = 'info') {
         if (alertsList.children.length === 1 && alertsList.children[0].textContent === '暂无预警') alertsList.innerHTML = '';
         const alert = document.createElement('div');
         alert.className = `border-l-4 p-3 rounded-lg text-sm ${colors[type]} flex items-start gap-2 animate-fade-in`;
-        alert.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${time}</div><div>${message}</div></div>`;
+        alert.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${safeHTML(time)}</div></div>`;
+        const msgDiv = alert.querySelector('.flex-1');
+        const msgContent = document.createElement('div');
+        msgContent.textContent = message;
+        msgDiv.appendChild(msgContent);
         alertsList.insertBefore(alert, alertsList.firstChild);
         while (alertsList.children.length > 20) alertsList.removeChild(alertsList.lastChild);
         return;
@@ -1316,7 +1315,11 @@ function showAlert(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `border-l-4 p-3 rounded-lg text-sm ${colors[type]} flex items-start gap-2 animate-fade-in`;
     toast.style.cssText = 'backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.3);';
-    toast.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${time}</div><div>${message}</div></div>`;
+    toast.innerHTML = `<i class="fas ${icons[type]} mt-0.5 flex-shrink-0"></i><div class="flex-1 min-w-0"><div class="text-xs text-gray-500 mb-0.5">${safeHTML(time)}</div></div>`;
+    const toastMsg = toast.querySelector('.flex-1');
+    const toastContent = document.createElement('div');
+    toastContent.textContent = message;
+    toastMsg.appendChild(toastContent);
     container.appendChild(toast);
     setTimeout(() => { toast.style.transition = 'opacity 0.3s'; toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 4000);
     while (container.children.length > 5) container.removeChild(container.firstChild);
@@ -1364,7 +1367,9 @@ function setPayoffMode(mode) {
         singleBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
         compareBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
     } else if (mode === 'compare') {
-        showAlert('对比模式开发中...', 'info');
+        singleMode.classList.add('hidden');
+        wheelMode.classList.add('hidden');
+        showAlert('对比模式开发中，敬请期待', 'info');
         compareBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400';
         singleBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
         wheelBtn.className = 'px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
@@ -1429,11 +1434,21 @@ function renderStrategyAdvice(data) {
     
     if (!scoreData || !adviceData) return;
     
-    document.getElementById('strategyAdviceCard').classList.remove('hidden');
-    document.getElementById('strategyAdviceCard').className = `mb-4 p-3 rounded-lg border ${adviceData.bg_color}`;
+    const levelColors = {
+        'green': { text: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30' },
+        'emerald': { text: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30' },
+        'yellow': { text: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30' },
+        'orange': { text: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/30' },
+        'red': { text: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30' }
+    };
+    const color = levelColors[adviceData.rating_level] || levelColors['yellow'];
+    
+    const adviceCard = document.getElementById('strategyAdviceCard');
+    adviceCard.classList.remove('hidden');
+    adviceCard.className = `mb-4 p-3 rounded-lg border ${color.bg}`;
     
     document.getElementById('strategyRating').textContent = adviceData.rating;
-    document.getElementById('strategyRating').className = `text-lg font-bold ${adviceData.rating_color}`;
+    document.getElementById('strategyRating').className = `text-lg font-bold ${color.text}`;
     document.getElementById('strategyScenario').textContent = adviceData.scenario;
     
     document.getElementById('strategyScore').textContent = `${scoreData.total_score}/100`;
@@ -1445,10 +1460,20 @@ function renderStrategyAdvice(data) {
     document.getElementById('strategyAdviceText').textContent = adviceData.advice_text;
     
     const risksList = document.getElementById('strategyRisks');
-    risksList.innerHTML = adviceData.risks.map(risk => `<li>${risk}</li>`).join('');
+    risksList.innerHTML = '';
+    adviceData.risks.forEach(risk => {
+        const li = document.createElement('li');
+        li.textContent = risk;
+        risksList.appendChild(li);
+    });
     
     const optList = document.getElementById('strategyOptimizations');
-    optList.innerHTML = adviceData.optimizations.map(opt => `<li>${opt}</li>`).join('');
+    optList.innerHTML = '';
+    adviceData.optimizations.forEach(opt => {
+        const li = document.createElement('li');
+        li.textContent = opt;
+        optList.appendChild(li);
+    });
 }
 
 async function estimatePremium() {
@@ -1702,95 +1727,18 @@ function updateWheelResult(data) {
     document.getElementById('wheelAnnualizedROI').textContent = `${s.annualized_roi_pct.toFixed(1)}%`;
 }
 
-// 列显示/隐藏功能
-const COLUMN_CONFIG = [
-    { key: 'platform', label: '平台', defaultVisible: true },
-    { key: 'option_type', label: '类型', defaultVisible: true },
-    { key: 'expiry', label: '到期日', defaultVisible: true },
-    { key: 'dte', label: '到期天数', defaultVisible: true },
-    { key: 'strike', label: '行权价', defaultVisible: true },
-    { key: 'delta', label: 'Delta', defaultVisible: true },
-    { key: 'theta', label: 'Theta', defaultVisible: true },
-    { key: 'gamma', label: 'Gamma', defaultVisible: false },
-    { key: 'vega', label: 'Vega', defaultVisible: false },
-    { key: 'mark_iv', label: '隐含波动率', defaultVisible: false },
-    { key: 'apr', label: '年化收益', defaultVisible: true },
-    { key: 'pop', label: 'POP', defaultVisible: true },
-    { key: 'premium', label: '权利金$', defaultVisible: true },
-    { key: 'margin_required', label: '保证金$', defaultVisible: true },
-    { key: 'capital_efficiency', label: '资金效率', defaultVisible: true },
-    { key: 'support_distance_pct', label: '支撑距离', defaultVisible: true },
-    { key: 'liquidity_score', label: '流动性', defaultVisible: false },
-    { key: 'loss_at_10pct', label: '-10%亏损$', defaultVisible: false },
-    { key: 'breakeven', label: '盈亏平衡$', defaultVisible: false },
-    { key: 'breakeven_pct', label: '安全垫%', defaultVisible: true },
-    { key: 'open_interest', label: '持仓量', defaultVisible: false },
-    { key: 'spread_pct', label: '买卖价差', defaultVisible: false },
-    { key: 'iv_rank', label: 'IV Rank', defaultVisible: false },
-    { key: '_score', label: '评分', defaultVisible: false },
-    { key: 'risk', label: '风险等级', defaultVisible: false }
-];
-
-let columnVisibility = {};
-
-function initColumnVisibility() {
-    const saved = localStorage.getItem('columnVisibility');
-    if (saved) {
-        try {
-            columnVisibility = JSON.parse(saved);
-        } catch (e) {
-            columnVisibility = {};
-        }
-    }
-    COLUMN_CONFIG.forEach(col => {
-        if (columnVisibility[col.key] === undefined) {
-            columnVisibility[col.key] = col.defaultVisible;
-        }
-    });
-    renderColumnMenu();
-    applyColumnVisibility();
-}
-
-function toggleColumnMenu() {
-    const menu = document.getElementById('columnMenu');
-    menu.classList.toggle('hidden');
-    if (!menu.classList.contains('hidden')) {
-        renderColumnMenu();
-    }
-}
-
-function renderColumnMenu() {
-    const list = document.getElementById('columnList');
-    list.innerHTML = COLUMN_CONFIG.map(col => `
-        <label class="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 rounded cursor-pointer text-xs">
-            <input type="checkbox" id="col_${col.key}" ${columnVisibility[col.key] ? 'checked' : ''}
-                   onchange="toggleColumn('${col.key}')" class="rounded">
-            <span>${col.label}</span>
-        </label>
-    `).join('');
-}
-
-function toggleColumn(key) {
-    columnVisibility[key] = !columnVisibility[key];
-    localStorage.setItem('columnVisibility', JSON.stringify(columnVisibility));
-    applyColumnVisibility();
-}
-
+// 视图切换功能（仅过滤行数据，不隐藏列）
 const VIEW_PRESETS = {
     sellput: {
-        visible: ['platform', 'option_type', 'expiry', 'dte', 'strike', 'delta', 'theta', 'apr', 'pop', 'premium', 'margin_required', 'capital_efficiency', 'support_distance_pct', 'breakeven_pct'],
         filter: (c) => c.option_type === 'P' || c.option_type === 'PUT'
     },
     coveredcall: {
-        visible: ['platform', 'option_type', 'expiry', 'dte', 'strike', 'delta', 'theta', 'apr', 'pop', 'premium', 'margin_required', 'capital_efficiency', 'breakeven_pct'],
         filter: (c) => c.option_type === 'C' || c.option_type === 'CALL'
     },
     wheel: {
-        visible: ['platform', 'option_type', 'expiry', 'dte', 'strike', 'delta', 'theta', 'apr', 'pop', 'premium', 'margin_required', 'capital_efficiency', 'support_distance_pct', 'breakeven_pct'],
         filter: null
     },
     all: {
-        visible: null,
         filter: null
     }
 };
@@ -1812,19 +1760,6 @@ function switchView(viewName) {
         activeBtn.className = `px-2.5 py-1 rounded text-xs font-medium ${colors[viewName] || ''} border transition`;
     }
 
-    if (preset.visible) {
-        COLUMN_CONFIG.forEach(col => {
-            columnVisibility[col.key] = preset.visible.includes(col.key);
-        });
-    } else {
-        COLUMN_CONFIG.forEach(col => {
-            columnVisibility[col.key] = col.defaultVisible;
-        });
-    }
-    localStorage.setItem('columnVisibility', JSON.stringify(columnVisibility));
-    renderColumnMenu();
-    applyColumnVisibility();
-
     if (currentData && currentData.contracts && preset.filter) {
         const filtered = currentData.contracts.filter(preset.filter);
         updateOpportunitiesTable(filtered);
@@ -1832,53 +1767,6 @@ function switchView(viewName) {
         updateOpportunitiesTable(currentData.contracts);
     }
 }
-
-function applyColumnVisibility() {
-    const headerRow = document.getElementById('tableHeaders');
-    if (!headerRow) return;
-    const headers = headerRow.querySelectorAll('th');
-
-    // 构建列索引到字段名的映射（跳过第0列的展开按钮）
-    const colIndexToKey = {};
-    headers.forEach((th, idx) => {
-        if (idx === 0) return; // 跳过展开按钮列
-        const sortKey = th.dataset.sort;
-        if (sortKey) {
-            colIndexToKey[idx - 1] = sortKey; // body列索引 = header列索引 - 1
-        }
-    });
-
-    // 过滤表头
-    headers.forEach(th => {
-        const sortKey = th.dataset.sort;
-        if (sortKey && columnVisibility.hasOwnProperty(sortKey)) {
-            th.style.display = columnVisibility[sortKey] ? '' : 'none';
-        }
-    });
-
-    // 过滤表格body
-    const tbody = document.getElementById('opportunitiesTable');
-    if (tbody) {
-        const rows = tbody.querySelectorAll('tr[data-symbol]');
-        rows.forEach(row => {
-            const cells = row.querySelectorAll('td');
-            cells.forEach((td, idx) => {
-                const key = colIndexToKey[idx];
-                if (key && columnVisibility.hasOwnProperty(key)) {
-                    td.style.display = columnVisibility[key] ? '' : 'none';
-                }
-            });
-        });
-    }
-}
-
-document.addEventListener('click', (e) => {
-    const menu = document.getElementById('columnMenu');
-    const btn = document.getElementById('columnToggleBtn');
-    if (menu && !menu.classList.contains('hidden') && !menu.contains(e.target) && !btn.contains(e.target)) {
-        menu.classList.add('hidden');
-    }
-});
 
 // 排序功能
 let currentSort = { field: null, direction: 'desc' };

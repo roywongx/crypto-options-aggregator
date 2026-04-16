@@ -307,7 +307,7 @@
                     </div>
                     <div>
                         <label class="block text-gray-400 text-xs mb-1">现货价格 ($)</label>
-                        <input type="number" id="payoffSpot" value="73000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                        <input type="number" id="payoffSpot" value="" placeholder="自动获取" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
                 </div>
                 <div class="flex gap-2 mb-4">
@@ -361,10 +361,6 @@
                         </div>
                     </div>
                 </div>
-                
-                <button onclick="calcPayoff()" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
-                    <i class="fas fa-calculator mr-1"></i>计算 Payoff
-                </button>
             </div>
 
             <!-- Wheel 策略模式 -->
@@ -599,23 +595,42 @@
                 </div>
                 <div>
                     <label class="block text-gray-400 text-xs mb-1">Put 数量</label>
-                    <input type="number" id="gridPutCount" value="5" min="1" max="10" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    <input type="number" id="gridPutCount" value="7" min="1" max="15" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-gray-400 text-xs mb-1">Call 数量</label>
-                    <input type="number" id="gridCallCount" value="3" min="1" max="10" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    <input type="number" id="gridCallCount" value="0" min="0" max="10" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-gray-400 text-xs mb-1">最小 DTE</label>
-                    <input type="number" id="gridMinDte" value="7" min="1" max="90" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    <input type="number" id="gridMinDte" value="14" min="1" max="90" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-gray-400 text-xs mb-1">最大 DTE</label>
-                    <input type="number" id="gridMaxDte" value="45" min="1" max="180" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    <input type="number" id="gridMaxDte" value="90" min="1" max="180" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
                     <label class="block text-gray-400 text-xs mb-1">最小 APR%</label>
-                    <input type="number" id="gridMinApr" value="15" min="0" max="200" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    <input type="number" id="gridMinApr" value="8" min="0" max="200" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                </div>
+            </div>
+            
+            <!-- 预设选择 -->
+            <div class="mb-4">
+                <label class="block text-gray-400 text-xs mb-2">策略预设</label>
+                <div id="gridPresetButtons" class="flex flex-wrap gap-2">
+                    <button type="button" onclick="applyGridPreset('sell_put_grid')" data-preset="sell_put_grid" class="px-3 py-1.5 text-xs rounded-lg border border-purple-500/40 bg-purple-500/15 text-purple-300 hover:bg-purple-500/20 transition font-medium ring-1 ring-purple-500/30">
+                        <i class="fas fa-star mr-1"></i>Sell Put 网格
+                    </button>
+                    <button type="button" onclick="applyGridPreset('conservative')" data-preset="conservative" class="px-3 py-1.5 text-xs rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition font-medium">
+                        保守型
+                    </button>
+                    <button type="button" onclick="applyGridPreset('balanced')" data-preset="balanced" class="px-3 py-1.5 text-xs rounded-lg border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 transition font-medium">
+                        双卖网格
+                    </button>
+                    <button type="button" onclick="applyGridPreset('aggressive')" data-preset="aggressive" class="px-3 py-1.5 text-xs rounded-lg border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 transition font-medium">
+                        激进型
+                    </button>
                 </div>
             </div>
             
@@ -749,15 +764,6 @@
                             <button onclick="switchView('coveredcall')" id="viewCoveredCall" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-blue-500/20 hover:text-blue-400 hover:border-blue-500/30">Covered Call</button>
                             <button onclick="switchView('wheel')" id="viewWheel" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-purple-500/20 hover:text-purple-400 hover:border-purple-500/30">Wheel</button>
                             <button onclick="switchView('all')" id="viewAll" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-orange-500/20 hover:text-orange-400 hover:border-orange-500/30">全部</button>
-                        </div>
-                        <div class="relative ml-2">
-                            <button id="columnToggleBtn" onclick="toggleColumnMenu()" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs flex items-center gap-1">
-                                <i class="fas fa-columns"></i> 列
-                            </button>
-                            <div id="columnMenu" class="hidden absolute left-0 top-full mt-2 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl p-3 min-w-56 z-[99999]" style="z-index: 99999 !important;">
-                                <div class="text-xs text-gray-400 mb-2 px-2">显示/隐藏列</div>
-                                <div id="columnList" class="space-y-1 max-h-64 overflow-y-auto"></div>
-                            </div>
                         </div>
                     </h2>
                     <div class="flex items-center gap-3">
@@ -1176,7 +1182,7 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=816&t=1775668000"></script>
-    <script src="/static/grid-strategy.js?v=816&t=1775668000"></script>
-<div style="display:none" data-app-version="v810"></div></body>
+    <script src="/static/app.js?v=823&t=1776370000"></script>
+    <script src="/static/grid-strategy.js?v=823&t=1776370000"></script>
+<div style="display:none" data-app-version="v823"></div></body>
 </html>

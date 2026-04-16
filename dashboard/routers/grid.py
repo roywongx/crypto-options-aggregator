@@ -9,6 +9,7 @@ from services.grid_engine import (
     calculate_grid_levels
 )
 from models.grid import GridDirection
+from constants import get_spot_fallback, get_dynamic_spot_price
 
 router = APIRouter(prefix="/api/grid", tags=["grid"])
 
@@ -27,7 +28,7 @@ def _get_contracts_from_db(currency: str):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT contracts_data FROM scan_records
-            WHERE currency = ? AND timestamp > datetime('now', '-1 day')
+            WHERE currency = ? AND timestamp > datetime('now', '-3 days')
             ORDER BY timestamp DESC LIMIT 1
         """, (currency,))
         row = cursor.fetchone()
@@ -49,23 +50,21 @@ def _get_contracts_from_db(currency: str):
 @router.get("/recommend")
 async def get_grid_recommend(
     currency: str = Query("BTC", pattern="^(BTC|ETH|SOL)$"),
-    put_count: int = Query(5, ge=1, le=10),
-    call_count: int = Query(3, ge=1, le=10),
-    min_dte: int = Query(7, ge=1, le=90),
-    max_dte: int = Query(45, ge=1, le=180),
-    min_apr: float = Query(15.0, ge=0, le=200),
+    put_count: int = Query(7, ge=1, le=15),
+    call_count: int = Query(0, ge=0, le=10),
+    min_dte: int = Query(14, ge=1, le=90),
+    max_dte: int = Query(90, ge=1, le=180),
+    min_apr: float = Query(8.0, ge=0, le=200),
     use_smart: bool = Query(False, description="是否使用智能推荐")
 ):
     try:
         from main import get_spot_price
 
-        spot_price = get_spot_price(currency)
-        if not spot_price or spot_price <= 0:
-            spot_price = 83000.0
+        spot_price = get_dynamic_spot_price(currency)
 
         contracts = _get_contracts_from_db(currency)
-
-        # 智能推荐模式：根据市场状态自动调整参数
+        
+        vol_signal = None
         if use_smart:
             vol_signal = get_vol_direction_signal(contracts, currency)
             dvol_pct = vol_signal.dvol_percentile
@@ -109,9 +108,9 @@ async def get_grid_recommend(
             "timestamp": recommendation.timestamp,
             "smart_mode": use_smart,
             "market_context": {
-                "dvol_percentile": vol_signal.dvol_percentile if use_smart else None,
-                "vol_signal": vol_signal.signal if use_smart else None,
-                "adjusted_reason": vol_signal.reason if use_smart else None
+                "dvol_percentile": vol_signal.dvol_percentile if vol_signal else None,
+                "vol_signal": vol_signal.signal if vol_signal else None,
+                "adjusted_reason": vol_signal.reason if vol_signal else None
             },
             "put_levels": [
                 {
@@ -164,8 +163,7 @@ async def get_grid_recommend(
         return {"error": str(e)}
 
 def _calc_suggested_position(level) -> int:
-    """根据合约评分计算建议仓位百分比"""
-    score = level.recommendation
+    score = level.recommendation.name if hasattr(level.recommendation, 'name') else str(level.recommendation)
     if score == "BEST":
         return 20
     elif score == "GOOD":
@@ -241,6 +239,9 @@ async def get_vol_direction(
 async def post_grid_scenario(request: ScenarioRequest):
     try:
         from services.grid_engine import GridLevel, GridDirection as GD
+        from main import get_spot_price
+
+        spot_price = get_dynamic_spot_price(request.currency)
 
         grid_levels = []
         for gl in request.grid_levels:
@@ -266,7 +267,7 @@ async def post_grid_scenario(request: ScenarioRequest):
         for target_price in request.target_prices:
             result = simulate_scenario(
                 grid_levels=grid_levels,
-                spot_price=83000.0,
+                spot_price=spot_price,
                 target_price=target_price,
                 position_size=request.position_size
             )
@@ -285,17 +286,15 @@ async def get_grid_heatmap(
     try:
         from main import get_spot_price
 
-        spot_price = get_spot_price(currency)
-        if not spot_price or spot_price <= 0:
-            spot_price = 83000.0
+        spot_price = get_dynamic_spot_price(currency)
 
         contracts = _get_contracts_from_db(currency)
 
         put_levels = calculate_grid_levels(
-            contracts, spot_price, GridDirection.PUT, 5, 7, 45, 15.0
+            contracts, spot_price, GridDirection.PUT, 7, 14, 90, 8.0
         )
         call_levels = calculate_grid_levels(
-            contracts, spot_price, GridDirection.CALL, 3, 7, 45, 15.0
+            contracts, spot_price, GridDirection.CALL, 0, 14, 90, 8.0
         )
 
         heatmap = calculate_heatmap_data(contracts, spot_price, put_levels, call_levels)
@@ -344,7 +343,10 @@ async def get_revenue_summary(
 
         avg_daily_premium = total_premium / max(1, scan_count)
         annualized_premium = avg_daily_premium * 365
-        annualized_rate = (annualized_premium / 83000.0) * 100
+        
+        from main import get_spot_price
+        spot_for_calc = get_dynamic_spot_price(currency)
+        annualized_rate = (annualized_premium / spot_for_calc) * 100
 
         return {
             "currency": currency,
@@ -367,39 +369,51 @@ async def get_grid_presets():
     return {
         "presets": [
             {
+                "id": "sell_put_grid",
+                "name": "Sell Put 网格（推荐）",
+                "description": "持续做多策略，跌了就滚仓/加仓回本",
+                "put_count": 7,
+                "call_count": 0,
+                "min_dte": 14,
+                "max_dte": 90,
+                "min_apr": 8.0,
+                "suggested_position": "60-80%",
+                "features": ["专注 Sell Put", "宽价格梯度", "适合长期看涨", "滚仓灵活"]
+            },
+            {
                 "id": "conservative",
                 "name": "保守型",
                 "description": "低风险，稳定收益 - 适合震荡市",
                 "put_count": 3,
-                "call_count": 2,
-                "min_dte": 14,
-                "max_dte": 30,
-                "min_apr": 20.0,
+                "call_count": 0,
+                "min_dte": 21,
+                "max_dte": 45,
+                "min_apr": 12.0,
                 "suggested_position": "30-50%",
                 "features": ["安全距离充足", "流动性好", "Theta 衰减快"]
             },
             {
                 "id": "balanced",
-                "name": "均衡型",
-                "description": "平衡风险与收益 - 适合温和波动",
+                "name": "双卖网格",
+                "description": "Sell Put + Sell Call 平衡收益",
                 "put_count": 5,
                 "call_count": 3,
-                "min_dte": 7,
-                "max_dte": 45,
-                "min_apr": 15.0,
+                "min_dte": 14,
+                "max_dte": 60,
+                "min_apr": 10.0,
                 "suggested_position": "50-70%",
-                "features": ["收益适中", "分散风险", "灵活调整"]
+                "features": ["双向收租", "分散风险", "灵活调整"]
             },
             {
                 "id": "aggressive",
                 "name": "激进型",
                 "description": "高风险，高收益 - 适合高波动环境",
-                "put_count": 7,
-                "call_count": 5,
-                "min_dte": 7,
-                "max_dte": 60,
-                "min_apr": 10.0,
-                "suggested_position": "70-100%",
+                "put_count": 10,
+                "call_count": 0,
+                "min_dte": 14,
+                "max_dte": 120,
+                "min_apr": 5.0,
+                "suggested_position": "80-100%",
                 "features": ["权利金收入高", "覆盖范围广", "需密切监控"]
             },
             {
@@ -413,33 +427,33 @@ async def get_grid_presets():
         "parameter_guide": {
             "min_dte": {
                 "label": "最短到期天数",
-                "description": "小于此天数的合约不会被推荐",
-                "suggested_range": "7-21 天",
-                "tips": "较短 DTE Theta 衰减快，但风险较高；较长 DTE 权利金高，但资金占用时间长"
+                "description": "小于此天数的合约不会被推荐。Sell Put 滚仓建议至少 14 天以上",
+                "suggested_range": "14-30 天",
+                "tips": "较短 DTE Theta 衰减快，但滚仓空间小；较长 DTE 权利金高，滚仓灵活，但资金占用时间长"
             },
             "max_dte": {
                 "label": "最长到期天数",
-                "description": "大于此天数的合约不会被推荐",
-                "suggested_range": "30-60 天",
-                "tips": "限制最大 DTE 可避免资金长期占用，提高资金利用率"
+                "description": "大于此天数的合约不会被推荐。建议 60-120 天以便滚仓操作",
+                "suggested_range": "60-120 天",
+                "tips": "限制最大 DTE 可避免资金长期占用，但 Sell Put 策略建议留足滚仓空间"
             },
             "min_apr": {
                 "label": "最低年化收益率",
-                "description": "低于此 APR 的合约不会被推荐",
-                "suggested_range": "10-30%",
-                "tips": "较高的 APR 要求会减少可选合约数量，但提高整体收益质量"
+                "description": "低于此 APR 的合约不会被推荐。持续做多建议 5-10% 即可",
+                "suggested_range": "5-15%",
+                "tips": "较高的 APR 要求会减少可选合约数量。Sell Put 策略应优先保证覆盖范围，APR 要求可适当放宽"
             },
             "put_count": {
                 "label": "Put 网格数量",
-                "description": "推荐多少个 Put 合约",
-                "suggested_range": "3-7 个",
-                "tips": "较多数量可分散风险，但管理复杂度增加"
+                "description": "推荐多少个 Put 合约。持续做多建议 5-10 个，形成价格梯度",
+                "suggested_range": "5-10 个",
+                "tips": "较多数量可覆盖更宽的价格范围，跌了可以加仓滚仓回本"
             },
             "call_count": {
                 "label": "Call 网格数量",
-                "description": "推荐多少个 Call 合约",
-                "suggested_range": "2-5 个",
-                "tips": "Call 端通常少于 Put 端，因为上涨风险理论上无限"
+                "description": "推荐多少个 Call 合约。持续做多策略建议设为 0",
+                "suggested_range": "0-3 个",
+                "tips": "Sell Put 策略不需要 Call。如需双卖收租可设置 2-3 个 Call"
             }
         }
     }

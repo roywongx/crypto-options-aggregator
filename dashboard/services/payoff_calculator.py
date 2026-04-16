@@ -130,7 +130,18 @@ class PayoffCalculator:
         
         max_profit = result['max_profit']
         max_loss = abs(result['max_loss'])
-        capital_at_risk = max_loss if max_loss > 0 else max_profit
+        
+        leg = legs[0] if legs else {}
+        direction = leg.get("direction", "sell")
+        option_type = leg.get("option_type", "P")
+        strike = leg.get("strike", spot)
+        
+        if direction == "sell" and option_type in ("P", "PUT"):
+            capital_at_risk = strike
+        elif direction == "sell" and option_type in ("C", "CALL"):
+            capital_at_risk = strike
+        else:
+            capital_at_risk = max_loss if max_loss > 0 else abs(max_profit)
         
         roi = (max_profit / capital_at_risk * 100) if capital_at_risk > 0 else 0
         apr = (roi * 365 / dte) if dte > 0 else 0
@@ -212,24 +223,19 @@ class PayoffCalculator:
         
         if total_score >= 80:
             rating = "强烈推荐"
-            rating_color = "text-green-400"
-            bg_color = "bg-green-500/10 border-green-500/30"
+            rating_level = "green"
         elif total_score >= 70:
             rating = "推荐"
-            rating_color = "text-emerald-400"
-            bg_color = "bg-emerald-500/10 border-emerald-500/30"
+            rating_level = "emerald"
         elif total_score >= 60:
             rating = "中性"
-            rating_color = "text-yellow-400"
-            bg_color = "bg-yellow-500/10 border-yellow-500/30"
+            rating_level = "yellow"
         elif total_score >= 50:
             rating = "谨慎"
-            rating_color = "text-orange-400"
-            bg_color = "bg-orange-500/10 border-orange-500/30"
+            rating_level = "orange"
         else:
             rating = "不推荐"
-            rating_color = "text-red-400"
-            bg_color = "bg-red-500/10 border-red-500/30"
+            rating_level = "red"
         
         leg = legs[0] if legs else {}
         direction = leg.get("direction", "sell")
@@ -274,8 +280,7 @@ class PayoffCalculator:
         
         return {
             "rating": rating,
-            "rating_color": rating_color,
-            "bg_color": bg_color,
+            "rating_level": rating_level,
             "scenario": scenario,
             "advice_text": advice_text,
             "risks": risks,

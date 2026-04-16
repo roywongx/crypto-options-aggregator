@@ -1,12 +1,21 @@
 /**
  * 网格策略前端实现
- * v8.1: 合并版 - 完整参数 + 情景模拟
+ * v8.1: 合并版 - 完整参数 + 情景模拟 + 预设功能
  */
+
+function gridSafeHTML(str) {
+    if (str == null) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 
 let gridData = null;
 let gridChart = null;
+let gridPresets = {};
+let currentGridPreset = 'sell_put_grid';
 
 async function initGridStrategy() {
+    await loadGridPresets();
+    
     const gridCurrency = document.getElementById('gridCurrency');
     const gridPutCount = document.getElementById('gridPutCount');
     const gridCallCount = document.getElementById('gridCallCount');
@@ -21,7 +30,55 @@ async function initGridStrategy() {
     if (gridMaxDte) gridMaxDte.addEventListener('change', loadGridStrategy);
     if (gridMinApr) gridMinApr.addEventListener('change', loadGridStrategy);
     
+    applyGridPreset('sell_put_grid');
     await loadGridStrategy();
+}
+
+async function loadGridPresets() {
+    try {
+        const response = await safeFetch(`${API_BASE}/api/grid/presets`);
+        const data = await response.json();
+        if (data.presets) {
+            gridPresets = {};
+            data.presets.forEach(p => {
+                gridPresets[p.id] = p;
+            });
+        }
+    } catch (error) {
+        console.error('加载网格预设失败:', error);
+    }
+}
+
+function applyGridPreset(presetId) {
+    const preset = gridPresets[presetId];
+    if (!preset) return;
+    
+    currentGridPreset = presetId;
+    
+    if (preset.put_count !== undefined) document.getElementById('gridPutCount').value = preset.put_count;
+    if (preset.call_count !== undefined) document.getElementById('gridCallCount').value = preset.call_count;
+    if (preset.min_dte !== undefined) document.getElementById('gridMinDte').value = preset.min_dte;
+    if (preset.max_dte !== undefined) document.getElementById('gridMaxDte').value = preset.max_dte;
+    if (preset.min_apr !== undefined) document.getElementById('gridMinApr').value = preset.min_apr;
+    
+    document.querySelectorAll('#gridPresetButtons button').forEach(btn => {
+        btn.classList.remove('ring-1', 'bg-purple-500/15', 'text-purple-300', 'ring-purple-500/30',
+            'bg-green-500/15', 'text-green-300', 'ring-green-500/30',
+            'bg-blue-500/15', 'text-blue-300', 'ring-blue-500/30',
+            'bg-orange-500/15', 'text-orange-300', 'ring-orange-500/30');
+    });
+    
+    const activeBtn = document.querySelector(`#gridPresetButtons button[data-preset="${presetId}"]`);
+    if (activeBtn) {
+        const colorMap = {
+            'sell_put_grid': 'purple',
+            'conservative': 'green',
+            'balanced': 'blue',
+            'aggressive': 'orange'
+        };
+        const c = colorMap[presetId] || 'purple';
+        activeBtn.classList.add(`bg-${c}-500/15`, `text-${c}-300`, `ring-1`, `ring-${c}-500/30`);
+    }
 }
 
 async function loadGridStrategy() {
@@ -30,11 +87,11 @@ async function loadGridStrategy() {
         if (!currencyEl) return;
         
         const currency = currencyEl.value;
-        const putCount = document.getElementById('gridPutCount')?.value || 5;
-        const callCount = document.getElementById('gridCallCount')?.value || 3;
-        const minDte = document.getElementById('gridMinDte')?.value || 7;
-        const maxDte = document.getElementById('gridMaxDte')?.value || 45;
-        const minApr = document.getElementById('gridMinApr')?.value || 15;
+        const putCount = document.getElementById('gridPutCount')?.value || 7;
+        const callCount = document.getElementById('gridCallCount')?.value || 0;
+        const minDte = document.getElementById('gridMinDte')?.value || 14;
+        const maxDte = document.getElementById('gridMaxDte')?.value || 90;
+        const minApr = document.getElementById('gridMinApr')?.value || 8;
         
         const loadingEl = document.getElementById('gridLoading');
         if (loadingEl) loadingEl.classList.remove('hidden');
@@ -67,23 +124,30 @@ function updateGridDisplay(data) {
         if (data.put_levels.length === 0) {
             putLevelsDiv.innerHTML = '<div class="text-center text-gray-500 py-4">无符合条件的Put档位</div>';
         } else {
-            putLevelsDiv.innerHTML = data.put_levels.map(level => `
-                <div class="bg-gray-800/50 p-3 rounded-lg border-l-4 border-green-500">
+            putLevelsDiv.innerHTML = '';
+            data.put_levels.forEach(level => {
+                const card = document.createElement('div');
+                card.className = 'bg-gray-800/50 p-3 rounded-lg border-l-4 border-green-500';
+                card.innerHTML = `
                     <div class="flex justify-between items-center">
                         <div>
                             <div class="text-sm font-medium">Sell Put</div>
-                            <div class="text-lg font-bold">$${level.strike.toLocaleString()}</div>
-                            <div class="text-xs text-gray-400">${level.dte}天 · Delta ${level.delta} · 距离${level.distance_pct}%</div>
+                            <div class="text-lg font-bold">$${gridSafeHTML(level.strike.toLocaleString())}</div>
+                            <div class="text-xs text-gray-400">${gridSafeHTML(level.dte)}天 · Delta ${gridSafeHTML(level.delta)} · 距离${gridSafeHTML(level.distance_pct)}%</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-green-400 font-bold">${level.apr}% APR</div>
-                            <div class="text-xs text-gray-400">$${level.premium_usd}</div>
-                            <div class="text-xs ${getRecommendationColor(level.recommendation)}">${level.recommendation}</div>
+                            <div class="text-green-400 font-bold">${gridSafeHTML(level.apr)}% APR</div>
+                            <div class="text-xs text-gray-400">$${gridSafeHTML(level.premium_usd)}</div>
+                            <div class="text-xs ${getRecommendationColor(level.recommendation)}">${gridSafeHTML(level.recommendation)}</div>
                         </div>
                     </div>
-                    <div class="mt-1 text-xs text-gray-500">${level.reason || ''}</div>
-                </div>
-            `).join('');
+                `;
+                const reasonDiv = document.createElement('div');
+                reasonDiv.className = 'mt-1 text-xs text-gray-500';
+                reasonDiv.textContent = level.reason || '';
+                card.appendChild(reasonDiv);
+                putLevelsDiv.appendChild(card);
+            });
         }
     }
     
@@ -92,23 +156,30 @@ function updateGridDisplay(data) {
         if (data.call_levels.length === 0) {
             callLevelsDiv.innerHTML = '<div class="text-center text-gray-500 py-4">无符合条件的Call档位</div>';
         } else {
-            callLevelsDiv.innerHTML = data.call_levels.map(level => `
-                <div class="bg-gray-800/50 p-3 rounded-lg border-l-4 border-blue-500">
+            callLevelsDiv.innerHTML = '';
+            data.call_levels.forEach(level => {
+                const card = document.createElement('div');
+                card.className = 'bg-gray-800/50 p-3 rounded-lg border-l-4 border-blue-500';
+                card.innerHTML = `
                     <div class="flex justify-between items-center">
                         <div>
                             <div class="text-sm font-medium">Sell Call</div>
-                            <div class="text-lg font-bold">$${level.strike.toLocaleString()}</div>
-                            <div class="text-xs text-gray-400">${level.dte}天 · Delta ${level.delta} · 距离+${Math.abs(level.distance_pct)}%</div>
+                            <div class="text-lg font-bold">$${gridSafeHTML(level.strike.toLocaleString())}</div>
+                            <div class="text-xs text-gray-400">${gridSafeHTML(level.dte)}天 · Delta ${gridSafeHTML(level.delta)} · 距离+${gridSafeHTML(Math.abs(level.distance_pct))}%</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-blue-400 font-bold">${level.apr}% APR</div>
-                            <div class="text-xs text-gray-400">$${level.premium_usd}</div>
-                            <div class="text-xs ${getRecommendationColor(level.recommendation)}">${level.recommendation}</div>
+                            <div class="text-blue-400 font-bold">${gridSafeHTML(level.apr)}% APR</div>
+                            <div class="text-xs text-gray-400">$${gridSafeHTML(level.premium_usd)}</div>
+                            <div class="text-xs ${getRecommendationColor(level.recommendation)}">${gridSafeHTML(level.recommendation)}</div>
                         </div>
                     </div>
-                    <div class="mt-1 text-xs text-gray-500">${level.reason || ''}</div>
-                </div>
-            `).join('');
+                `;
+                const reasonDiv = document.createElement('div');
+                reasonDiv.className = 'mt-1 text-xs text-gray-500';
+                reasonDiv.textContent = level.reason || '';
+                card.appendChild(reasonDiv);
+                callLevelsDiv.appendChild(card);
+            });
         }
     }
     
@@ -122,10 +193,10 @@ function updateGridDisplay(data) {
         
         signalDiv.innerHTML = `
             <div class="bg-gray-800/50 p-4 rounded-lg space-y-2">
-                <div class="text-lg font-bold ${getSignalColor(data.dvol_signal)}">${signalLabels[data.dvol_signal] || data.dvol_signal}</div>
-                <div class="text-sm text-gray-300">推荐比例: <b>${data.recommended_ratio || '5:5'}</b></div>
-                <div class="text-sm text-gray-300">潜在总权利金: <b class="text-green-400">$${(data.total_potential_premium || 0).toLocaleString()}</b></div>
-                <div class="text-sm text-gray-300">现货: <b>$${(data.spot_price || 0).toLocaleString()}</b></div>
+                <div class="text-lg font-bold ${getSignalColor(data.dvol_signal)}">${gridSafeHTML(signalLabels[data.dvol_signal] || data.dvol_signal)}</div>
+                <div class="text-sm text-gray-300">推荐比例: <b>${gridSafeHTML(data.recommended_ratio || '5:5')}</b></div>
+                <div class="text-sm text-gray-300">潜在总权利金: <b class="text-green-400">$${gridSafeHTML((data.total_potential_premium || 0).toLocaleString())}</b></div>
+                <div class="text-sm text-gray-300">现货: <b>$${gridSafeHTML((data.spot_price || 0).toLocaleString())}</b></div>
             </div>
         `;
     }
@@ -238,15 +309,15 @@ function renderGridScenarios(data) {
         }, 0);
         
         const totalPnl = putPnl + callPnl;
-        const isCurrent = s.price === spot;
+        const isCurrent = Math.abs(s.price - spot) < 0.01;
         const pnlColor = totalPnl >= 0 ? 'text-green-400' : 'text-red-400';
         const bgColor = isCurrent ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800/40';
         
         return `
             <div class="p-3 ${bgColor} rounded-lg border ${isCurrent ? 'border-purple-500/30' : 'border-gray-700/30'}">
-                <div class="text-xs text-gray-400 mb-1">${s.label}</div>
-                <div class="text-sm font-medium">$${s.price.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
-                <div class="text-sm font-bold ${pnlColor}">$${totalPnl.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+                <div class="text-xs text-gray-400 mb-1">${gridSafeHTML(s.label)}</div>
+                <div class="text-sm font-medium">$${gridSafeHTML(s.price.toLocaleString(undefined, {maximumFractionDigits: 0}))}</div>
+                <div class="text-sm font-bold ${pnlColor}">$${gridSafeHTML(totalPnl.toLocaleString(undefined, {maximumFractionDigits: 0}))}</div>
             </div>
         `;
     }).join('');

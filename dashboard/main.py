@@ -301,12 +301,12 @@ async def get_latest(currency: str = Query(default="BTC")):
         }
 
     try:
-        contracts = json.loads(row[6]) if row[6] else []
+        contracts = json.loads(row[7]) if row[7] else []
     except Exception:
         contracts = []
 
     try:
-        large_trades = json.loads(row[5]) if row[5] else []
+        large_trades = json.loads(row[6]) if row[6] else []
     except Exception:
         large_trades = []
 
@@ -430,7 +430,9 @@ def _quick_scan_sync(params: QuickScanParams = None):
             
             req_type = _p.option_type.upper()
             req_type_short = "P" if req_type == "PUT" else "C"
-            if meta.option_type != req_type_short: continue
+            # 如果 option_type 为 "ALL" 或 "BOTH"，则获取所有合约
+            fetch_all = req_type in ("ALL", "BOTH")
+            if not fetch_all and meta.option_type != req_type_short: continue
                 
             iv = float(s.get("mark_iv") or 0) / 100.0
             prem = float(s.get("mark_price") or 0)
@@ -495,12 +497,13 @@ def _quick_scan_sync(params: QuickScanParams = None):
         import time
         now_ms = time.time() * 1000
         req_type = _p.option_type.upper()
+        fetch_all = req_type in ("ALL", "BOTH")
         max_delta = _p.max_delta
         margin_ratio = _p.margin_ratio
 
         for s in r_info.get('optionSymbols', []):
             if s['underlying'] != f"{currency}USDT": continue
-            if s['side'] != req_type: continue
+            if not fetch_all and s['side'] != req_type: continue
             
             dte = (s['expiryDate'] - now_ms) / 86400000
             if dte <= 0: continue

@@ -7,6 +7,7 @@ from models.grid import (
     GridLevel, GridRecommendation, GridScenario,
     GridDirection, RecommendationLevel, VolDirectionSignal
 )
+from constants import get_dynamic_spot_price
 
 try:
     import numpy as np
@@ -82,6 +83,14 @@ def calculate_grid_levels(
     max_dte: int = 45,
     min_apr: float = 15.0
 ) -> List[GridLevel]:
+    """
+    计算网格档位
+    
+    去重策略：
+    - 按 strike 去重，同一行权价只保留最高分的合约
+    - 网格需要价格梯度，相同strike的多个合约只选最优
+    - 如果需要更多档位，应降低 min_apr 扩大筛选范围
+    """
     if not contracts or spot_price <= 0:
         return []
 
@@ -89,8 +98,11 @@ def calculate_grid_levels(
 
     candidates = []
     for c in contracts:
-        c_type = c.get("type", "")
-        if c_type.upper() != target_type:
+        c_type = c.get("type", "") or c.get("option_type", "")
+        c_type_upper = c_type.upper()
+        
+        valid_types = {"P", "PUT"} if target_type == "P" else {"C", "CALL"}
+        if c_type_upper not in valid_types:
             continue
 
         try:
@@ -149,32 +161,20 @@ def calculate_grid_levels(
         except (ValueError, TypeError):
             continue
 
+    # 按分数排序
     candidates.sort(key=lambda x: _calc_grid_score(x.apr, x.distance_pct, x.oi, x.volume, x.dte), reverse=True)
 
-    selected = []
-    seen_strikes = set()
+    # 去重：同一 strike 只保留分数最高的一个
+    selected_by_strike = {}
     for c in candidates:
-        strike_pct_diff = 0
-        for s in seen_strikes:
-            diff = abs(c.strike - s) / s * 100
-            if diff < 2:
-                strike_pct_diff = diff
-                break
+        if c.strike not in selected_by_strike:
+            selected_by_strike[c.strike] = c
 
-        if strike_pct_diff < 2:
-            continue
+    # 按距离排序（从近到远），形成价格梯度
+    unique_candidates = sorted(selected_by_strike.values(), key=lambda x: abs(x.distance_pct))
 
-        selected.append(c)
-        seen_strikes.add(c.strike)
-
-        if len(selected) >= count:
-            break
-
-    if len(selected) < count and min_apr > 5:
-        return calculate_grid_levels(
-            contracts, spot_price, direction, count,
-            min_dte, max_dte, min_apr - 10
-        )
+    # 选择前 count 个
+    selected = unique_candidates[:count]
 
     return selected
 
@@ -220,7 +220,11 @@ def get_vol_direction_signal(
 
     dvol_percentile = 50.0
     if dvol_30d_avg > 0:
-        dvol_percentile = min(100, max(0, (dvol_current / dvol_30d_avg - 0.5) * 200 + 50))
+        ratio = dvol_current / dvol_30d_avg
+        if ratio > 1.0:
+            dvol_percentile = min(100, 50 + (ratio - 1.0) * 100)
+        else:
+            dvol_percentile = max(0, 50 - (1.0 - ratio) * 100)
 
     put_iv_avg = sum(put_ivs) / len(put_ivs) if put_ivs else 50.0
     call_iv_avg = sum(call_ivs) / len(call_ivs) if call_ivs else 50.0
@@ -273,7 +277,7 @@ def recommend_grid(
     prefer_short_dte: bool = True
 ) -> GridRecommendation:
     if not spot_price or spot_price <= 0:
-        spot_price = 83000.0
+        spot_price = get_dynamic_spot_price(currency)
 
     put_levels = calculate_grid_levels(
         contracts, spot_price, GridDirection.PUT,
@@ -316,6 +320,7 @@ def simulate_scenario(
         premium = level.premium_usd * position_size
         total_premium += premium
 
+        exercise_loss = 0
         if level.direction == GridDirection.PUT:
             if target_price < level.strike:
                 exercise_loss = (level.strike - target_price) * position_size * 100
@@ -329,6 +334,8 @@ def simulate_scenario(
             else:
                 net_pnl = premium
 
+        total_exercise_loss += exercise_loss
+
         level_results.append({
             "strike": level.strike,
             "premium": round(premium, 2),
@@ -336,13 +343,14 @@ def simulate_scenario(
             "exercised": target_price < level.strike if level.direction == GridDirection.PUT else target_price > level.strike
         })
 
-    total_pnl = total_premium - total_exercise_loss + (spot_pnl * 100 if spot_pnl > 0 else spot_pnl * 100)
+    total_pnl = total_premium - total_exercise_loss
     vs_hold_pnl = total_pnl - (spot_pnl * 100)
 
     return {
         "target_price": target_price,
         "spot_pnl": round(spot_pnl * 100, 2),
         "total_premium": round(total_premium, 2),
+        "total_exercise_loss": round(total_exercise_loss, 2),
         "level_results": level_results,
         "total_pnl": round(total_pnl, 2),
         "vs_hold_pnl": round(vs_hold_pnl, 2)

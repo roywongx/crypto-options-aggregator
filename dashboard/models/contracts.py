@@ -31,7 +31,7 @@ class QuickScanParams(BaseModel):
     max_dte: int = Field(default=35, ge=1, le=365)
     max_delta: float = Field(default=0.4, ge=0.01, le=1.0)
     margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
-    option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$")
+    option_type: str = Field(default="ALL", pattern="^(PUT|CALL|ALL|BOTH)$")
     strike: Optional[float] = Field(default=None, gt=0)
     strike_range: Optional[str] = Field(default=None)
 

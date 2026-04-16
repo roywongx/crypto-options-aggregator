@@ -1,4 +1,6 @@
 # Routers - Scan
+# DEPRECATED: 此文件是死代码，routers 从未被 main.py include
+# 所有路由已在 main.py 中直接定义。此文件保留仅作为参考，未来版本可删除。
 from fastapi import APIRouter, Query, Body
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any

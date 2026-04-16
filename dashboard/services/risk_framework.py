@@ -29,7 +29,7 @@ class RiskFramework:
         
         # 缓存1小时
         if (cls._cached_floors and cls._cache_timestamp and 
-            (now - cls._cache_timestamp).seconds < 3600):
+            (now - cls._cache_timestamp).total_seconds() < 3600):
             return cls._cached_floors
         
         # 重新计算

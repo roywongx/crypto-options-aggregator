@@ -95,7 +95,7 @@ async def _calc_max_pain_internal(currency: str):
                        "net_oi_exposure": round(net_oi_exposure, 0),
                        "call_oi_above": round(call_oi_above, 0), "put_oi_below": round(put_oi_below, 0)})
             cs = 1 if net_oi_exposure >= 0 else -1
-            if prev_sign is not None and cs != prev_sign:
+            if prev_sign is not None and cs != prev_sign and flip is None:
                 flip = ts
             prev_sign = cs
 
