@@ -779,6 +779,12 @@ function updateRiskDashboardUI(data) {
     
     // 更新链上核心指标（v8.1新增）
     updateOnchainMetrics(data.onchain_metrics);
+    
+    // 压力测试系统（v9.0新增）
+    updatePressureTest(data.pressure_test);
+    
+    // AI 驱动的情绪分析（v9.0新增）
+    updateSentimentAnalysis(data.ai_sentiment);
 }
 
 function updateOnchainMetrics(onchain) {
@@ -893,6 +899,177 @@ function updateOnchainMetrics(onchain) {
         }
         
         analysisEl.innerHTML = analysisText;
+    }
+}
+
+function updatePressureTest(pt) {
+    if (!pt || pt.error) {
+        return;
+    }
+    
+    const levelEl = document.getElementById('ptRiskLevel');
+    const descEl = document.getElementById('ptRiskDesc');
+    if (levelEl && pt.risk_assessment) {
+        const ra = pt.risk_assessment;
+        levelEl.textContent = ra.level === 'HIGH' ? '⚠️ 高风险' : ra.level === 'MEDIUM' ? '⚡ 中风险' : '✅ 低风险';
+        levelEl.className = 'text-lg font-bold ' + (ra.level === 'HIGH' ? 'text-red-400' : ra.level === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400');
+        if (descEl) descEl.textContent = ra.description;
+    }
+    
+    const vannaEl = document.getElementById('ptVannaRisk');
+    const volgaEl = document.getElementById('ptVolgaRisk');
+    const maxDeltaEl = document.getElementById('ptMaxDelta');
+    if (vannaEl && pt.risk_assessment) {
+        vannaEl.textContent = pt.risk_assessment.vanna_risk ? '⚠️ 较高' : '✅ 可控';
+        vannaEl.className = 'text-lg font-bold ' + (pt.risk_assessment.vanna_risk ? 'text-red-400' : 'text-green-400');
+    }
+    if (volgaEl && pt.risk_assessment) {
+        volgaEl.textContent = pt.risk_assessment.volga_risk ? '⚠️ 较高' : '✅ 可控';
+        volgaEl.className = 'text-lg font-bold ' + (pt.risk_assessment.volga_risk ? 'text-orange-400' : 'text-green-400');
+    }
+    if (maxDeltaEl && pt.risk_assessment) {
+        maxDeltaEl.textContent = pt.risk_assessment.max_delta_exposure.toFixed(4);
+    }
+    
+    const tbody = document.getElementById('ptJointScenarios');
+    if (tbody && pt.joint_stress_tests) {
+        tbody.innerHTML = pt.joint_stress_tests.map(s => {
+            const deltaColor = Math.abs(s.delta) > 0.5 ? 'text-red-400' : Math.abs(s.delta) > 0.3 ? 'text-yellow-400' : 'text-green-400';
+            return `<tr class="hover:bg-gray-800/30">
+                <td class="py-1 px-2 text-left text-gray-300">${safeHTML(s.scenario)}</td>
+                <td class="py-1 px-2 font-mono">$${s.price.toLocaleString()}</td>
+                <td class="py-1 px-2 font-mono">${s.volatility.toFixed(1)}%</td>
+                <td class="py-1 px-2 font-mono ${deltaColor}">${s.delta.toFixed(4)}</td>
+                <td class="py-1 px-2 font-mono text-gray-400">${s.gamma.toFixed(6)}</td>
+                <td class="py-1 px-2 font-mono text-gray-400">${s.vanna.toFixed(6)}</td>
+                <td class="py-1 px-2 font-mono text-gray-400">${s.volga.toFixed(4)}</td>
+            </tr>`;
+        }).join('');
+    }
+}
+
+function updateSentimentAnalysis(sa) {
+    if (!sa || sa.error) {
+        return;
+    }
+    
+    const iconEl = document.getElementById('aiSentimentIcon');
+    const intentEl = document.getElementById('aiDominantIntent');
+    const confEl = document.getElementById('aiConfidence');
+    const recEl = document.getElementById('aiRecommendation');
+    const riskLevelEl = document.getElementById('aiRiskLevel');
+    const signalStrengthEl = document.getElementById('aiSignalStrength');
+    
+    if (iconEl) iconEl.textContent = sa.sentiment_icon || '➖';
+    if (intentEl) {
+        intentEl.textContent = sa.overall_sentiment || '--';
+        intentEl.className = 'text-xl font-bold ' + (sa.dominant_intent?.intent_color || 'text-gray-400');
+    }
+    if (confEl) confEl.textContent = sa.confidence ? `${sa.confidence}%` : '--';
+    if (recEl) recEl.innerHTML = sa.ai_recommendation ? safeHTML(sa.ai_recommendation) : '等待分析...';
+    
+    // v2.0: 风险等级
+    if (riskLevelEl && sa.dominant_intent?.risk_level) {
+        const rl = sa.dominant_intent.risk_level;
+        riskLevelEl.textContent = `风险等级: ${rl === 'HIGH' ? '🔴 高风险' : rl === 'MEDIUM' ? '🟡 中风险' : '🟢 低风险'}`;
+        riskLevelEl.className = 'text-xs mt-1 ' + (rl === 'HIGH' ? 'text-red-400' : rl === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400');
+    }
+    
+    // v2.0: 信号强度
+    if (signalStrengthEl) {
+        // 信号强度从 confidence 推断
+        const conf = sa.confidence || 0;
+        if (conf > 75) {
+            signalStrengthEl.textContent = '🔥 STRONG';
+            signalStrengthEl.className = 'text-xs font-bold text-red-400';
+        } else if (conf > 50) {
+            signalStrengthEl.textContent = '⚡ MEDIUM';
+            signalStrengthEl.className = 'text-xs font-bold text-yellow-400';
+        } else {
+            signalStrengthEl.textContent = '💤 WEAK';
+            signalStrengthEl.className = 'text-xs font-bold text-gray-500';
+        }
+    }
+    
+    if (sa.put_call_ratio) {
+        const putPctEl = document.getElementById('aiPutPct');
+        const callPctEl = document.getElementById('aiCallPct');
+        if (putPctEl) putPctEl.textContent = `${sa.put_call_ratio.put_pct.toFixed(1)}%`;
+        if (callPctEl) callPctEl.textContent = `${sa.put_call_ratio.call_pct.toFixed(1)}%`;
+    }
+    
+    // v2.0: 市场流摘要
+    const summaryEl = document.getElementById('aiMarketFlowSummary');
+    if (summaryEl && sa.market_flow_summary) {
+        const mfs = sa.market_flow_summary;
+        if (mfs.total_trades > 0) {
+            summaryEl.classList.remove('hidden');
+            const totalPremiumM = (mfs.total_premium / 1e6).toFixed(1);
+            summaryEl.innerHTML = `📊 分析 <b>${mfs.total_trades}</b> 笔交易 | 总名义价值 <b>$${totalPremiumM}M</b> | 机构占比 <b>${mfs.institutional_ratio || 0}%</b> | 平均单量 <b>$${(mfs.avg_trade_size / 1e3).toFixed(0)}K</b>`;
+        }
+    }
+    
+    const distEl = document.getElementById('aiIntentDist');
+    if (distEl && sa.intent_distribution) {
+        const intentNames = {
+            'directional_speculation': {name: '方向性投机', icon: '🎯', color: 'bg-red-500/20'},
+            'institutional_hedging': {name: '机构对冲', icon: '🛡️', color: 'bg-blue-500/20'},
+            'arbitrage': {name: '套利交易', icon: '⚖️', color: 'bg-green-500/20'},
+            'market_maker_adjust': {name: '做市商调仓', icon: '🔄', color: 'bg-yellow-500/20'},
+            'income_generation': {name: '收益增强', icon: '💰', color: 'bg-purple-500/20'},
+            'volatility_play': {name: '波动率博弈', icon: '📊', color: 'bg-cyan-500/20'}
+        };
+        const total = Object.values(sa.intent_distribution).reduce((sum, v) => sum + v.count, 0);
+        distEl.innerHTML = Object.entries(sa.intent_distribution).map(([key, val]) => {
+            const info = intentNames[key] || {name: key, icon: '❓', color: 'bg-gray-500/20'};
+            const pct = total > 0 ? (val.count / total * 100).toFixed(0) : 0;
+            return `<div class="flex items-center gap-2">
+                <span class="text-xs">${info.icon}</span>
+                <span class="text-xs text-gray-300 flex-1">${info.name}</span>
+                <div class="w-16 bg-gray-700 rounded-full h-1.5">
+                    <div class="${info.color} h-1.5 rounded-full" style="width: ${pct}%"></div>
+                </div>
+                <span class="text-xs font-mono text-gray-400 w-8 text-right">${val.count}</span>
+            </div>`;
+        }).join('');
+    }
+    
+    const signalsEl = document.getElementById('aiKeySignals');
+    if (signalsEl && sa.key_signals) {
+        if (sa.key_signals.length === 0) {
+            signalsEl.innerHTML = '<div class="text-gray-600 text-xs">暂无显著信号</div>';
+        } else {
+            const typeClasses = {
+                'warning': 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300',
+                'success': 'bg-green-500/10 border-green-500/30 text-green-300',
+                'info': 'bg-blue-500/10 border-blue-500/30 text-blue-300',
+                'danger': 'bg-red-500/10 border-red-500/30 text-red-300'
+            };
+            signalsEl.innerHTML = sa.key_signals.map(s => 
+                `<div class="p-2 rounded border text-xs ${typeClasses[s.type] || 'bg-gray-500/10 border-gray-500/30 text-gray-300'}">
+                    ${safeHTML(s.text)}
+                </div>`
+            ).join('');
+        }
+    }
+    
+    // v2.0: 风险预警
+    const riskWarningsSection = document.getElementById('aiRiskWarningsSection');
+    const riskWarningsEl = document.getElementById('aiRiskWarnings');
+    if (riskWarningsSection && riskWarningsEl && sa.risk_warnings && sa.risk_warnings.length > 0) {
+        riskWarningsSection.classList.remove('hidden');
+        const levelClasses = {
+            'HIGH': 'bg-red-500/10 border-red-500/30 text-red-300',
+            'MEDIUM': 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300',
+            'LOW': 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+        };
+        riskWarningsEl.innerHTML = sa.risk_warnings.map(w => 
+            `<div class="p-2 rounded border text-xs ${levelClasses[w.level] || 'bg-gray-500/10 border-gray-500/30 text-gray-300'}">
+                <span class="font-bold mr-1">${w.level === 'HIGH' ? '🔴' : w.level === 'MEDIUM' ? '🟡' : '🔵'}</span>${safeHTML(w.text)}
+            </div>`
+        ).join('');
+    } else if (riskWarningsSection) {
+        riskWarningsSection.classList.add('hidden');
     }
 }
 

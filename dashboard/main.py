@@ -1255,6 +1255,32 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
     except Exception as e:
         onchain_data = {"error": str(e)}
 
+    # 压力测试系统 - 基于 Black-Scholes 的 Vanna/Volga 敏感度分析
+    pressure_test_data = {}
+    try:
+        from services.pressure_test import PressureTestEngine
+        atm_strike = round(spot / 100) * 100
+        t = 30 / 365  # 30天到期
+        r = 0.045  # 无风险利率 4.5%
+        sigma = risk_data.get("components", {}).get("volatility", {}).get("current_iv", 60) / 100
+        
+        pressure_test_data = PressureTestEngine.stress_test(
+            S=spot, K=atm_strike, T=t, r=r, sigma=sigma, option_type="P"
+        )
+    except Exception as e:
+        logger.warning("压力测试计算失败: %s", str(e))
+        pressure_test_data = {"error": str(e)}
+
+    # AI 驱动的情绪分析 - 基于大宗交易数据
+    ai_sentiment_data = {}
+    try:
+        from services.ai_sentiment import AISentimentAnalyzer
+        large_trades = _fetch_large_trades(currency, days=3, limit=50)
+        ai_sentiment_data = AISentimentAnalyzer.analyze_market_sentiment(large_trades, spot)
+    except Exception as e:
+        logger.warning("AI情绪分析失败: %s", str(e))
+        ai_sentiment_data = {"error": str(e)}
+
     return {
         "currency": currency,
         "spot": spot,
@@ -1275,6 +1301,8 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         "put_wall": put_wall,
         "gamma_flip": gamma_flip,
         "onchain_metrics": onchain_data,
+        "pressure_test": pressure_test_data,
+        "ai_sentiment": ai_sentiment_data,
         "timestamp": risk_data["timestamp"]
     }
 
