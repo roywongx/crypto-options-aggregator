@@ -3,236 +3,188 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v9.0-链上数据引擎+支撑位重构+API重试机制-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v9.0-链上数据引擎+智能策略引擎-blueviolet" alt="Version">
 </p>
 
-<h1 align="center">Crypto Options Aggregator (期权监控聚合面板)</h1>
+<h1 align="center">Crypto Options Aggregator</h1>
 
 <p align="center">
-  <b>专业级双平台期权扫描器 + 动态风险框架 + 抄底建议引擎</b><br>
-  实时聚合 Binance (USDT本位) 与 Deribit (币本位) 深度期权数据<br>
-  专为进阶 <b>Sell Put / Covered Call</b> 策略及滚仓(Rolling)交易者打造
+  <b>专业级双平台期权扫描器 + 链上数据引擎 + 智能策略系统</b><br>
+  实时聚合 Binance + Deribit 深度期权数据，融合 fuckbtc.com 链上指标<br>
+  专为 <b>Sell Put / Covered Call / Wheel</b> 策略交易者打造的一站式决策平台
 </p>
 
 ---
 
-## 🌟 核心特性与优势
+## 🌟 核心亮点
 
-### 📊 专业分析工具
+### 🔗 链上数据引擎 — 数据精度与 fuckbtc.com 一致
 
-| 功能模块 | 详细说明 |
-|------|------|
-| 🔗 **双平台统一视图** | 消除 Binance + Deribit 之间的差异，在同一面板对比真实收益。 |
-| 💰 **真实 Margin-APR** | 摒弃传统面值收益率，采用真实**保证金占用回报率**（如锁定 20% 资金计算 APR），反映资金真实效率。 |
-| 🌊 **DVOL 波动率引擎** | 基于 Deribit 波动率指数，自动计算 Z-Score 和历史分位数。高波收紧参数，低波放宽，实现策略自动适配。 |
-| 🛡️ **动态风险框架** | 引入 BTC 风险阶梯（如 55k 常规底，45k 极限底），为不同市场阶段提供精确的参数权重修正。 |
-| 💡 **智能抄底助手** | 融合当前水位、Max Pain (最大痛点)、GEX (Gamma Exposure)，输出实时的建仓/滚仓/平仓操作指令。 |
-| 🔄 **正收益滚仓计算器** | 当持仓遇险时，自动寻找更低行权价、更远到期日的新合约，并测算所需保证金，确保净信用 (Net Credit) 大于零。 |
-| 🌊 **大单风向标 & 资金流** | 监控百万级大单，基于 Delta 深度解析真实交易意图（备兑、保护性买入、追涨等），透视主力底牌。 |
-| 📊 **多维数据图表分析** | 实时生成 APR 分位图、DVOL 趋势图、波动率曲面 (Term Structure) 以及 PCR (Put/Call Ratio) 面板。 |
+| 指标 | 数据源 | 精度验证 |
+|------|--------|----------|
+| **MVRV Ratio** | looknode-proxy API | 与 fuckbtc.com 精确匹配 (1.38) |
+| **200周均线** | Binance 200周K线 | 误差 <0.002% ($59,947 vs $59,948) |
+| **Balanced Price** | 链上API直接获取 | 零偏差 ($40,437) |
+| **减半倒计时** | blockchain.info 实时区块 | 实时更新 (725天) |
 
-### 🎯 智能策略引擎 (v7.0 新增)
+> 全面弃用硬编码/估算，所有链上指标均来自真实API，配备指数退避重试机制确保稳定性。
 
-| 功能模块 | 详细说明 |
-|------|------|
-| 📈 **Payoff 可视化** | 交互式盈亏曲线图，支持 Sell Put/Call、Buy Put/Call 策略，实时显示最大盈亏、盈亏平衡点。 |
-| 🤖 **智能权利金估算** | 基于 Black-Scholes 公式自动估算合理权利金，支持输入 IV 和 DTE 参数。 |
-| ⭐ **策略评分系统** | 0-100 分综合评分，4 个维度：收益性 (30%)、风险性 (30%)、胜率 (25%)、流动性 (15%)。 |
-| 💡 **实操建议引擎** | 根据评分生成推荐程度（强烈推荐/推荐/中性/谨慎/不推荐）、适用场景、风险提示和优化建议。 |
-| 🎡 **Wheel ROI 计算器** | 完整 Wheel 策略收益分析，包含年化 ROI、胜率估算、Put/Call 收入分解。 |
-| 🆚 **策略对比模式** | 同时对比最多 5 个不同参数组合，直观比较 ROI、胜率和风险回报比。 |
-| 📐 **网格策略引擎** | 4 种预设配置（保守/均衡/激进/智能推荐），参数指导系统，根据 DVOL 自动调整的智能推荐模式。 |
-| 🎯 **最大痛点/Gamma Flip** | 市场状态指示器（多头/空头 Gamma 区），方向性建议（仓位/策略/Delta 范围），图表标记优化。 |
-| 🐋 **大宗异动监控** | 5 级严重度分类（巨鲸/大单/中单/小单/信息），权利金/IV/Delta 显示，大宗交易标记和流向提示。 |
+### 💰 真实 Margin-APR — 反映资金真实效率
+
+摒弃传统面值收益率，采用**真实保证金占用回报率**计算。
+
+```
+传统 APR = 权利金 / 合约面值  ❌ (低估资金占用)
+真实 APR = 权利金 / 实际保证金  ✅ (反映真实效率)
+```
+
+### 🌊 DVOL 波动率引擎 — 策略自动适配
+
+基于 Deribit 波动率指数，自动计算 Z-Score 和历史分位数：
+- **高波动 (>70分位)**: 自动收紧参数，降低 APR 要求，增加合约数量
+- **低波动 (<30分位)**: 自动放宽参数，提高 APR 要求，减少合约数量
+
+### 🛡️ 动态风险框架 — 精确的市场阶段判断
+
+| 风险层级 | 常规支撑位 | 极端支撑位 | 策略指令 |
+|----------|------------|------------|----------|
+| **安全区** | 价格 > 常规底 +10% | -- | 正常开仓，Wheel 策略 |
+| **警戒区** | 常规底 ±10% | -- | 收紧 Delta，增加 DTE |
+| **危险区** | 极端底 ~ 常规底 | -- | 暂停开仓，准备滚仓 |
+| **恐慌区** | 价格 < 极端底 | -- | 正收益滚仓，确保 Net Credit > 0 |
+
+结合 Max Pain、Gamma Flip、Put Wall 防线，输出实时操作指令。
+
+### 🎯 智能策略引擎
+
+**策略评分系统**: 0-100 分综合评分，4 维度评估
+- 收益性 (30%)、风险性 (30%)、胜率 (25%)、流动性 (15%)
+
+**Payoff 可视化**: 交互式盈亏曲线，支持 Sell/Buy Put/Call，实时显示最大盈亏、盈亏平衡点
+
+**正收益滚仓计算器**: 持仓遇险时自动寻找更优合约，确保滚仓后净信用大于零
+
+**网格策略引擎**: 4 种预设（保守/均衡/激进/智能推荐），根据 DVOL 自动调整参数
+
+---
+
+## 📊 功能模块总览
+
+| 模块 | 核心能力 |
+|------|----------|
+| 🔗 **双平台统一视图** | Binance (USDT本位) + Deribit (币本位) 同一面板对比真实收益 |
+| 💡 **智能抄底助手** | 融合水位、Max Pain、GEX，输出建仓/滚仓/平仓指令 |
+| 🌊 **大单风向标** | 监控百万级大单，基于 Delta 深度解析交易意图（备兑/保护/追涨） |
+| 📈 **多维数据图表** | APR 分位图、DVOL 趋势图、波动率曲面、PCR 面板 |
+| 🆚 **策略对比模式** | 同时对比最多 5 个参数组合，直观比较 ROI/胜率/风险回报 |
+| 🎡 **Wheel ROI 计算器** | 完整 Wheel 策略收益分析，年化 ROI、胜率、Put/Call 收入分解 |
+| 🐋 **大宗异动监控** | 5 级严重度分类，权利金/IV/Delta 显示，流向提示 |
+| 🏥 **API 健康检查** | `/api/health` 实时监控数据库、扫描状态、缓存有效性 |
 
 ---
 
 ## 🚀 快速开始
 
-本项目采用 FastAPI 后端与纯原生 JS + TailwindCSS 前端，轻量且高效。
-
 ### 1. 环境准备
-请确保已安装 Python 3.10 及以上版本。
 
 ```bash
 # 克隆仓库
 git clone https://github.com/roywongx/crypto-options-aggregator.git
 cd crypto-options-aggregator
 
-# 安装依赖项
+# 安装依赖
 pip install -r requirements.txt
 pip install -r dashboard/requirements.txt
 ```
 
 ### 2. 启动服务
+
 ```bash
-# 进入 dashboard 目录并启动
 cd dashboard
-python -m uvicorn main:app --reload --port 8080
+python -m uvicorn main:app --reload --port 8000
 ```
-启动成功后，浏览器访问 👉 `http://localhost:8080` 即可进入监控面板。
+
+访问 👉 `http://localhost:8000`
 
 ---
 
-## 🏗️ 核心架构与 API
+## 🏗️ API 端点
 
-| 请求方式 | 路由 | 描述 |
+| 路由 | 方法 | 描述 |
 |------|------|------|
-| `POST` | `/api/quick-scan` | 核心扫描接口，多线程并行获取盘口、现货价、期权链 |
-| `GET` | `/api/latest` | 获取数据库中缓存的最后一次有效扫描结果 |
-| `GET` | `/api/bottom-fishing/advice` | **(New)** 基于动态风险框架的抄底建议 |
-| `POST` | `/api/calculator/roll` | 持仓遇险时的正收益滚仓计算器 |
-| `POST` | `/api/sandbox/simulate` | 极端行情(如闪崩)下的保证金压力测试沙盒 |
-| `GET` | `/api/metrics/max-pain` | 获取当月最大痛点及 Gamma Flip 关键点位 |
-| `GET` | `/api/charts/vol-surface` | 获取波动率曲面及升贴水状态 |
+| `/api/quick-scan` | POST | 核心扫描接口，并行获取盘口/现货价/期权链 |
+| `/api/latest` | GET | 获取最后一次有效扫描结果 |
+| `/api/risk/overview` | GET | 风险概览：价格/状态/支撑位/链上指标/Put Wall/建议 |
+| `/api/health` | GET | 健康检查：数据库/扫描状态/缓存 |
+| `/api/charts/apr` | GET | APR 历史数据 |
+| `/api/charts/dvol` | GET | DVOL 历史数据 |
+| `/api/charts/pcr` | GET | PCR 历史数据 |
+| `/api/charts/vol-surface` | GET | 波动率曲面 |
+| `/api/metrics/max-pain` | GET | 最大痛点 + Gamma Flip |
+| `/api/grid/recommend` | GET | 智能网格推荐 |
+| `/api/large-trades` | GET | 大额交易记录 |
 
 ---
 
-## ⚙️ 策略预设参考
+## 📈 数据准确性报告
 
-系统内置的三种默认过滤预设（支持在界面自由微调）：
+| 指标 | 本系统 | fuckbtc.com | 偏差 |
+|------|--------|-------------|------|
+| MVRV Ratio | 1.38 | 1.38 | **0%** |
+| 200周均线 | $59,947 | $59,948 | **<0.002%** |
+| Balanced Price | $40,437 | $40,437 | **0%** |
+| 常规支撑位 | $69,798 | -- | 真实 Binance 数据 |
+| Put Wall | $70,000 | -- | 真实 Deribit OI 数据 |
 
-| 风格 | Max Delta | DTE (到期天数) | 目标 APR |
-|------|----------|---------|-------------|
-| **保守 (Conservative)** | 0.20 | 30 - 45 天 | 15%+ |
-| **标准 (Standard)** | 0.30 | 14 - 35 天 | 20%+ |
-| **激进 (Aggressive)** | 0.40 | 7 - 28 天 | 25%+ |
-
-*(注：系统会自动根据 DVOL 波动率指数，对上述预设进行动态微调。)*
+**代码质量评分**: 8.925/10 (A) — [详细报告](dashboard/TEST_REPORT.md)
 
 ---
 
 ## 💡 更新日志
 
-### v9.0 (2026-04) - 链上数据引擎 + 支撑位重构 + API重试机制
+### v9.0 (2026-04) — 链上数据引擎 + 支撑位重构 + API重试机制
 
-**🔗 链上数据引擎全面接入**
-- ✨ 新增 MVRV Ratio (市值/已实现市值)：使用 looknode-proxy 真实API，数据与 fuckbtc.com 精确匹配
-- ✨ 新增 200周均线 (200 WMA)：基于 Binance 200周周K线收盘价真实计算，误差<0.002%
-- ✨ 新增 Balanced Price (均衡价格)：直接从链上API获取，零偏差
-- ✨ 新增 减半倒计时：基于 blockchain.info 实时区块高度计算
-- 🛡️ 全面弃用硬编码/估算：所有链上指标改为真实API数据源
+**🔗 链上数据引擎**
+- 新增 MVRV Ratio、200周均线、Balanced Price、减半倒计时
+- 数据精度与 fuckbtc.com 一致，全面弃用硬编码/估算
 
-**🛠️ 支撑位系统全面重构**
-- 🐛 修复常规支撑位计算：从硬编码$56,543修正为真实Binance数据$69,798
-- 🐛 修复极端支撑位计算：从硬编码$48,062修正为合理推算$59,328
-- 🐛 修复200日均线：从硬编码$60,000改为Binance 200天K线真实计算$86,998
-- 🐛 修复斐波那契回撤：从硬编码高低点改为Binance 90天真实高低点
-- 🎯 Put Wall防线逻辑修正：改为找单个行权价最大Put OI，而非累积值
+**🛠️ 支撑位系统重构**
+- 常规支撑位: $56,543 → $69,798 (真实 Binance 数据)
+- 极端支撑位: $48,062 → $59,328 (合理推算)
+- Put Wall 逻辑修正: 单个行权价最大 Put OI
 
 **🔄 API重试机制**
-- ✨ 新增 `services/api_retry.py`：指数退避重试工具（1s→2s→4s）
-- 🔧 所有外部API调用增加自动重试：Binance、looknode-proxy、blockchain.info
-- 📊 默认重试3次，失败后降级到fallback机制
+- 新增 `services/api_retry.py` 指数退避重试工具
+- 所有外部 API 自动重试 3 次 (1s→2s→4s)
 
-**🔒 代码质量全面改进**
-- 🔒 修复 main.py 4处裸except语句，改为except Exception
-- 🔒 替换所有 print() 为 logging (spot_price.py 4处, risk_framework.py 1处, dvol_analyzer.py 3处)
-- 🏗️ 新增 `/api/health` 健康检查端点：监控数据库、扫描状态、缓存有效性
-- 📈 评分提升：从 8.45/10 (A-) 提升至 8.925/10 (A)
+**🔒 代码质量**
+- 修复 4 处裸 except，8 处 print()→logging
+- 新增 `/api/health` 健康检查端点
+- 评分: 8.45 → 8.925 (A- → A)
 
-**🗑️ 清理与优化**
-- 🗑️ 删除所有临时测试文件（15个）
-- 🗑️ 删除废弃的 onchain_metrics_v2.py 和 btc_market_metrics.py
-- 📦 更新 fallback 值到当前市场水平（BTC高低点、支撑位等）
+### v8.0 (2025-04) — 网格策略引擎修复 + 全面Bug修复
+- 修复网格去重逻辑导致空结果的核心 Bug
+- 修复 SQL 列索引错位、场景模拟盈亏计算错误
+- 修复前端 XSS 漏洞，移除后端 Tailwind 类名
+- 新增 `constants.py` 集中管理默认值
 
-### v8.0 (2025-04) - 网格策略引擎修复 + 全面Bug修复
-
-**📐 网格策略引擎全面修复**
-- 🐛 修复核心 Bug：去重逻辑导致所有合约被过滤，返回空结果
-- 🐛 修复合约字段映射：支持 `option_type` vs `type`、`open_interest` vs `oi` 等多种字段名
-- 🐛 修复现货价格硬编码：新增 `constants.py` 统一管理，支持动态获取（API → 数据库缓存 → 常量）
-- 🐛 修复扫描器过滤：`option_type="ALL"` 支持同时获取 Put 和 Call 合约
-- 🎯 新增 Sell Put 网格预设：专注持续做多策略，跌了就滚仓/加仓回本
-- 📊 扩展默认参数：DTE 14-90 天，min_apr 8%，put_count=7，call_count=0
-
-**🛠️ 核心 Bug 修复**
-- 🐛 修复 SQL 列索引错位：`get_latest` 返回的合约数据和大单数据完全错误
-- 🐛 修复场景模拟盈亏计算：正确累加行权损失，移除冗余条件判断
-- 🐛 修复 RiskFramework 缓存判断：`.seconds` 改为 `.total_seconds()`，避免缓存提前失效
-- 🐛 修复 DVOL percentile 计算公式：ratio=1.0 时返回 50（中位），而非 100%
-- 🐛 修复 Gamma Flip 点检测：多次符号变化时只记录第一次翻转点
-
-**🔒 安全改进**
-- 🔒 修复前端 XSS 漏洞：`showAlert`、`submitStrategyCalc`、`displayStrategyCalcResult`、`updateGridDisplay`、`renderGridScenarios` 等函数中的 innerHTML 注入
-- 🔒 移除后端 Tailwind CSS 类名：payoff_calculator.py 返回语义值，由前端映射样式
-
-**🏗️ 架构改进**
-- 🏗️ 新增 `constants.py`：集中管理所有硬编码默认值（现货价格回退值等）
-- 🏗️ 简化列显示逻辑：移除复杂的列显示/隐藏系统，所有视图默认显示全部列
-- 🏗️ 标记 `routers/scan.py` 为死代码：添加 DEPRECATED 注释
-
-**📦 其他改进**
-- 📦 统一版本号：`app.js`、`grid-strategy.js`、`data-app-version` 同步更新
-- 📦 修复前端高重复合约通知逻辑：删除重复的 `push` 语句
-
-### v7.0 (2024-04) - 智能策略引擎重大升级
-
-**🎯 Payoff 可视化 & Wheel ROI 专业增强版**
-- ✨ 智能权利金估算：基于 Black-Scholes 公式，输入 IV/DTE 自动计算
-- ⭐ 策略评分系统：0-100 分，4 个维度（收益性 30%、风险性 30%、胜率 25%、流动性 15%）
-- 💡 实操建议引擎：5 级推荐程度（强烈推荐→不推荐），适用场景，风险提示，优化建议
-- 🎡 Wheel ROI 增强：年化 ROI 计算，胜率估算，Put/Call 收入分解
-- 🆚 对比模式：同时对比最多 5 个策略组合
-- 📊 结果展示：6 个指标卡片（最大盈利/亏损、盈亏平衡、ROI、胜率、风险回报比）
-
-**📐 网格策略引擎优化**
-- 🎯 4 种预设配置：保守型/均衡型/激进型/智能推荐
-- 📚 参数指导系统：每个参数都有详细说明、建议范围和使用技巧
-- 🤖 智能推荐模式：根据 DVOL 分位数自动调整参数
-  - 高波动（>70 分位）：激进策略，降低 APR 要求，增加合约数量
-  - 低波动（<30 分位）：保守策略，提高 APR 要求，减少合约数量
-- 💰 建议仓位计算：BEST=20%、GOOD=15%、OK=10%、CAUTION=5%
-- 📊 策略建议卡片：关键指标、操作项、风险警告
-
-**🎯 最大痛点/Gamma Flip 重新设计**
-- 📊 市场状态指示器：多头 Gamma 区/空头 Gamma 区，波动特征，机构态度
-- 💡 方向性建议：建议仓位、策略方向、Delta 范围
-- 📈 数据卡片增强：从 4 个扩展到 6 个（增加 Gamma Flip 价格、区域距离）
-- 🎨 图表标记：Gamma Flip 点、最大痛点、现货价格标记
-
-**🐋 大宗异动重新设计**
-- 🔧 修复 notional 计算错误：使用 amount×index_price 替代错误的 premium 计算
-- 📊 5 级严重度分类：巨鲸 (>$5M)/大单 (>$2M)/中单 (>$500K)/小单 (>$100K)/信息
-- 💰 新增数据显示：权利金、IV、Delta、大宗交易标记
-- 🎯 流向提示：保护性对冲、收权利金、看跌投机等中文翻译
-
-**🛠️ 其他改进**
-- 🖥️ 桌面快捷方式创建脚本（支持 Windows）
-- 📚 参数指导 UI 组件
-- 🎨 策略建议渲染引擎
-- 🐛 修复多个已知问题
-
-### v6.x - 风险框架与数据优化
-
-| 版本 | 核心更新内容 |
-|------|---------|
-| **v6.0.2** | **P0**: 实现 `DeribitOptionsMonitor` 单例模式，消除每请求重复实例化；**P1**: Binance Greeks 现在直接使用 API 返回的 delta/gamma/theta/vega；**P2**: 风险阈值统一到 `config.py`（DVOL_PANIC_THRESHOLD=80, DVOL_LOW_THRESHOLD=20 等）。 |
-| **v6.0.1** | 修复 `_parse_inst_name` option_type 返回值不统一问题（'CALL'/'PUT' vs 'C'/'P'）；修复 `get_dvol_from_deribit` DVOL 字段名映射错误（current_dvol, z_score_7d, history_points, iv_percentile_7d）。 |
-| **v6.0** | 新增 **BTC 动态风险框架** (55k 常规底/45k 极限底)；新增**抄底建议模块**，结合 Max Pain 与 GEX 生成策略指令；全面启用**并发网络请求**，大幅缩短加载延迟。 |
-| **v5.11** | DVOL 实现统一为 DeribitOptionsMonitor 高级版 (动态阈值 + 置信度 + 风险笔记)；instrument name 解析统一为 Monitor 版本 (缓存 + 动态 DTE) |
-| **v5.10** | 修复 sentiment_score 中英文 key 不匹配；sandbox KeyError；roll 计算器 NameError；PCR 月份误匹配；delta 缺失导致 risk_level 恒低；_get_spot_from_scan 查错字段 |
-| **v5.9** | 重构大单监控系统，引入交易意图智能判定（如识别"深度 ITM 保护性买入"）。 |
-| **v5.7** | 重构配置引擎，抽离全局 `config.py`，彻底消除硬编码散落。 |
-| **v5.3** | 引入 `Calculation Engine` 和加权评分系统 (POP, Breakeven, Liquidity)。 |ent_score中英文key不匹配；sandbox KeyError；roll计算器NameError；PCR月份误匹配；delta缺失导致risk_level恒低；_get_spot_from_scan查错字段 |
-| **v5.9** | 重构大单监控系统，引入交易意图智能判定（如识别“深度ITM保护性买入”）。 |
-| **v5.7** | 重构配置引擎，抽离全局 `config.py`，彻底消除硬编码散落。 |
-| **v5.3** | 引入 `Calculation Engine` 和加权评分系统 (POP, Breakeven, Liquidity)。 |
+### v7.0 (2024-04) — 智能策略引擎重大升级
+- Payoff 可视化 + Wheel ROI 专业增强
+- 策略评分系统 (0-100分，4维度)
+- 网格策略引擎 4 种预设 + DVOL 智能推荐
+- 最大痛点/Gamma Flip 重新设计
+- 大宗异动 5 级严重度分类
 
 ---
 
-## 🙏 致谢 (Acknowledgments)
+## 🙏 致谢
 
-本项目并非从零开始，其底层核心逻辑得益于开源社区的无私奉献。在此特别感谢：
-
-- **[lianyanshe-ai/deribit-options-monitor](https://github.com/lianyanshe-ai/deribit-options-monitor)** 
-  本项目最初的灵感与核心根基来源于此库。原作者为其提供了极其健壮的 Deribit API 封装、Greeks 期权希腊字母推算以及 DVOL/大单提醒的基础框架。正是基于这一出色的开源工作，我们才得以扩展支持 Binance、重构风险模型并打造统一的双平台监控面板。
-- **[ccxt](https://github.com/ccxt/ccxt)** 
-  为极端行情下现货价格的 Fallback 获取提供了稳定的跨交易所 API 方案。
+- **[deribit-options-monitor](https://github.com/lianyanshe-ai/deribit-options-monitor)** — 核心根基：Deribit API 封装、Greeks 推算、DVOL 框架
+- **[ccxt](https://github.com/ccxt/ccxt)** — 极端行情下现货价格的 Fallback 方案
 
 ---
 
 ## ⚠️ 风险免责声明
 
-期权交易（尤其是裸卖期权 / Sell Puts）具有极高的资金风险，可能导致本金完全损失。
-本工具所有数据、建议、压力测试及滚仓计算**仅供学习与量化分析参考，绝不构成任何投资建议**。在进行实盘交易前，请务必充分理解期权规则并严格做好资金与仓位管理。
+期权交易具有极高风险，可能导致本金完全损失。
+本工具所有数据、建议、压力测试及滚仓计算**仅供学习与量化分析参考，绝不构成任何投资建议**。实盘交易前请充分理解期权规则并严格做好资金管理。
