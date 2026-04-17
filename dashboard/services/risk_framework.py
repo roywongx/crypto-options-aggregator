@@ -39,7 +39,7 @@ class RiskFramework:
             cls._cache_timestamp = now
             return cls._cached_floors
         except Exception as e:
-            print(f"获取动态支撑位失败: {e}")
+            logger.warning(f"获取动态支撑位失败: {e}")
             # 回退到静态值
             return {
                 "regular": cls.REGULAR_FLOOR,

@@ -8,6 +8,7 @@ import sys
 import json
 import sqlite3
 import asyncio
+import logging
 import subprocess
 import math
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +24,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -215,9 +219,43 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         return {"success": False, "error": "参数适配失败，请检查输入参数"}
 
 
+SCAN_INTERVAL_SECONDS = 300  # 5分钟
+AUTO_SCAN_ENABLED = True
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_database()
+    
+    # 启动后台定时扫描任务
+    if AUTO_SCAN_ENABLED:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        async def background_scan():
+            logger.info("启动后台定时扫描任务，间隔 %d 秒", SCAN_INTERVAL_SECONDS)
+            while True:
+                try:
+                    await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+                    
+                    # 对所有支持的币种执行扫描
+                    for currency in ["BTC", "ETH", "SOL"]:
+                        try:
+                            params = QuickScanParams(currency=currency, option_type="ALL")
+                            await quick_scan(params)
+                            logger.info("定时扫描完成: %s", currency)
+                        except Exception as e:
+                            logger.error("定时扫描失败 %s: %s", currency, str(e))
+                except asyncio.CancelledError:
+                    logger.info("后台扫描任务已取消")
+                    break
+                except Exception as e:
+                    logger.error("后台扫描任务异常: %s", str(e))
+                    await asyncio.sleep(60)  # 异常后等待1分钟再继续
+        
+        # 创建后台任务
+        scan_task = asyncio.create_task(background_scan())
+        logger.info("后台扫描任务已创建")
+    
     yield
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -269,6 +307,60 @@ async def scan_options(params: ScanParams):
     if not result.get('success'):
         raise HTTPException(status_code=500, detail=result.get('error', '扫描失败'))
     return result
+
+
+@app.get("/api/health")
+async def health_check():
+    """API健康检查端点"""
+    import time
+    health = {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "checks": {}
+    }
+    
+    # 检查数据库连接
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+        health["checks"]["database"] = "ok"
+    except Exception as e:
+        health["checks"]["database"] = f"error: {str(e)}"
+        health["status"] = "degraded"
+    
+    # 检查后台扫描状态
+    try:
+        cursor.execute("SELECT MAX(timestamp) FROM scan_records")
+        row = cursor.fetchone()
+        if row and row[0]:
+            last_scan = float(row[0])
+            age = time.time() - last_scan
+            health["checks"]["last_scan_age_seconds"] = round(age, 1)
+            if age > SCAN_INTERVAL_SECONDS * 2:
+                health["checks"]["scan_status"] = "stale"
+                health["status"] = "degraded"
+            else:
+                health["checks"]["scan_status"] = "fresh"
+        else:
+            health["checks"]["scan_status"] = "no_data"
+    except Exception as e:
+        health["checks"]["scan_status"] = f"error: {str(e)}"
+        health["status"] = "degraded"
+    
+    # 检查现货价格缓存
+    try:
+        from services.spot_price import _spot_cache, _CACHE_TTL_SECONDS
+        import time as _time
+        now = _time.time()
+        fresh_count = sum(1 for _, (p, t) in _spot_cache.items() if now - t < _CACHE_TTL_SECONDS)
+        health["checks"]["spot_cache_fresh"] = fresh_count
+    except Exception:
+        health["checks"]["spot_cache"] = "unknown"
+    
+    status_code = 200 if health["status"] == "healthy" else 503
+    return JSONResponse(content=health, status_code=status_code)
 
 
 @app.post("/api/quick-scan")
@@ -390,10 +482,18 @@ def _quick_scan_sync(params: QuickScanParams = None):
             r_ticker = f_bin_ticker.result(timeout=15)
         except Exception as e:
             import logging
-            logging.getLogger(__name__).error("Parallel fetch failed: %s", str(e))
-            # Fallback spot price if possible, or raise
+            logger = logging.getLogger(__name__)
+            logger.error("Parallel fetch failed: %s", str(e))
+            # Fallback: try to get essential data individually
             try: spot = get_spot_price(currency)
-            except: raise HTTPException(status_code=500, detail=f"数据抓取失败: {str(e)}")
+            except Exception: spot = None
+            try: dvol_data = get_dvol_from_deribit(currency)
+            except Exception: dvol_data = {}
+            try: summaries = _fetch_deribit_summaries(currency)
+            except Exception: summaries = []
+            try: large_trades = _fetch_large_trades(currency, days=1, limit=40)
+            except Exception: large_trades = []
+            r_mark, r_info, r_ticker = {}, {}, {}
 
     _min_spot = {"BTC": 1000, "ETH": 100, "SOL": 10, "XRP": 0.5}.get(currency, 100)
     if not spot or spot < _min_spot:
@@ -1091,9 +1191,9 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
                 max_put_oi_strike = None
                 max_put_oi = 0
                 for g in gc:
-                    put_oi_below = g.get("put_oi_below", 0)
-                    if put_oi_below > max_put_oi:
-                        max_put_oi = put_oi_below
+                    put_oi_at = g.get("put_oi_at_strike", 0)
+                    if put_oi_at > max_put_oi:
+                        max_put_oi = put_oi_at
                         max_put_oi_strike = g.get("strike")
                 if max_put_oi_strike:
                     put_wall = {"strike": max_put_oi_strike, "oi": max_put_oi, "expiry": exp.get("expiry"), "dte": exp.get("dte")}
@@ -1147,6 +1247,14 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
     }
     pos_guide = position_guidance.get(status, position_guidance["NORMAL"])
 
+    # 链上指标（MVRV、200WMA等）
+    onchain_data = {}
+    try:
+        from services.onchain_metrics import OnChainMetrics
+        onchain_data = OnChainMetrics.get_all_metrics("bitcoin")
+    except Exception as e:
+        onchain_data = {"error": str(e)}
+
     return {
         "currency": currency,
         "spot": spot,
@@ -1166,6 +1274,7 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         "position_guidance": pos_guide,
         "put_wall": put_wall,
         "gamma_flip": gamma_flip,
+        "onchain_metrics": onchain_data,
         "timestamp": risk_data["timestamp"]
     }
 
@@ -1268,4 +1377,6 @@ async def calc_wheel_roi(data: dict):
 # 启动服务器
 if __name__ == "__main__":
     import uvicorn
+    # 单worker模式：后台定时扫描任务需要在单worker中运行
+    # 如需多worker，请移除main.py中的background_scan_async()启动代码
     uvicorn.run(app, host="0.0.0.0", port=8000)

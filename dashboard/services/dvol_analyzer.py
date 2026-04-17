@@ -2,8 +2,11 @@
 import requests
 import sys
 import math
+import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type: str = 'P') -> float:
     """使用 Black-Scholes 计算期权 Delta (Bug B1 修复)"""
@@ -44,7 +47,7 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
             "percentile_7d": result.get("iv_percentile_7d", 50.0),
         }
     except Exception as e:
-        print(f"获取DVOL失败(高级版): {e}, 回退简单版", file=sys.stderr)
+        logger.warning(f"获取DVOL失败(高级版): {e}, 回退简单版")
         return _get_dvol_simple_fallback(currency)
 
 def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
@@ -89,7 +92,7 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
                 }
         return {}
     except Exception as e:
-        print(f"获取DVOL失败(简单版): {e}", file=sys.stderr)
+        logger.warning(f"获取DVOL失败(简单版): {e}")
         return {}
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:

@@ -2,8 +2,11 @@
 import requests
 import sys
 import time
+import logging
 from typing import Optional, Dict
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # 缓存：{currency: (price, timestamp)}
 _spot_cache: Dict[str, tuple] = {}
@@ -26,7 +29,7 @@ def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
             except Exception:
                 continue
     except Exception as e:
-        print(f"获取现货价格失败: {e}", file=sys.stderr)
+        logger.warning(f"获取现货价格失败: {e}")
     return None
 
 def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
@@ -41,7 +44,7 @@ def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
         if data.get("result"):
             return float(data["result"]["index_price"])
     except Exception as e:
-        print(f"获取Deribit现货价格失败: {e}", file=sys.stderr)
+        logger.warning(f"获取Deribit现货价格失败: {e}")
     return None
 
 def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
@@ -105,7 +108,7 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
                 _spot_cache[currency] = (spot, now)
                 return spot
         except Exception as e:
-            print(f"[WARN] CCXT failed for {currency}: {e}", file=sys.stderr)
+            logger.warning(f"CCXT failed for {currency}: {e}")
 
     # 最后 fallback
     if source == "auto":
@@ -132,7 +135,7 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
                 except Exception:
                     continue
         except Exception as e:
-            print(f"[WARN] Fallback oracle failed: {e}", file=sys.stderr)
+            logger.warning(f"Fallback oracle failed: {e}")
 
     raise RuntimeError(
         f"[CRITICAL] Cannot obtain spot price for {currency}. "
@@ -154,6 +157,7 @@ def _get_spot_from_scan(currency: str = "BTC"):
 
     try:
         import urllib.request
+        import json
         url = f"https://api.binance.com/api/v3/ticker/price?symbol={currency}USDT"
         resp = urllib.request.urlopen(url, timeout=5)
         return float(json.loads(resp.read())["price"])

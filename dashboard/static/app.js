@@ -776,6 +776,124 @@ function updateRiskDashboardUI(data) {
     if (riskLevelCard) {
         riskLevelCard.textContent = data.risk_level || '综合风险';
     }
+    
+    // 更新链上核心指标（v8.1新增）
+    updateOnchainMetrics(data.onchain_metrics);
+}
+
+function updateOnchainMetrics(onchain) {
+    console.log('[OnChain] 更新链上指标:', onchain);
+    
+    if (!onchain) {
+        console.log('[OnChain] 警告: onchain 数据为空');
+        return;
+    }
+    
+    // MVRV Ratio
+    const mvrvEl = document.getElementById('onchainMVRV');
+    const mvrvSignalEl = document.getElementById('onchainMVRVSignal');
+    console.log('[OnChain] MVRV元素:', mvrvEl ? '找到' : '未找到');
+    
+    if (mvrvEl && mvrvSignalEl) {
+        if (onchain.mvrv_ratio !== null && onchain.mvrv_ratio !== undefined) {
+            mvrvEl.textContent = onchain.mvrv_ratio.toFixed(2);
+            mvrvSignalEl.textContent = onchain.mvrv_signal || '--';
+            console.log('[OnChain] MVRV更新:', onchain.mvrv_ratio);
+            
+            // 根据 MVRV 值设置颜色
+            if (onchain.mvrv_ratio < 1) {
+                mvrvEl.className = 'text-xl font-bold text-green-400';
+                mvrvSignalEl.className = 'text-xs mt-1 text-green-500';
+            } else if (onchain.mvrv_ratio < 3.5) {
+                mvrvEl.className = 'text-xl font-bold text-yellow-400';
+                mvrvSignalEl.className = 'text-xs mt-1 text-yellow-500';
+            } else {
+                mvrvEl.className = 'text-xl font-bold text-red-400';
+                mvrvSignalEl.className = 'text-xs mt-1 text-red-500';
+            }
+        } else {
+            mvrvEl.textContent = '--';
+            mvrvSignalEl.textContent = onchain.mvrv_signal || '数据加载中...';
+        }
+    }
+    
+    // 200周均线
+    const wmaEl = document.getElementById('onchain200WMA');
+    const wmaRatioEl = document.getElementById('onchain200WMARatio');
+    if (wmaEl && wmaRatioEl) {
+        if (onchain.price_200wma !== null && onchain.price_200wma !== undefined) {
+            wmaEl.textContent = `$${onchain.price_200wma.toLocaleString()}`;
+            if (onchain.price_to_200wma_ratio) {
+                const ratio = onchain.price_to_200wma_ratio;
+                wmaRatioEl.textContent = `当前价格 / 200WMA = ${ratio.toFixed(2)}x`;
+                if (ratio > 1.5) {
+                    wmaRatioEl.className = 'text-xs mt-1 text-red-400';
+                } else if (ratio > 1.0) {
+                    wmaRatioEl.className = 'text-xs mt-1 text-yellow-400';
+                } else {
+                    wmaRatioEl.className = 'text-xs mt-1 text-green-400';
+                }
+            }
+        } else {
+            wmaEl.textContent = '--';
+            wmaRatioEl.textContent = '数据加载中...';
+        }
+    }
+    
+    // Balanced Price
+    const bpEl = document.getElementById('onchainBalancedPrice');
+    const bpRatioEl = document.getElementById('onchainBalancedPriceRatio');
+    if (bpEl && bpRatioEl) {
+        if (onchain.balanced_price !== null && onchain.balanced_price !== undefined) {
+            bpEl.textContent = `$${onchain.balanced_price.toLocaleString()}`;
+            if (onchain.current_price && onchain.balanced_price > 0) {
+                const ratio = (onchain.current_price / onchain.balanced_price).toFixed(2);
+                bpRatioEl.textContent = `当前价格 / BP = ${ratio}x`;
+            }
+        } else {
+            bpEl.textContent = '--';
+            bpRatioEl.textContent = '数据加载中...';
+        }
+    }
+    
+    // 减半倒计时
+    const halvingEl = document.getElementById('onchainHalvingDays');
+    const halvingDateEl = document.getElementById('onchainHalvingDate');
+    if (halvingEl) {
+        if (onchain.halving_days_remaining !== null && onchain.halving_days_remaining !== undefined) {
+            halvingEl.textContent = `${onchain.halving_days_remaining} 天`;
+            
+            // 估算减半日期
+            const halvingDate = new Date();
+            halvingDate.setDate(halvingDate.getDate() + onchain.halving_days_remaining);
+            halvingDateEl.textContent = `预计 ${halvingDate.getFullYear()}年${halvingDate.getMonth() + 1}月`;
+        } else {
+            halvingEl.textContent = '--';
+            halvingDateEl.textContent = '--';
+        }
+    }
+    
+    // MVRV 周期模式分析（参考 Murphy 的推文）
+    const analysisEl = document.getElementById('onchainMVRVAnalysis');
+    if (analysisEl && onchain.mvrv_ratio !== null && onchain.mvrv_ratio !== undefined) {
+        analysisEl.classList.remove('hidden');
+        
+        let analysisText = '<i class="fas fa-chart-line mr-2"></i> ';
+        analysisText += '<b>MVRV 周期模式分析（参考 Messari & Murphy）</b><br>';
+        analysisText += '• BTC 前3轮减半后 MVRV 走势高度同频<br>';
+        analysisText += '• 历史顶部信号：MVRV > 3.5（Messari 2022年报告）<br>';
+        analysisText += '• 历史底部信号：MVRV < 1.0<br>';
+        
+        if (onchain.mvrv_ratio < 1) {
+            analysisText += `<br><span class="text-green-400">📊 当前 MVRV ${onchain.mvrv_ratio.toFixed(2)} 处于历史底部区域，可能是积累机会</span>`;
+        } else if (onchain.mvrv_ratio < 3.5) {
+            analysisText += `<br><span class="text-yellow-400">📊 当前 MVRV ${onchain.mvrv_ratio.toFixed(2)} 处于正常区间</span>`;
+        } else {
+            analysisText += `<br><span class="text-red-400">📊 当前 MVRV ${onchain.mvrv_ratio.toFixed(2)} 处于过热区域，注意风险</span>`;
+        }
+        
+        analysisEl.innerHTML = analysisText;
+    }
 }
 
 function getRiskColor(score) {
@@ -1382,7 +1500,7 @@ async function calcPayoff() {
         const optionType = document.getElementById('payoffOptionType').value;
         const quantity = parseFloat(document.getElementById('payoffQuantity').value) || 1;
         const strike = parseFloat(document.getElementById('payoffStrike').value);
-        const premium = parseFloat(document.getElementById('payoffPremium').value);
+        const premium = parseFloat(document.getElementById('payoffPremium').value) || 0;
         const dte = parseFloat(document.getElementById('payoffDTE').value) || 30;
         const iv = parseFloat(document.getElementById('payoffIV').value) || 50;
         const spot = parseFloat(document.getElementById('payoffSpot').value) || currentSpotPrice || 73000;
@@ -1400,10 +1518,10 @@ async function calcPayoff() {
         
         const data = await response.json();
         renderPayoffChart(data);
-        updatePayoffResult(data);
         
-        // 计算策略评分和实操建议
-        await calcStrategyScore({ direction, option_type: optionType, strike, premium, quantity }, spot, dte, iv);
+        // 计算策略评分和实操建议（同时更新胜率）
+        const scoreData = await calcStrategyScore({ direction, option_type: optionType, strike, premium, quantity }, spot, dte, iv);
+        updatePayoffResult(data, scoreData);
     } catch (error) {
         console.error('Payoff 计算失败:', error);
         showAlert('Payoff 计算失败', 'error');
@@ -1423,8 +1541,10 @@ async function calcStrategyScore(leg, spot, dte, iv) {
         
         const data = await response.json();
         renderStrategyAdvice(data);
+        return data.score;
     } catch (error) {
         console.error('策略评分计算失败:', error);
+        return null;
     }
 }
 
@@ -1690,7 +1810,7 @@ function renderWheelChart(data) {
     });
 }
 
-function updatePayoffResult(data) {
+function updatePayoffResult(data, scoreData = null) {
     document.getElementById('payoffMaxProfit').textContent = `$${data.max_profit.toLocaleString()}`;
     document.getElementById('payoffMaxLoss').textContent = `$${Math.abs(data.max_loss).toLocaleString()}`;
     document.getElementById('payoffBreakeven').textContent = data.breakevens.length > 0 ? `$${data.breakevens.map(b => b.toLocaleString()).join(', ')}` : '无';
@@ -1700,7 +1820,13 @@ function updatePayoffResult(data) {
     const riskReward = data.max_loss !== 0 ? (data.max_profit / Math.abs(data.max_loss)).toFixed(2) : 0;
     
     document.getElementById('payoffROI').textContent = `${roi}%`;
-    document.getElementById('payoffWinRate').textContent = '--';
+    
+    if (scoreData && scoreData.metrics && scoreData.metrics.win_rate_pct) {
+        document.getElementById('payoffWinRate').textContent = `${scoreData.metrics.win_rate_pct.toFixed(0)}%`;
+    } else {
+        document.getElementById('payoffWinRate').textContent = '--';
+    }
+    
     document.getElementById('payoffRiskReward').textContent = `1:${riskReward}`;
     
     document.getElementById('wheelResult').classList.add('hidden');

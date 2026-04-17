@@ -27,9 +27,10 @@ class Config:
     ROLL_SLIPPAGE_PCT = 0.05
     ROLL_SAFETY_BUFFER_PCT = 0.10
 
-    # v6.0: BTC Risk Floors
-    BTC_REGULAR_FLOOR = 55000.0
-    BTC_EXTREME_FLOOR = 45000.0
+    # v6.0: BTC Risk Floors (静态回退值，实际使用DynamicSupportCalculator动态计算)
+    # 这些值仅在API全部失败时作为最后手段使用
+    BTC_REGULAR_FLOOR = 65000.0  # 更新为更接近当前市场的值
+    BTC_EXTREME_FLOOR = 55000.0
 
     # v6.0.1: DVOL Threshold Constants
     DVOL_PANIC_THRESHOLD = 80      # 极度恐慌/高波动的 DVOL 分位阈值

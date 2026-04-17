@@ -58,21 +58,22 @@ class PayoffCalculator:
         leg_results = []
 
         for leg in legs:
+            option_type = self._normalize_option_type(leg.get("option_type", "P"))
             params = PayoffParams(
-                option_type=leg.get("option_type", "P"),
+                option_type=option_type,
                 strike=leg.get("strike", spot),
-                premium=leg.get("premium", 0),
+                premium=leg.get("premium", 0) or 0,
                 quantity=leg.get("quantity", 1),
                 spot=spot
             )
 
             if leg.get("direction") == "sell":
-                if params.option_type in ("P", "PUT"):
+                if option_type == "P":
                     pnl = self.calc_sell_put(params, prices)
                 else:
                     pnl = self.calc_sell_call(params, prices)
             else:
-                if params.option_type in ("P", "PUT"):
+                if option_type == "P":
                     pnl = self.calc_buy_put(params, prices)
                 else:
                     pnl = self.calc_buy_call(params, prices)
@@ -90,7 +91,7 @@ class PayoffCalculator:
             max_loss = min(pnl)
 
             leg_results.append({
-                "option_type": params.option_type,
+                "option_type": option_type,
                 "direction": leg.get("direction", "sell"),
                 "strike": params.strike,
                 "premium": params.premium,
@@ -133,12 +134,10 @@ class PayoffCalculator:
         
         leg = legs[0] if legs else {}
         direction = leg.get("direction", "sell")
-        option_type = leg.get("option_type", "P")
+        option_type = self._normalize_option_type(leg.get("option_type", "P"))
         strike = leg.get("strike", spot)
         
-        if direction == "sell" and option_type in ("P", "PUT"):
-            capital_at_risk = strike
-        elif direction == "sell" and option_type in ("C", "CALL"):
+        if direction == "sell":
             capital_at_risk = strike
         else:
             capital_at_risk = max_loss if max_loss > 0 else abs(max_profit)
@@ -171,41 +170,62 @@ class PayoffCalculator:
             "metrics": {
                 "roi_pct": round(roi, 2),
                 "apr_pct": round(apr, 2),
-                "win_rate_pct": round(win_rate, 2),
+                "win_rate_pct": round(win_rate * 100, 2),
                 "max_profit": round(max_profit, 2),
                 "max_loss": round(max_loss, 2),
                 "risk_reward_ratio": round(max_profit / max_loss, 2) if max_loss > 0 else 0
             }
         }
     
+    def _normalize_option_type(self, option_type: str) -> str:
+        """统一期权类型为大写标准格式"""
+        if not option_type:
+            return "P"
+        ot = str(option_type).upper().strip()
+        if ot in ("P", "PUT"):
+            return "P"
+        elif ot in ("C", "CALL"):
+            return "C"
+        return "P"
+    
     def _calc_win_rate(self, legs: List[Dict[str, Any]], spot: float, 
                        iv: float, dte: int) -> float:
         """
         计算策略胜率（基于正态分布近似）
+        返回 0-1 之间的概率值
         """
         if not legs:
             return 0.5
         
         leg = legs[0]
         direction = leg.get("direction", "sell")
-        option_type = leg.get("option_type", "P")
+        option_type = self._normalize_option_type(leg.get("option_type", "P"))
         strike = leg.get("strike", spot)
-        premium = leg.get("premium", 0)
+        premium = leg.get("premium", 0) or 0
         
-        breakeven = strike - premium if option_type in ("P", "PUT") else strike + premium
+        if spot <= 0 or dte <= 0 or iv <= 0:
+            return 0.5
+        
+        breakeven = strike - premium if option_type == "P" else strike + premium
+        
+        volatility_factor = spot * (iv / 100) * math.sqrt(dte / 365)
+        if volatility_factor <= 0:
+            return 0.5
+        
+        z = (breakeven - spot) / volatility_factor
         
         if direction == "sell":
-            if option_type in ("P", "PUT"):
-                prob = 1 - self._norm_cdf((breakeven - spot) / (spot * iv / 100 * math.sqrt(dte / 365)))
+            if option_type == "P":
+                prob = 1 - self._norm_cdf(z)
             else:
-                prob = self._norm_cdf((breakeven - spot) / (spot * iv / 100 * math.sqrt(dte / 365)))
+                prob = self._norm_cdf(z)
         else:
-            if option_type in ("P", "PUT"):
-                prob = self._norm_cdf((breakeven - spot) / (spot * iv / 100 * math.sqrt(dte / 365)))
+            if option_type == "P":
+                prob = self._norm_cdf(z)
             else:
-                prob = 1 - self._norm_cdf((breakeven - spot) / (spot * iv / 100 * math.sqrt(dte / 365)))
+                prob = 1 - self._norm_cdf(z)
         
-        return max(0, min(1, prob))
+        return max(0.0, min(1.0, prob))
     
     @staticmethod
     def _norm_cdf(x: float) -> float:
@@ -239,9 +259,9 @@ class PayoffCalculator:
         
         leg = legs[0] if legs else {}
         direction = leg.get("direction", "sell")
-        option_type = leg.get("option_type", "P")
+        option_type = self._normalize_option_type(leg.get("option_type", "P"))
         
-        if direction == "sell" and option_type in ("P", "PUT"):
+        if direction == "sell" and option_type == "P":
             scenario = "震荡市或温和看涨"
             advice_text = f"该策略胜率 {metrics.get('win_rate_pct', 0):.0f}%，风险回报比 1:{metrics.get('risk_reward_ratio', 0):.1f}。"
             if metrics.get('win_rate_pct', 0) >= 60:
@@ -292,6 +312,7 @@ class PayoffCalculator:
         """
         智能估算权利金（基于 Black-Scholes 公式近似）
         """
+        option_type = self._normalize_option_type(option_type)
         T = dte / 365.0
         sigma = iv / 100.0
         r = 0.05
@@ -302,22 +323,22 @@ class PayoffCalculator:
         d1 = (math.log(spot / strike) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
         d2 = d1 - sigma * math.sqrt(T)
         
-        if option_type in ("P", "PUT"):
+        if option_type == "P":
             premium = strike * math.exp(-r * T) * self._norm_cdf(-d2) - spot * self._norm_cdf(-d1)
         else:
             premium = spot * self._norm_cdf(d1) - strike * math.exp(-r * T) * self._norm_cdf(d2)
         
         premium = max(0, premium)
         
-        delta = self._norm_cdf(d1) if option_type in ("C", "CALL") else self._norm_cdf(d1) - 1
+        delta = self._norm_cdf(d1) if option_type == "C" else self._norm_cdf(d1) - 1
         
         return {
             "estimated_premium": round(premium, 2),
             "delta": round(delta, 3),
             "dte": dte,
             "iv": iv,
-            "intrinsic_value": round(max(0, strike - spot) if option_type in ("P", "PUT") else max(0, spot - strike), 2),
-            "time_value": round(max(0, premium - max(0, strike - spot) if option_type in ("P", "PUT") else max(0, premium - max(0, spot - strike))), 2)
+            "intrinsic_value": round(max(0, strike - spot) if option_type == "P" else max(0, spot - strike), 2),
+            "time_value": round(max(0, premium - max(0, strike - spot) if option_type == "P" else max(0, premium - max(0, spot - strike))), 2)
         }
     
     def compare_strategies(self, strategies: List[Dict[str, Any]], spot: float) -> Dict[str, Any]:

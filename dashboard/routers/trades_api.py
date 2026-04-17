@@ -116,7 +116,12 @@ async def get_wind_analysis(currency: str = Query(default="BTC"), days: int = Qu
         deribit_sp = float(summaries[0].get('underlying_price', 0)) if summaries else 0
         spot = deribit_sp if deribit_sp > 1000 else spot
     if not spot:
-        spot = 70000
+        try:
+            from services.spot_price import get_spot_price
+            spot = get_spot_price(currency)
+        except Exception:
+            from constants import get_spot_fallback
+            spot = get_spot_fallback(currency)
 
     total = summary_data['total'] or 1
     bp = summary_data['buy_put']

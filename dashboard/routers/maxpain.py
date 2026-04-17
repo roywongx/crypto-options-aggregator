@@ -86,6 +86,7 @@ async def _calc_max_pain_internal(currency: str):
             ng = sum(g for k, g in cg_map.items() if k >= ts) + sum(-g for k, g in pg_map.items() if k <= ts)
             call_oi_above = sum(v for k, v in co_map.items() if k >= ts)
             put_oi_below = sum(v for k, v in po_map.items() if k <= ts)
+            put_oi_at_strike = po_map.get(ts, 0)
             net_oi_exposure = call_oi_above - put_oi_below
             if ng != 0:
                 ngex = ng * spot * spot / 100
@@ -93,7 +94,8 @@ async def _calc_max_pain_internal(currency: str):
                 ngex = net_oi_exposure * 100
             gc.append({"strike": ts, "gex": round(ngex, 0), "net_gamma": round(ng, 2),
                        "net_oi_exposure": round(net_oi_exposure, 0),
-                       "call_oi_above": round(call_oi_above, 0), "put_oi_below": round(put_oi_below, 0)})
+                       "call_oi_above": round(call_oi_above, 0), "put_oi_below": round(put_oi_below, 0),
+                       "put_oi_at_strike": round(put_oi_at_strike, 0)})
             cs = 1 if net_oi_exposure >= 0 else -1
             if prev_sign is not None and cs != prev_sign and flip is None:
                 flip = ts
