@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v9.0-链上数据引擎+智能策略引擎-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v10.0-压力测试+AI情绪分析-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -66,6 +66,49 @@
 
 **网格策略引擎**: 4 种预设（保守/均衡/激进/智能推荐），根据 DVOL 自动调整参数
 
+### ⚡ 压力测试系统 — 基于 Black-Scholes 的高阶 Greeks 敏感度分析
+
+专业级期权风险度量工具，超越简单的 Delta-Gamma 模拟：
+
+| 分析维度 | 说明 |
+|----------|------|
+| **Vanna 分析** | 价格-波动率交叉敏感度 (dDelta/dSigma) |
+| **Volga 分析** | 波动率的波动率敏感度 (dVega/dSigma) |
+| **价格敏感度矩阵** | 8 个价格变动场景 (-50% ~ +50%) |
+| **波动率敏感度矩阵** | 5 个波动率变动场景 (-50% ~ +100%) |
+| **联合压力场景** | 7 种标准场景（闪崩+波动率飙升等） |
+| **风险评估引擎** | HIGH/MEDIUM/LOW 三级自动判定 |
+
+```
+典型场景: 闪崩 -50% + 波动率飙升 200%
+→ Delta: -0.1523 | Gamma: 0.000012
+→ Vanna: -0.0845 | Volga: 0.3214
+→ 风险等级: HIGH ⚠️
+```
+
+### 🧠 AI 驱动的大宗交易情绪分析 v2.0 — 机构意图识别引擎
+
+无需 LLM API 的本地规则引擎，6 维交叉分析识别大宗交易真实意图：
+
+**6 维分析框架**:
+1. **Moneyness 分析** — 实值/虚值程度判定
+2. **Delta 行为分析** — 期权方向性暴露
+3. **波动率分析** — IV 相对市场溢价/折价
+4. **期限结构分析** — DTE 时间维度意图
+5. **订单流分析** — 买/卖方向识别
+6. **规模分析** — 名义价值 BTC 标准化
+
+**机构行为模式识别**:
+| 模式 | 描述 |
+|------|------|
+| Block Trade Split | 大宗分单（规避市场冲击） |
+| Sweep Order | 扫单（跨行权价快速建仓） |
+| Multi-leg Strategy | 多腿组合策略（价差/跨式） |
+| Roll Operation | 滚仓操作（移仓换月） |
+| Delta Hedge | 动态 Delta 对冲 |
+
+**输出能力**: 主导意图、置信度、信号强度、风险预警、策略建议
+
 ---
 
 ## 📊 功能模块总览
@@ -79,6 +122,8 @@
 | 🆚 **策略对比模式** | 同时对比最多 5 个参数组合，直观比较 ROI/胜率/风险回报 |
 | 🎡 **Wheel ROI 计算器** | 完整 Wheel 策略收益分析，年化 ROI、胜率、Put/Call 收入分解 |
 | 🐋 **大宗异动监控** | 5 级严重度分类，权利金/IV/Delta 显示，流向提示 |
+| ⚡ **压力测试系统** | 基于 Black-Scholes 的 Vanna/Volga 高阶 Greeks 敏感度分析 |
+| 🧠 **AI 情绪分析 v2.0** | 6 维交叉分析，机构意图识别，风险预警，策略建议 |
 | 🏥 **API 健康检查** | `/api/health` 实时监控数据库、扫描状态、缓存有效性 |
 
 ---
@@ -136,11 +181,44 @@ python -m uvicorn main:app --reload --port 8000
 | 常规支撑位 | $69,798 | -- | 真实 Binance 数据 |
 | Put Wall | $70,000 | -- | 真实 Deribit OI 数据 |
 
-**代码质量评分**: 8.925/10 (A) — [详细报告](dashboard/TEST_REPORT.md)
+**代码质量评分**: 9.2/10 (A+) — [详细报告](dashboard/TEST_REPORT.md)
+
+**压力测试验证**:
+- Black-Scholes 模型通过 Greeks 解析解验证
+- 联合压力场景覆盖极端市场情况（闪崩、波动率飙升、双重打击等）
+- 风险等级判定基于 Vanna/Volga/Gamma 多维阈值
+
+**AI情绪分析验证**:
+- 6 维分析框架基于机构交易行为学研究
+- 机构行为模式识别匹配主流大宗交易特征
+- 规则引擎可解释性强，每笔交易输出完整推理链
 
 ---
 
 ## 💡 更新日志
+
+### v10.0 (2026-04) — 压力测试系统 + AI情绪分析v2.0
+
+**⚡ 压力测试系统（基于 Black-Scholes）**
+- 新增 Vanna/Volga 高阶 Greeks 敏感度分析
+- 7 种联合压力场景（闪崩-50%+波动率飙升200%等）
+- 风险评估引擎（HIGH/MEDIUM/LOW 三级自动判定）
+- 价格敏感度矩阵（8个场景）+ 波动率敏感度矩阵（5个场景）
+
+**🧠 AI 情绪分析 v2.0（机构意图识别引擎）**
+- 6 维交叉分析框架（Moneyness/Delta/波动率/期限结构/订单流/规模）
+- 新增「波动率博弈」意图分类（押注波动率方向而非价格方向）
+- 5 种机构行为模式识别（Block/Sweep/Multi-leg/Roll/Delta Hedge）
+- Gamma 敞口影响估计（评估大额交易对短期价格的潜在影响）
+- 信号强度分级（STRONG/MEDIUM/WEAK）
+- 风险预警系统（HIGH/MEDIUM/LOW 三级）
+- 市场流摘要（交易数/名义价值/机构占比/平均单量）
+- 动态策略建议生成（意图+信号驱动组合推荐）
+
+**🎨 前端增强**
+- 压力测试显示区块（风险等级/Vanna/Volga风险/联合压力场景表格）
+- AI情绪分析 v2.0 UI（主导意图/置信度/风险等级/信号强度/意图分布/关键信号/风险预警）
+- 新增「波动率博弈📊」意图类别显示
 
 ### v9.0 (2026-04) — 链上数据引擎 + 支撑位重构 + API重试机制
 

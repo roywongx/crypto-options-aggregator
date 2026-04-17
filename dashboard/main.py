@@ -1213,7 +1213,7 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         else:
             advice.append(f"⚠️ Gamma Flip ${gamma_flip['strike']:,.0f} — 价格在空头Gamma区，波动放大")
 
-    # 策略建议
+    # ===== 核心策略建议 v10.0（多维数据融合） =====
 
     if status == "NORMAL":
         advice.append(f"当前价格 ${spot:,.0f} 处于常规区间。")
@@ -1267,6 +1267,15 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         pressure_test_data = PressureTestEngine.stress_test(
             S=spot, K=atm_strike, T=t, r=r, sigma=sigma, option_type="P"
         )
+        
+        # 根据压力测试结果补充策略建议
+        if "risk_assessment" in pressure_test_data:
+            ra = pressure_test_data["risk_assessment"]
+            if ra.get("level") == "HIGH":
+                advice.append("⚡ 压力测试警告：Vanna/Volga 风险较高，建议严格对冲 Delta/Gamma 暴露")
+                actions.append("买入保护性期权对冲高阶风险")
+            elif ra.get("vanna_risk"):
+                advice.append("⚡ Vanna 风险：价格-波动率交叉敏感度强，需警惕波动率变动对 Delta 的影响")
     except Exception as e:
         logger.warning("压力测试计算失败: %s", str(e))
         pressure_test_data = {"error": str(e)}
@@ -1277,6 +1286,19 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         from services.ai_sentiment import AISentimentAnalyzer
         large_trades = _fetch_large_trades(currency, days=3, limit=50)
         ai_sentiment_data = AISentimentAnalyzer.analyze_market_sentiment(large_trades, spot)
+        
+        # 根据AI情绪分析补充策略建议
+        if "key_signals" in ai_sentiment_data and ai_sentiment_data["key_signals"]:
+            for signal in ai_sentiment_data["key_signals"][:2]:  # 只取前2个信号
+                if signal.get("type") in ("warning", "danger"):
+                    advice.append(f"🧠 AI信号: {signal.get('text', '')}")
+        
+        if "dominant_intent" in ai_sentiment_data:
+            dom = ai_sentiment_data["dominant_intent"]
+            if dom.get("name") == "机构对冲" and ai_sentiment_data.get("confidence", 0) > 60:
+                advice.append("🧠 AI识别：机构正在积极对冲风险，建议降低仓位暴露")
+            elif dom.get("name") == "方向性投机" and ai_sentiment_data.get("confidence", 0) > 60:
+                advice.append(f"🧠 AI识别：方向性投机主导市场（{'看跌' if ai_sentiment_data.get('put_call_ratio', {}).get('put_pct', 50) > 50 else '看涨'}），注意短期波动加剧")
     except Exception as e:
         logger.warning("AI情绪分析失败: %s", str(e))
         ai_sentiment_data = {"error": str(e)}
