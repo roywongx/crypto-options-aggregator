@@ -1579,6 +1579,10 @@ function updateLargeTrades(trades, count) {
     const container = document.getElementById('largeTradesList');
     const titleCount = document.getElementById('largeTradesTitleCount');
 
+    if (!container) { console.warn('大单风向标: container not found'); return; }
+
+    console.log('大单风向标更新:', count, '条记录,', trades?.length || 0, '条详情');
+
     if (count > 0) { titleCount.textContent = count; titleCount.classList.remove('hidden'); }
     else titleCount.classList.add('hidden');
 
