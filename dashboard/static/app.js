@@ -2650,14 +2650,22 @@ async function loadWindAnalysis() {
 // Module 1: IV Term Structure
 // ============================================================
 let tsChart = null;
-async function loadTermStructure() {
+async function loadTermStructure(retryCount = 0) {
+    const maxRetries = 2;
     const statusEl = document.getElementById('ts7');
     if (!statusEl) { console.warn('TS: container not found'); return; }
     try {
         const currency = document.getElementById('currencySelect')?.value || 'BTC';
         const resp = await safeFetch(API_BASE + '/api/charts/vol-surface?currency=' + currency);
         const d = await resp.json();
-        if (d.error) { console.warn('TS:', d.error); return; }
+        if (d.error) {
+            if (retryCount < maxRetries) {
+                setTimeout(() => loadTermStructure(retryCount + 1), 2000);
+                return;
+            }
+            showTermStructureError(d.error);
+            return;
+        }
 
         const tsData = d.term_structure || [];
 
@@ -2879,8 +2887,22 @@ async function loadTermStructure() {
         }
     } catch(e) {
         console.error('TS error:', e);
-        const ctx = document.getElementById('termStructureChart');
-        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">❌ 错误: ' + e.message + '</div>';
+        if (retryCount < maxRetries) {
+            setTimeout(() => loadTermStructure(retryCount + 1), 2000);
+        } else {
+            showTermStructureError(e.message);
+        }
+    }
+}
+
+function showTermStructureError(message) {
+    const el = document.getElementById('termStructureChart');
+    if (el && el.parentElement) {
+        el.parentElement.innerHTML = '<div class="text-gray-500 text-center py-8 text-xs">' +
+            '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
+            '数据加载失败: ' + safeHTML(message) + '<br>' +
+            '<button onclick="loadTermStructure()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
+            '<i class="fas fa-redo mr-1"></i>重试</button></div>';
     }
 }
 
@@ -2888,14 +2910,22 @@ async function loadTermStructure() {
 // Module 2: Max Pain & GEX
 // ============================================================
 let mpChart = null;
-async function loadMaxPain() {
+async function loadMaxPain(retryCount = 0) {
+    const maxRetries = 2;
     const spotEl = document.getElementById('mpSpot');
     if (!spotEl) { console.warn('MP: container not found'); return; }
     try {
         const currency = document.getElementById('currencySelect')?.value || 'BTC';
         const resp = await safeFetch(API_BASE + '/api/metrics/max-pain?currency=' + currency);
         const d = await resp.json();
-        if (d.error || !d.expiries) { console.warn('MP:', d.error || 'no expiries'); return; }
+        if (d.error || !d.expiries) {
+            if (retryCount < maxRetries) {
+                setTimeout(() => loadMaxPain(retryCount + 1), 2000);
+                return;
+            }
+            showMaxPainError(d.error || '无数据');
+            return;
+        }
 
         const exp = d.expiries[0];
         
@@ -3101,8 +3131,23 @@ async function loadMaxPain() {
         console.log('MP chart rendered:', strikes.length, 'strikes');
     } catch(e) {
         console.error('MP error:', e);
-        const ctx = document.getElementById('painGexChart');
-        if (ctx) ctx.parentElement.innerHTML = '<div class="text-red-400 text-center py-4 text-xs">❌ 错误: ' + e.message + '</div>';
+        if (retryCount < maxRetries) {
+            setTimeout(() => loadMaxPain(retryCount + 1), 2000);
+        } else {
+            showMaxPainError(e.message);
+        }
+    }
+}
+
+function showMaxPainError(message) {
+    const container = document.getElementById('painGexChart');
+    if (container && container.parentElement) {
+        const mpSection = container.closest('.grid') || container.parentElement;
+        mpSection.innerHTML = '<div class="col-span-2 text-gray-500 text-center py-8">' +
+            '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
+            '最大痛点数据加载失败: ' + safeHTML(message) + '<br>' +
+            '<button onclick="loadMaxPain()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
+            '<i class="fas fa-redo mr-1"></i>重试</button></div>';
     }
 }
 
