@@ -55,11 +55,11 @@ function applyGridPreset(presetId) {
     
     currentGridPreset = presetId;
     
-    if (preset.put_count !== undefined) document.getElementById('gridPutCount').value = preset.put_count;
-    if (preset.call_count !== undefined) document.getElementById('gridCallCount').value = preset.call_count;
-    if (preset.min_dte !== undefined) document.getElementById('gridMinDte').value = preset.min_dte;
-    if (preset.max_dte !== undefined) document.getElementById('gridMaxDte').value = preset.max_dte;
-    if (preset.min_apr !== undefined) document.getElementById('gridMinApr').value = preset.min_apr;
+    if (preset.put_count !== undefined) { const el = document.getElementById('gridPutCount'); if (el) el.value = preset.put_count; }
+    if (preset.call_count !== undefined) { const el = document.getElementById('gridCallCount'); if (el) el.value = preset.call_count; }
+    if (preset.min_dte !== undefined) { const el = document.getElementById('gridMinDte'); if (el) el.value = preset.min_dte; }
+    if (preset.max_dte !== undefined) { const el = document.getElementById('gridMaxDte'); if (el) el.value = preset.max_dte; }
+    if (preset.min_apr !== undefined) { const el = document.getElementById('gridMinApr'); if (el) el.value = preset.min_apr; }
     
     document.querySelectorAll('#gridPresetButtons button').forEach(btn => {
         btn.classList.remove('ring-1', 'bg-purple-500/15', 'text-purple-300', 'ring-purple-500/30',

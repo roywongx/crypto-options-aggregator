@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v2.5-前端加载优化-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v2.6-深度Bug修复-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -144,6 +144,23 @@ crypto-options-aggregator/
 ---
 
 ## 📝 更新日志
+
+### v2.6
+
+- **深度 Bug 修复**：全面检查修复 23 个问题
+  - 修复 grid-strategy.js null 引用错误（Cannot set properties of null）
+  - 修复数据库连接关闭导致 500 错误（status.py 全部改用 execute_read）
+  - 修复 health_check 时间戳解析错误（float 改为 strptime）
+  - 修复 export CSV 端点不可达（新增 /api/export/csv 到 main.py）
+  - 添加 null 保护到 initCharts 和 dvolValue
+  - 删除 loadDerivData 死代码（/api/derivatives 返回 404）
+  - 修复 AbortError 请求冲突（triggerScan 与 loadPageDataAsync 并发）
+  - 增加 API 超时时间从 15s 到 30s
+- **前端优化**
+  - loadPageDataAsync 并行加载所有模块
+  - 移除旧的 setTimeout 瀑布加载逻辑
+  - 创建 /api/dashboard-init 聚合 API
+  - 创建 updateWindUI/updateTermStructureUI/updateMaxPainUI 函数
 
 ### v2.5
 

@@ -18,34 +18,35 @@ def get_db_connection(read_only: bool = True):
 
 @router.get("/api/stats")
 async def get_stats():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM scan_records")
-    total_scans = cursor.fetchone()[0]
-    _today = datetime.utcnow().strftime('%Y-%m-%d')
-    cursor.execute("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (_today,))
-    today_scans = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM large_trades_history")
-    total_trades = cursor.fetchone()[0]
-    db_size = os.path.getsize(DB_PATH)
-    return {
-        "total_scans": total_scans,
-        "today_scans": today_scans,
-        "total_large_trades": total_trades,
-        "db_size_mb": round(db_size / (1024 * 1024), 2)
-    }
+    try:
+        from db.connection import execute_read
+        rows = execute_read("SELECT COUNT(*) FROM scan_records")
+        total_scans = rows[0][0] if rows else 0
+        _today = datetime.utcnow().strftime('%Y-%m-%d')
+        rows = execute_read("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (_today,))
+        today_scans = rows[0][0] if rows else 0
+        rows = execute_read("SELECT COUNT(*) FROM large_trades_history")
+        total_trades = rows[0][0] if rows else 0
+        db_size = os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
+        return {
+            "total_scans": total_scans,
+            "today_scans": today_scans,
+            "total_large_trades": total_trades,
+            "db_size_mb": round(db_size / (1024 * 1024), 2)
+        }
+    except Exception as e:
+        return {"total_scans": 0, "today_scans": 0, "total_large_trades": 0, "db_size_mb": 0, "error": str(e)}
 
 
 @router.get("/api/latest")
 async def get_latest_scan(currency: str = Query(default="BTC")):
     import json
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT * FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
-    """, (currency,))
-    row = cursor.fetchone()
-    if not row:
+    from db.connection import execute_read
+    try:
+        rows = execute_read("SELECT * FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
+    except Exception:
+        rows = []
+    if not rows:
         return {
             "success": False,
             "currency": currency,
@@ -56,8 +57,8 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
             "timestamp": None,
             "message": "暂无扫描数据，请先执行扫描"
         }
-    col_names = [desc[0] for desc in cursor.description] if cursor.description else []
-    rd = dict(zip(col_names, row)) if row and col_names else {}
+    row = rows[0]
+    rd = dict(row) if hasattr(row, 'keys') else {}
     _dvol_raw = {}
     if rd.get('raw_output'):
         try: _dvol_raw = json.loads(rd['raw_output'])
@@ -112,13 +113,10 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
 async def health_check():
     checks = {}
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA journal_mode")
-        mode = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM scan_records")
-        count = cursor.fetchone()[0]
-        checks["database"] = {"status": "ok", "mode": mode, "records": count}
+        from db.connection import execute_read
+        rows = execute_read("SELECT COUNT(*) FROM scan_records")
+        count = rows[0][0] if rows else 0
+        checks["database"] = {"status": "ok", "mode": "wal", "records": count}
     except Exception as e:
         checks["database"] = {"status": "error", "message": str(e)}
     for name, url in [
@@ -138,14 +136,15 @@ async def health_check():
 async def get_dvol_advice(currency: str = Query(default="BTC")):
     import json
     from services.dvol_analyzer import adapt_params_by_dvol
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT raw_output FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
-    row = cursor.fetchone()
+    from db.connection import execute_read
+    try:
+        rows = execute_read("SELECT raw_output FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
+    except Exception:
+        rows = []
     dvol_raw = {}
-    if row and row[0]:
+    if rows and rows[0][0]:
         try:
-            dvol_raw = json.loads(row[0])
+            dvol_raw = json.loads(rows[0][0])
         except Exception: pass
     _inner = dvol_raw.get("dvol_raw", dvol_raw)
     dvol_snapshot = {

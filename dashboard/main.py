@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
@@ -361,8 +361,15 @@ async def health_check():
         cursor.execute("SELECT MAX(timestamp) FROM scan_records")
         row = cursor.fetchone()
         if row and row[0]:
-            last_scan = float(row[0])
-            age = time.time() - last_scan
+            try:
+                last_scan_dt = datetime.strptime(str(row[0]), '%Y-%m-%d %H:%M:%S')
+                age = time.time() - last_scan_dt.timestamp()
+            except (ValueError, TypeError):
+                try:
+                    last_scan = float(row[0])
+                    age = time.time() - last_scan
+                except (ValueError, TypeError):
+                    age = 9999
             health["checks"]["last_scan_age_seconds"] = round(age, 1)
             if age > SCAN_INTERVAL_SECONDS * 2:
                 health["checks"]["scan_status"] = "stale"
@@ -387,6 +394,41 @@ async def health_check():
     
     status_code = 200 if health["status"] == "healthy" else 503
     return JSONResponse(content=health, status_code=status_code)
+
+
+@app.get("/api/export/csv")
+async def export_csv(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
+    """导出扫描数据为 CSV"""
+    import csv
+    import io
+    conn = get_db_connection(read_only=True)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT contracts_data FROM scan_records
+        WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
+    """, (currency,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row or not row[0]:
+        return JSONResponse(content={"error": "No data available"}, status_code=404)
+    
+    try:
+        contracts = json.loads(row[0])
+    except Exception:
+        return JSONResponse(content={"error": "Data parse error"}, status_code=500)
+    
+    output = io.StringIO()
+    if contracts:
+        writer = csv.DictWriter(output, fieldnames=contracts[0].keys())
+        writer.writeheader()
+        writer.writerows(contracts)
+    
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=options_{currency}_{hours}h.csv"}
+    )
 
 
 @app.post("/api/quick-scan")
@@ -487,6 +529,7 @@ async def dashboard_init(currency: str = Query(default="BTC")):
     前端一次请求即可渲染完整的仪表盘。
     """
     from routers.maxpain import _calc_max_pain_internal
+    from routers.trades_api import get_db_path
     
     # 并行执行三个独立的数据获取任务
     wind_task = asyncio.create_task(asyncio.to_thread(_fetch_wind_analysis, currency))
@@ -515,11 +558,10 @@ async def dashboard_init(currency: str = Query(default="BTC")):
 
 def _fetch_wind_analysis(currency: str, days: int = 30):
     """同步获取 Wind Analysis 数据"""
-    import sqlite3
-    from datetime import timedelta
+    from routers.trades_api import get_db_path
     from services.risk_framework import RiskFramework
     
-    db_path = Path(__file__).parent / "data" / "monitor.db"
+    db_path = get_db_path()
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -598,6 +640,12 @@ def _fetch_term_structure(currency: str):
     from services.instrument import _parse_inst_name
     from scipy import interpolate
     
+    # 只调用一次现货价格
+    try:
+        spot = get_spot_price(currency)
+    except Exception:
+        spot = 70000 if currency == "BTC" else 3000
+    
     summaries = fetch_deribit_summaries(currency)
     if not summaries:
         return {"error": "无法获取Deribit数据", "surface": [], "term_structure": [], "backwardation": False}
@@ -629,7 +677,8 @@ def _fetch_term_structure(currency: str):
     atm_ivs = []
     dtes = []
     for ed in expiry_data:
-        strikes = sorted(ed["strikes"], key=lambda x: abs(x["strike"] - (get_spot_price(currency) if get_spot_price(currency) > 1000 else 70000)))
+        # 使用预先获取的 spot 价格
+        strikes = sorted(ed["strikes"], key=lambda x: abs(x["strike"] - spot))
         atm_iv = None
         if strikes:
             atm_iv = strikes[0]["iv"]
@@ -695,38 +744,29 @@ def _get_iv_term_analysis(term_structure: list) -> dict:
 
 @app.get("/api/macro")
 async def get_macro(currency: str = Query(default="BTC")):
-    """获取宏观数据（DVOL + 现货 + 大单统计），轻量快速响应
-    
-    用于页面初始加载，不返回合约详情，确保秒开。
-    合约数据通过 /api/latest 单独获取。
-    """
-    conn = get_db_connection(read_only=True)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
-               large_trades_count, raw_output
-        FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
-    """, (currency,))
-    row = cursor.fetchone()
+    """获取宏观数据（DVOL + 现货 + 大单统计），轻量快速响应"""
+    from db.connection import execute_read
+    try:
+        rows = execute_read("""
+            SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
+                   large_trades_count, raw_output
+            FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
+        """, (currency,))
+    except Exception:
+        rows = []
 
-    if not row:
+    if not rows:
         return {
             "success": True,
             "currency": currency,
             "spot_price": get_spot_price(currency),
-            "dvol_current": 0,
-            "dvol_z_score": 0,
-            "dvol_signal": "",
-            "dvol_trend": "",
-            "dvol_trend_label": "",
-            "dvol_confidence": "",
-            "dvol_percentile_7d": 50,
-            "dvol_interpretation": "",
-            "large_trades_count": 0,
-            "timestamp": None,
-            "contracts_count": 0
+            "dvol_current": 0, "dvol_z_score": 0, "dvol_signal": "",
+            "dvol_trend": "", "dvol_trend_label": "", "dvol_confidence": "",
+            "dvol_percentile_7d": 50, "dvol_interpretation": "",
+            "large_trades_count": 0, "timestamp": None, "contracts_count": 0
         }
 
+    row = rows[0]
     raw = {}
     if row[6]:
         try:

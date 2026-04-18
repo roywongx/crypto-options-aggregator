@@ -40,7 +40,7 @@ let _currentSortField = null;
 let _currentSortDir = 'desc';
 
 const API_BASE = '';
-const API_TIMEOUT_MS = 15000;
+const API_TIMEOUT_MS = 30000;
 const FETCH_MAX_RETRIES = 1;
 
 async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
@@ -155,7 +155,9 @@ async function setAutoRefresh(minutes) {
 
 function initCharts() {
     // APR图表
-    const aprCtx = document.getElementById('aprChart').getContext('2d');
+    const aprEl = document.getElementById('aprChart');
+    if (!aprEl) return;
+    const aprCtx = aprEl.getContext('2d');
     aprChart = new Chart(aprCtx, {
         type: 'line',
         data: {
@@ -234,7 +236,9 @@ function initCharts() {
     });
 
     // DVOL图表
-    const dvolCtx = document.getElementById('dvolChart').getContext('2d');
+    const dvolEl = document.getElementById('dvolChart');
+    if (!dvolEl) return;
+    const dvolCtx = dvolEl.getContext('2d');
     dvolChart = new Chart(dvolCtx, {
         type: 'line',
         data: {
@@ -349,7 +353,16 @@ async function triggerScan() {
 
         if (result.success) {
             showAlert(`扫描完成！发现 ${result.contracts_count} 个合约`, 'success');
-            await loadLatestData();
+            await loadLatestData(true, true);
+            // 扫描完成后刷新图表
+            const currency = document.getElementById('currencySelect')?.value || 'BTC';
+            loadWindAnalysis().catch(() => {});
+            loadTermStructure().catch(() => {});
+            loadMaxPain().catch(() => {});
+            loadPcrChart(currency, chartPeriods.pcr || 168).catch(() => {});
+            loadAprChartData().catch(() => {});
+            loadDvolChartData().catch(() => {});
+            loadRiskDashboard(currency).catch(() => {});
             await loadStats();
         } else {
             showAlert('扫描失败: ' + (result.detail || result.error), 'error');
@@ -649,7 +662,7 @@ function displayRecoveryResult(result) {
     }
 }
 
-async function loadLatestData(showSuccess = true) {
+async function loadLatestData(showSuccess = true, skipCharts = false) {
     try {
         if (!navigator.onLine) {
             showAlert('网络连接已断开，刷新失败', 'error');
@@ -697,11 +710,13 @@ async function loadLatestData(showSuccess = true) {
             showDvolAdvice(data.currency || 'BTC');
         }
 
-        loadAprChartData();
-        loadDvolChartData();
-        loadPcrChart(currency, chartPeriods.pcr || 168);
-        
-        loadRiskDashboard(currency);
+        // 仅在非初始化加载时才更新图表（避免重复请求）
+        if (!skipCharts) {
+            loadAprChartData();
+            loadDvolChartData();
+            loadPcrChart(currency, chartPeriods.pcr || 168);
+            loadRiskDashboard(currency);
+        }
     } catch (error) {
         console.error('加载数据失败:', error);
         showAlert(`数据刷新失败: ${error.message}`, 'error');
@@ -733,16 +748,22 @@ async function loadDashboardInit() {
         // 更新 Wind Analysis
         if (data.wind && !data.wind.error) {
             updateWindUI(data.wind);
+        } else {
+            console.warn('[DashboardInit] Wind error:', data.wind?.error);
         }
         
         // 更新 Term Structure
         if (data.term_structure && !data.term_structure.error) {
             updateTermStructureUI(data.term_structure);
+        } else {
+            console.warn('[DashboardInit] Term structure error:', data.term_structure?.error);
         }
         
         // 更新 Max Pain
         if (data.max_pain && !data.max_pain.error) {
             updateMaxPainUI(data.max_pain);
+        } else {
+            console.warn('[DashboardInit] Max pain error:', data.max_pain?.error);
         }
     } catch (e) {
         console.error('Failed to load dashboard init:', e);
@@ -757,21 +778,43 @@ function updateWindUI(data) {
         countEl.classList.remove('hidden');
     }
     
-    const score = data.sentiment_score || 0;
-    let icon, scoreLabel, scoreClass;
-    if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-green-500/20 text-green-300'; }
-    else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-green-900/30 text-green-400'; }
-    else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
-    else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-red-900/30 text-red-400'; }
-    else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-red-500/20 text-red-300'; }
-    
-    const iconEl = document.getElementById('windSentimentIcon');
-    if (iconEl) iconEl.textContent = icon;
-    
-    const scEl = document.getElementById('windSentimentScore');
-    if (scEl) {
-        scEl.textContent = scoreLabel;
-        scEl.className = `px-2 py-1 rounded-lg text-xs font-bold ${scoreClass}`;
+    const summaryCard = document.getElementById('windSummaryCard');
+    if (summary.total_trades > 0) {
+        summaryCard?.classList.remove('hidden');
+        
+        const score = data.sentiment_score || 0;
+        let icon, scoreLabel, scoreClass;
+        if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-green-500/20 text-green-300'; }
+        else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-green-900/30 text-green-400'; }
+        else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
+        else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-red-900/30 text-red-400'; }
+        else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-red-500/20 text-red-300'; }
+        
+        const iconEl = document.getElementById('windSentimentIcon');
+        if (iconEl) iconEl.textContent = icon;
+        
+        const scEl = document.getElementById('windSentimentScore');
+        if (scEl) { scEl.textContent = scoreLabel; scEl.className = `text-xs font-mono px-2 py-0.5 rounded ${scoreClass}`; }
+        
+        const sentimentTextEl = document.getElementById('windSentimentText');
+        if (sentimentTextEl) sentimentTextEl.textContent = data.sentiment_text || data.dominant_flow || '';
+        
+        const buySellRatioEl = document.getElementById('windBuySellRatio');
+        if (buySellRatioEl) buySellRatioEl.textContent = `${(data.buy_ratio * 100 || 0).toFixed(0)}% / ${((1 - data.buy_ratio) * 100 || 0).toFixed(0)}%`;
+        
+        const totalNotionalEl = document.getElementById('windTotalNotional');
+        if (totalNotionalEl) totalNotionalEl.textContent = data.spot ? `$${(data.spot / 1000).toFixed(0)}K` : '-';
+        
+        const dominantFlowEl = document.getElementById('windDominantFlow');
+        if (dominantFlowEl) dominantFlowEl.textContent = data.dominant_flow || '-';
+        
+        const spotMarkerEl = document.getElementById('windSpotMarker');
+        if (spotMarkerEl && data.spot > 0) {
+            spotMarkerEl.textContent = `● 现价 $${data.spot.toLocaleString()}`;
+            spotMarkerEl.classList.remove('hidden');
+        }
+    } else {
+        summaryCard?.classList.add('hidden');
     }
 }
 
@@ -788,63 +831,216 @@ function updateTermStructureUI(data) {
     
     targetDtes.forEach(({key, target}) => {
         const el = document.getElementById('ts' + key);
+        const dteEl = document.getElementById('ts' + key + 'dte');
         if (!el) return;
         
-        let closest = null;
-        let minDiff = Infinity;
-        for (const item of tsData) {
-            const diff = Math.abs(item.dte - target);
-            if (diff < minDiff) {
-                minDiff = diff;
-                closest = item;
+        let best = null;
+        let bestDiff = Infinity;
+        for (const t of tsData) {
+            const diff = Math.abs(t.dte - target);
+            if (diff < bestDiff && t.avg_iv !== null && t.avg_iv > 0) {
+                bestDiff = diff;
+                best = t;
             }
         }
         
-        if (closest && closest.avg_iv) {
-            el.textContent = closest.avg_iv.toFixed(1) + '%';
-            el.classList.remove('text-gray-600');
-            if (closest.avg_iv > 80) el.classList.add('text-red-400');
-            else if (closest.avg_iv > 60) el.classList.add('text-yellow-400');
-            else el.classList.add('text-green-400');
+        const maxAllowedDiff = target * 0.5 + 5;
+        if (best && bestDiff <= maxAllowedDiff) {
+            const iv = best.avg_iv;
+            el.textContent = iv.toFixed(1) + '%';
+            if (iv > 70) el.className = 'font-mono text-sm font-bold text-red-400';
+            else if (iv > 55) el.className = 'font-mono text-sm font-bold text-yellow-400';
+            else el.className = 'font-mono text-sm font-bold text-cyan-400';
+            if (dteEl) dteEl.textContent = best.dte !== target ? `DTE ${best.dte}` : '';
         } else {
             el.textContent = '--';
-            el.classList.add('text-gray-600');
+            el.className = 'font-mono text-sm font-bold text-gray-600';
+            if (dteEl) dteEl.textContent = '';
         }
     });
+    
+    // 更新期限结构标签
+    const structLabel = document.getElementById('tsStructureLabel');
+    const slopeLabel = document.getElementById('tsSlopeLabel');
+    if (structLabel && slopeLabel && tsData.length >= 2) {
+        const frontIv = tsData[0].avg_iv;
+        const backIv = tsData[tsData.length - 1].avg_iv;
+        if (frontIv && backIv) {
+            if (frontIv > backIv) {
+                structLabel.textContent = 'Backwardation';
+                structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium';
+            } else {
+                structLabel.textContent = 'Contango';
+                structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium';
+            }
+            const slope = ((backIv - frontIv) / frontIv * 100).toFixed(1);
+            slopeLabel.textContent = (slope > 0 ? '+' : '') + slope + '%';
+            slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+        }
+    }
+    
+    // 更新 backwardation 警报
+    const bwEl = document.getElementById('backwardationAlert');
+    const bwTxt = document.getElementById('bwText');
+    if (bwEl && bwTxt && data.backwardation) {
+        bwEl.classList.remove('hidden');
+        bwTxt.textContent = '近高远低结构';
+    } else if (bwEl) {
+        bwEl.classList.add('hidden');
+    }
 }
 
 function updateMaxPainUI(data) {
     const nearestMp = data.nearest_mp;
-    const mpEl = document.getElementById('maxPainValue');
-    if (mpEl && nearestMp) {
-        mpEl.textContent = `$${nearestMp.toLocaleString()}`;
+    const spot = data.spot;
+    const mmOverview = data.mm_overview || '';
+    const signal = data.signal || '';
+    const firstExpiry = (data.expiries && data.expiries.length > 0) ? data.expiries[0] : null;
+    
+    // 更新关键数据卡片
+    const mpSpot = document.getElementById('mpSpot');
+    if (mpSpot && spot) {
+        mpSpot.textContent = `$${spot.toLocaleString()}`;
     }
     
-    const mmSignal = data.mm_overview || '';
-    const signalEl = document.getElementById('mmSignalText');
-    if (signalEl && mmSignal) {
-        signalEl.textContent = mmSignal;
+    // 更新 Max Pain 价格
+    const mpPrice = document.getElementById('mpPrice');
+    if (mpPrice && nearestMp) {
+        mpPrice.textContent = `$${nearestMp.toLocaleString()}`;
+    }
+    
+    // 更新 Gamma Flip 信息
+    const mpFlip = document.getElementById('mpFlip');
+    if (mpFlip && firstExpiry && firstExpiry.gamma_status && firstExpiry.gamma_status.flip_strike) {
+        mpFlip.textContent = `$${firstExpiry.gamma_status.flip_strike.toLocaleString()}`;
+    }
+    
+    // 更新距离信息
+    const mpDist = document.getElementById('mpDist');
+    if (mpDist && data.nearest_dist !== undefined) {
+        mpDist.textContent = `${data.nearest_dist}%`;
+    }
+    
+    // 更新 PCR 信息
+    const mpPCR = document.getElementById('mpPCR');
+    if (mpPCR && firstExpiry && firstExpiry.pcr !== undefined) {
+        mpPCR.textContent = firstExpiry.pcr.toFixed(2);
+    }
+    
+    // 更新信号文本
+    const mpSignal = document.getElementById('mpSignal');
+    if (mpSignal && signal) {
+        mpSignal.textContent = signal;
+    }
+    
+    // 更新 Gamma 状态卡片（从第一个到期日提取）
+    const gammaStatus = firstExpiry ? firstExpiry.gamma_status : null;
+    if (gammaStatus) {
+        const statusCard = document.getElementById('gammaStatusCard');
+        if (statusCard) {
+            statusCard.classList.remove('hidden');
+            statusCard.className = 'mb-3 p-3 rounded-lg border ' + 
+                (gammaStatus.region === 'long' ? 'border-emerald-500/30 bg-emerald-500/5' :
+                 gammaStatus.region === 'short' ? 'border-red-500/30 bg-red-500/5' :
+                 'border-gray-500/30 bg-gray-500/5');
+        }
+        
+        const iconEl = document.getElementById('gammaStatusIcon');
+        if (iconEl && gammaStatus.icon) {
+            iconEl.textContent = gammaStatus.icon;
+        }
+        
+        const textEl = document.getElementById('gammaStatusText');
+        if (textEl && gammaStatus.region_cn) {
+            textEl.textContent = gammaStatus.region_cn;
+            textEl.className = 'text-sm font-bold ' + 
+                (gammaStatus.region === 'long' ? 'text-emerald-400' :
+                 gammaStatus.region === 'short' ? 'text-red-400' : 'text-gray-400');
+        }
+        
+        const distEl = document.getElementById('gammaDistance');
+        if (distEl && gammaStatus.distance_pct !== undefined) {
+            const distText = (gammaStatus.region === 'long' ? '现货高于 Flip 点 ' : '现货低于 Flip 点 ') + gammaStatus.distance_pct.toFixed(1) + '%';
+            distEl.textContent = distText;
+        }
+        
+        const volEl = document.getElementById('gammaVolatility');
+        if (volEl && gammaStatus.volatility) {
+            volEl.textContent = gammaStatus.volatility;
+        }
+        
+        const instEl = document.getElementById('gammaInstitutional');
+        if (instEl && gammaStatus.institutional) {
+            instEl.textContent = gammaStatus.institutional;
+        }
+        
+        // 更新区域距离卡片
+        const regionDistEl = document.getElementById('mpRegionDist');
+        if (regionDistEl && gammaStatus.distance_pct !== undefined) {
+            regionDistEl.textContent = (gammaStatus.distance_pct > 0 ? '+' : '') + gammaStatus.distance_pct.toFixed(1) + '%';
+            regionDistEl.className = 'font-mono text-xs ' + 
+                (gammaStatus.distance_pct > 5 ? 'text-emerald-400' :
+                 gammaStatus.distance_pct < -5 ? 'text-red-400' : 'text-gray-400');
+        }
+    }
+    
+    // 更新策略建议（从第一个到期日提取）
+    const gammaAdvice = firstExpiry ? firstExpiry.gamma_advice : null;
+    if (gammaAdvice) {
+        const adviceCard = document.getElementById('gammaAdviceCard');
+        if (adviceCard) {
+            adviceCard.classList.remove('hidden');
+            adviceCard.className = 'mb-3 p-2.5 rounded-lg border ' + 
+                (gammaStatus && gammaStatus.region === 'long' ? 'border-emerald-500/20 bg-emerald-500/5' :
+                 gammaStatus && gammaStatus.region === 'short' ? 'border-red-500/20 bg-red-500/5' :
+                 'border-gray-500/20 bg-gray-500/5');
+        }
+        
+        const adviceText = document.getElementById('gammaAdviceText');
+        if (adviceText && gammaAdvice.text) {
+            adviceText.textContent = gammaAdvice.text;
+        }
+        
+        const advicePosition = document.getElementById('advicePosition');
+        if (advicePosition && gammaAdvice.position_pct) {
+            advicePosition.textContent = `${gammaAdvice.position_pct}%`;
+        }
+        
+        const adviceStrategy = document.getElementById('adviceStrategy');
+        if (adviceStrategy && gammaAdvice.strategy) {
+            adviceStrategy.textContent = gammaAdvice.strategy;
+        }
+        
+        const adviceDelta = document.getElementById('adviceDelta');
+        if (adviceDelta && gammaAdvice.delta_range) {
+            adviceDelta.textContent = gammaAdvice.delta_range;
+        }
+    }
+    
+    // 风险预警
+    const mmEl = document.getElementById('mmAlert');
+    if (firstExpiry && firstExpiry.mm_signal && mmEl) {
+        mmEl.classList.remove('hidden');
+        mmEl.className = firstExpiry.mm_signal.includes('DANGER') || firstExpiry.mm_signal.includes('危险') ? 
+            'mb-3 p-2 rounded text-xs bg-red-900/40 border border-red-500/50 text-red-300' : 
+            'mb-3 p-2 rounded text-xs bg-green-900/30 border border-green-500/30 text-green-300';
+        mmEl.textContent = firstExpiry.mm_signal;
+    } else if (mmEl) {
+        mmEl.classList.add('hidden');
     }
 }
 
 function loadPageDataAsync() {
     const currency = document.getElementById('currencySelect')?.value || 'BTC';
-    // 使用聚合 API 一次性加载 Wind/TermStructure/MaxPain
-    loadDashboardInit().catch(() => {});
-    // 其他独立数据源并行加载
-    loadLatestData(false).catch(() => {});
-    loadPcrChart(currency, chartPeriods.pcr || 168).catch(() => {});
-    loadDerivData(currency).catch(() => {});
-}
-
-async function loadDerivData(currency) {
-    try {
-        const res = await safeFetch(`${API_BASE}/api/derivatives/${currency}`);
-        const data = await res.json();
-        updateDerivativeMetrics(data);
-    } catch (e) {
-        console.error('Failed to load derivatives:', e);
-    }
+    // 所有数据源并行加载，互不阻塞
+    loadLatestData(false, true).catch(e => console.error('[loadPageDataAsync] loadLatestData failed:', e));
+    loadWindAnalysis().catch(e => console.error('[loadPageDataAsync] loadWindAnalysis failed:', e));
+    loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
+    loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
+    loadPcrChart(currency, chartPeriods.pcr || 168).catch(e => console.error('[loadPageDataAsync] loadPcrChart failed:', e));
+    loadAprChartData().catch(e => console.error('[loadPageDataAsync] loadAprChartData failed:', e));
+    loadDvolChartData().catch(e => console.error('[loadPageDataAsync] loadDvolChartData failed:', e));
+    loadRiskDashboard(currency).catch(e => console.error('[loadPageDataAsync] loadRiskDashboard failed:', e));
 }
 
 async function loadRiskDashboard(currency = 'BTC') {
@@ -1501,7 +1697,8 @@ function updateMacroIndicators(data) {
     }
 
     const dvol = data.dvol_current;
-    document.getElementById('dvolValue').textContent = dvol ? dvol.toFixed(2) : '--';
+    const dvolEl = document.getElementById('dvolValue');
+    if (dvolEl) dvolEl.textContent = dvol ? dvol.toFixed(2) : '--';
 
     const dvolSignal = document.getElementById('dvolSignal');
     const zScore = data.dvol_z_score;
