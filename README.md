@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v18.0-异步性能优化-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v2.5-前端加载优化-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -145,14 +145,9 @@ crypto-options-aggregator/
 
 ## 📝 更新日志
 
-### v18.0 - 异步性能优化 + 聚合 API
+### v2.5
 
-- **全异步迁移**：从 requests + ThreadPool 迁移到 httpx.AsyncClient
-  - 新增 spot_price.py 异步版本（get_spot_price_async）
-  - 新增 _fetch_large_trades_async 异步大单获取
-  - quick_scan 改为真正的 async def，使用 asyncio.gather 并行获取所有数据源
-  - 移除 ThreadPoolExecutor 包装，消除线程上下文切换开销
-- **聚合 API**：创建 /api/dashboard-init 端点
+- **聚合 API**：创建 /api/dashboard-init 端点，消除瀑布加载
   - 后端使用 asyncio.gather 并行获取 Wind/TermStructure/MaxPain
   - 前端使用聚合 API 替代 setTimeout 瀑布加载
   - 页面初始化从 3-4 秒优化为单次并行请求
@@ -160,38 +155,11 @@ crypto-options-aggregator/
   - 移除旧的 setTimeout 瀑布加载逻辑（2s/2.5s/3s 延迟）
   - 新增 loadDashboardInit() 调用聚合 API
   - 新增 updateWindUI/updateTermStructureUI/updateMaxPainUI 函数
-  - "加载更多"按钮已存在且正常工作
 
-### v17.0 - 页面加载性能优化
+### v2.4
 
-- 重构为并行异步加载，所有数据源同时启动
-- 页面打开自动预加载，无需手动刷新
-- 重试间隔从 10s 缩短到 5s
-- 独立模块重试，互不阻塞
-
-### v16.1 - 大单风向标调试
-
-- 添加 console.log 调试信息到 updateLargeTrades 函数
-- 优化加载提示和错误处理
-
-### v16.0 - 模块加载重试机制
-
-- IV 期限结构和最大痛点添加 2 次自动重试
-- 友好错误提示 + 重试按钮
-- 改善用户体验
-
-### v15.0 - 前端板块去重合并
-
-- 删除独立网格策略引擎板块（~106 行 HTML）
-- 清理相关 JavaScript 函数
-- 统一策略引擎作为唯一入口
-
-### v14.0 - 统一策略推荐引擎
-
-- 整合滚仓/新建/网格三种模式到统一引擎
-- ContractFilter/UnifiedScorer/StrategyParams 标准化接口
-- 前端支持三种模式切换
-- 代码复用率提升 60%
+- 优化数据库 JSON 解析性能
+- 使用 top_contracts_data 避免解析全量 JSON
 
 ### v2.3
 
