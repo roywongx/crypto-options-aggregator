@@ -8,8 +8,37 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+def _norm_cdf_approx(x: float) -> float:
+    """Abramowitz & Stegun 公式 7.1.26，最大误差 < 7.5e-8
+    
+    基于误差函数补码 erfc 的有理逼近。
+    """
+    # 标准正态 PDF
+    pdf = math.exp(-x * x / 2.0) / math.sqrt(2.0 * math.pi)
+    
+    # erfc 逼近系数 (Abramowitz & Stegun 7.1.26)
+    p = 0.2316419
+    b1 = 0.319381530
+    b2 = -0.356563782
+    b3 = 1.781477937
+    b4 = -1.821255978
+    b5 = 1.330274429
+    
+    sign = 1.0 if x >= 0 else -1.0
+    ax = abs(x)
+    t = 1.0 / (1.0 + p * ax)
+    
+    # erfc(ax/sqrt(2)) 的逼近
+    erfc_approx = pdf * (b1*t + b2*t**2 + b3*t**3 + b4*t**4 + b5*t**5)
+    
+    # Φ(x) = 0.5 * (1 + sign * (1 - erfc(ax/sqrt(2))))
+    return 0.5 * (1.0 + sign * (1.0 - 2.0 * erfc_approx))
+
 def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type: str = 'P') -> float:
-    """使用 Black-Scholes 计算期权 Delta (Bug B1 修复)"""
+    """使用 Black-Scholes 计算期权 Delta
+    
+    优先使用 scipy.stats.norm.cdf，回退到 Abramowitz & Stegun 近似（精度 7.5e-8）
+    """
     if strike <= 0 or spot <= 0 or dte <= 0 or iv <= 0:
         return 0.3
     t = dte / 365.0
@@ -21,7 +50,7 @@ def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type
         from scipy.stats import norm
         nd1 = norm.cdf(d1)
     except Exception:
-        nd1 = max(0.0, min(1.0, 0.5 + 0.5 * math.tanh(d1 * 0.8)))
+        nd1 = _norm_cdf_approx(d1)
     if option_type.upper() in ('P', 'PUT'):
         return round(nd1 - 1, 4)
     return round(nd1, 4)

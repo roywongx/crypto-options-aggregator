@@ -215,8 +215,7 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         return parsed
 
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error("adapt_params_by_dvol failed: %s", str(e), exc_info=True)
+        logger.error("scan adapter failed: %s", str(e), exc_info=True)
         return {"success": False, "error": "参数适配失败，请检查输入参数"}
 
 

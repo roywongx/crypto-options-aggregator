@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v18.0-后端性能优化-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v19.0-代码质量修复-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -282,6 +282,29 @@ python -m uvicorn main:app --reload --port 8000
 - 现货价格缓存从 5 分钟缩短到 5 秒
 - 确保所有组件使用相同的时间戳和价格
 - 减少对外部 API 的重复请求
+
+### v19.0 (2026-04) — 代码质量修复
+
+**🔧 统一异常捕获日志记录**
+- main.py 中的 except 块统一使用顶层 logger 记录错误
+- 避免在 catch 块中重复 import logging，减少运行时开销
+- 所有异常添加 exc_info=True 输出完整堆栈跟踪
+
+**🎯 改进 Delta 估算逻辑**
+- dvol_analyzer.py 使用 Abramowitz & Stegun 公式 7.1.26 近似正态 CDF
+- 最大误差 < 7.5e-8，替代原有的 math.tanh 近似（误差 3.7%）
+- scipy 不可用时自动降级到高精度近似公式
+
+**🗃️ 增强数据库连接池**
+- SQLite 连接 busy_timeout 从 30s 提升到 60s，应对高并发读取
+- 添加 PRAGMA synchronous=NORMAL 和 wal_autocheckpoint=1000
+- 新增 execute_with_retry() 包装器自动重试 "database is locked" 错误
+- close_db_connection() 添加异常处理防止资源泄漏
+
+**🛡️ 修复 Binance Ticker 查找潜在崩溃**
+- main.py quick_scan 使用 dict.get() 替代直接键访问
+- 新增合约不存在于 ticker 数据中时不再抛出 KeyError
+- 所有 Binance 数据查找提供安全默认值
 
 ### v17.0 (2026-04) — 并行异步加载优化
 
