@@ -367,19 +367,31 @@ function setCalcMode(mode) {
     currentCalcMode = mode;
     const rollBtn = document.getElementById('modeRollBtn');
     const newBtn = document.getElementById('modeNewBtn');
+    const gridBtn = document.getElementById('modeGridBtn');
     const rollFields = document.getElementById('scRollFields');
     const newFields = document.getElementById('scNewFields');
+    const gridFields = document.getElementById('scGridFields');
+    const optionTypeSelect = document.getElementById('scOptionType');
+
+    rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+    newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+    gridBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
+
+    rollFields.classList.add('hidden');
+    newFields.classList.add('hidden');
+    gridFields.classList.add('hidden');
+    optionTypeSelect.disabled = false;
 
     if (mode === 'roll') {
         rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-orange-500/20 border border-orange-500/50 text-orange-400';
-        newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
         rollFields.classList.remove('hidden');
-        newFields.classList.add('hidden');
-    } else {
+    } else if (mode === 'new') {
         newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-blue-500/20 border border-blue-500/50 text-blue-400';
-        rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
         newFields.classList.remove('hidden');
-        rollFields.classList.add('hidden');
+    } else if (mode === 'grid') {
+        gridBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-purple-500/20 border border-purple-500/50 text-purple-400';
+        gridFields.classList.remove('hidden');
+        optionTypeSelect.disabled = true;
     }
 }
 
@@ -407,8 +419,12 @@ async function submitStrategyCalc() {
             showAlert('请输入旧行权价', 'error');
             return;
         }
-    } else {
+    } else if (currentCalcMode === 'new') {
         params.target_apr = parseFloat(document.getElementById('scTargetApr').value) || 200;
+    } else if (currentCalcMode === 'grid') {
+        params.put_count = parseInt(document.getElementById('scGridPutCount').value) || 5;
+        params.call_count = parseInt(document.getElementById('scGridCallCount').value) || 0;
+        params.min_apr = parseFloat(document.getElementById('scGridMinApr').value) || 8;
     }
 
     btn.disabled = true;
@@ -437,6 +453,11 @@ async function submitStrategyCalc() {
 }
 
 function displayStrategyCalcResult(result, wrapper) {
+    if (result.mode === 'grid') {
+        displayGridResult(result, wrapper);
+        return;
+    }
+
     const plans = result.plans || [];
     if (plans.length === 0) {
         const meta = result.meta || {};
@@ -457,7 +478,7 @@ function displayStrategyCalcResult(result, wrapper) {
                     <th class="text-right py-2 px-2 font-medium">Strike</th>
                     <th class="text-center py-2 px-2 font-medium">DTE</th>
                     <th class="text-right py-2 px-2 font-medium">Delta</th>
-                    <th class="text-right py-2 px-2 font-medium">APR</th>
+                    <th class="text-right py-2 px-2 font-medium">胜率</th>
                     ${result.mode === 'roll' ? '<th class="text-right py-2 px-2 font-medium">数量</th><th class="text-right py-2 px-2 font-medium">净流入</th>' : '<th class="text-right py-2 px-2 font-medium">保证金</th><th class="text-right py-2 px-2 font-medium">权利金</th>'}
                     <th class="text-right py-2 px-2 font-medium">ROI%</th>
                     <th class="text-right py-2 px-2 font-medium">评分</th>
@@ -467,21 +488,113 @@ function displayStrategyCalcResult(result, wrapper) {
 
     plans.forEach((plan, idx) => {
         const isBest = idx === 0;
+        const metrics = plan.metrics || {};
         html += `<tr class="hover:bg-white/5 transition ${isBest ? 'bg-green-500/10' : ''}">
             <td class="py-3 px-2">${isBest ? '<i class="fas fa-crown text-yellow-400"></i>' : idx + 1}</td>
             <td class="py-3 px-2"><span class="font-mono text-white">${safeHTML(plan.symbol)}</span><br><span class="text-[10px] text-gray-500">${safeHTML(plan.platform)}</span></td>
             <td class="py-3 px-2 text-right font-mono text-orange-400">${plan.strike?.toLocaleString()}</td>
             <td class="py-3 px-2 text-center">${plan.dte}</td>
-            <td class="py-3 px-2 text-right">${plan.delta?.toFixed(3)}</td>
-            <td class="py-3 px-2 text-right text-green-400">${plan.apr?.toFixed(1)}%</td>
-            ${result.mode === 'roll' ? `<td class="py-3 px-2 text-right">${plan.new_qty}</td><td class="py-3 px-2 text-right text-cyan-400">$${plan.net_credit?.toFixed(2)}</td>` : `<td class="py-3 px-2 text-right">$${plan.margin_req?.toFixed(2)}</td><td class="py-3 px-2 text-right text-green-400">$${plan.gross_credit?.toFixed(2)}</td>`}
-            <td class="py-3 px-2 text-right text-yellow-400 font-bold">${plan.roi_pct?.toFixed(1)}%</td>
+            <td class="py-3 px-2 text-right">${metrics.delta?.toFixed(3)}</td>
+            <td class="py-3 px-2 text-right text-cyan-400">${metrics.win_rate?.toFixed(1)}%</td>
+            ${result.mode === 'roll' ? `<td class="py-3 px-2 text-right">${metrics.new_qty}</td><td class="py-3 px-2 text-right text-cyan-400">$${metrics.net_credit?.toFixed(2)}</td>` : `<td class="py-3 px-2 text-right">$${metrics.margin_required?.toFixed(2)}</td><td class="py-3 px-2 text-right text-green-400">$${metrics.gross_credit?.toFixed(2)}</td>`}
+            <td class="py-3 px-2 text-right text-yellow-400 font-bold">${metrics.roi?.toFixed(1)}%</td>
             <td class="py-3 px-2 text-right">${plan.score?.toFixed(4)}</td>
         </tr>`;
     });
 
     html += '</tbody></table></div>';
     html += `<div class="mt-3 text-xs text-gray-500">扫描了 ${result.meta?.total_contracts_scanned || 0} 个合约，找到 ${result.meta?.plans_found || 0} 个方案</div>`;
+    wrapper.innerHTML = html;
+}
+
+function displayGridResult(result, wrapper) {
+    const putLevels = result.put_levels || [];
+    const callLevels = result.call_levels || [];
+
+    let html = '<div class="space-y-6">';
+    
+    // DVOL 信号
+    html += `<div class="bg-gray-800/50 p-3 rounded-xl border border-gray-700">
+        <h4 class="text-xs font-semibold text-purple-400 mb-2"><i class="fas fa-chart-area mr-1"></i>波动率信号</h4>
+        <div class="flex gap-4 text-xs">
+            <span class="text-gray-400">信号: <span class="text-white font-bold">${safeHTML(result.dvol_signal || 'N/A')}</span></span>
+            <span class="text-gray-400">推荐比例: <span class="text-white">${safeHTML(result.recommended_ratio || 'N/A')}</span></span>
+            <span class="text-gray-400">总潜在权利金: <span class="text-green-400 font-bold">$${result.total_potential_premium?.toFixed(2) || '0'}</span></span>
+        </div>
+    </div>`;
+
+    if (putLevels.length > 0) {
+        html += `<h4 class="text-sm font-semibold text-green-400"><i class="fas fa-arrow-down mr-1"></i>Put 网格档位 (${putLevels.length} 个)</h4>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-xs">';
+        html += '<thead class="bg-gray-800/80"><tr class="text-gray-400 border-b border-gray-700/50">';
+        html += '<th class="text-left py-2 px-2 font-medium">等级</th><th class="text-right py-2 px-2 font-medium">Strike</th>';
+        html += '<th class="text-center py-2 px-2 font-medium">DTE</th><th class="text-right py-2 px-2 font-medium">权利金</th>';
+        html += '<th class="text-right py-2 px-2 font-medium">胜率</th><th class="text-right py-2 px-2 font-medium">APR</th>';
+        html += '<th class="text-right py-2 px-2 font-medium">Theta</th><th class="text-right py-2 px-2 font-medium">评分</th>';
+        html += '<th class="text-left py-2 px-2 font-medium">原因</th></tr></thead><tbody class="divide-y divide-gray-800/30">';
+
+        putLevels.forEach((level) => {
+            const metrics = level.metrics || {};
+            const extra = level.extra || {};
+            const score = level.score || 0;
+            const recLevel = metrics.recommendation_level || 'OK';
+            const colorMap = { 'BEST': 'text-green-400', 'GOOD': 'text-blue-400', 'OK': 'text-yellow-400', 'CAUTION': 'text-orange-400', 'SKIP': 'text-red-400' };
+            const color = colorMap[recLevel] || 'text-gray-400';
+            
+            html += `<tr class="hover:bg-white/5 transition">
+                <td class="py-2 px-2"><span class="${color} font-bold">${safeHTML(recLevel)}</span></td>
+                <td class="py-2 px-2 text-right font-mono text-orange-400">${level.strike?.toLocaleString()}</td>
+                <td class="py-2 px-2 text-center">${level.dte}</td>
+                <td class="py-2 px-2 text-right text-green-400">$${level.premium_usd?.toFixed(2)}</td>
+                <td class="py-2 px-2 text-right text-cyan-400">${metrics.win_rate?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-yellow-400">${metrics.apr?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-pink-400">${metrics.theta_decay?.toFixed(2) || 'N/A'}</td>
+                <td class="py-2 px-2 text-right">${score?.toFixed(4)}</td>
+                <td class="py-2 px-2 text-gray-400">${safeHTML(metrics.reason || '')}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+    }
+
+    if (callLevels.length > 0) {
+        html += `<h4 class="text-sm font-semibold text-red-400 mt-4"><i class="fas fa-arrow-up mr-1"></i>Call 网格档位 (${callLevels.length} 个)</h4>`;
+        html += '<div class="overflow-x-auto"><table class="w-full text-xs">';
+        html += '<thead class="bg-gray-800/80"><tr class="text-gray-400 border-b border-gray-700/50">';
+        html += '<th class="text-left py-2 px-2 font-medium">等级</th><th class="text-right py-2 px-2 font-medium">Strike</th>';
+        html += '<th class="text-center py-2 px-2 font-medium">DTE</th><th class="text-right py-2 px-2 font-medium">权利金</th>';
+        html += '<th class="text-right py-2 px-2 font-medium">胜率</th><th class="text-right py-2 px-2 font-medium">APR</th>';
+        html += '<th class="text-right py-2 px-2 font-medium">Theta</th><th class="text-right py-2 px-2 font-medium">评分</th>';
+        html += '<th class="text-left py-2 px-2 font-medium">原因</th></tr></thead><tbody class="divide-y divide-gray-800/30">';
+
+        callLevels.forEach((level) => {
+            const metrics = level.metrics || {};
+            const score = level.score || 0;
+            const recLevel = metrics.recommendation_level || 'OK';
+            const colorMap = { 'BEST': 'text-green-400', 'GOOD': 'text-blue-400', 'OK': 'text-yellow-400', 'CAUTION': 'text-orange-400', 'SKIP': 'text-red-400' };
+            const color = colorMap[recLevel] || 'text-gray-400';
+            
+            html += `<tr class="hover:bg-white/5 transition">
+                <td class="py-2 px-2"><span class="${color} font-bold">${safeHTML(recLevel)}</span></td>
+                <td class="py-2 px-2 text-right font-mono text-orange-400">${level.strike?.toLocaleString()}</td>
+                <td class="py-2 px-2 text-center">${level.dte}</td>
+                <td class="py-2 px-2 text-right text-green-400">$${level.premium_usd?.toFixed(2)}</td>
+                <td class="py-2 px-2 text-right text-cyan-400">${metrics.win_rate?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-yellow-400">${metrics.apr?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-pink-400">${metrics.theta_decay?.toFixed(2) || 'N/A'}</td>
+                <td class="py-2 px-2 text-right">${score?.toFixed(4)}</td>
+                <td class="py-2 px-2 text-gray-400">${safeHTML(metrics.reason || '')}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table></div>';
+    }
+
+    if (putLevels.length === 0 && callLevels.length === 0) {
+        html += '<div class="text-center py-12 text-yellow-400"><i class="fas fa-search text-3xl mb-2 opacity-50"></i><p>未找到符合条件的网格配置</p></div>';
+    }
+
+    html += '</div>';
     wrapper.innerHTML = html;
 }
 

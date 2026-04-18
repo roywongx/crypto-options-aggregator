@@ -757,6 +757,11 @@ def _quick_scan_sync(params: QuickScanParams = None):
 
 @app.post("/api/strategy-calc")
 async def strategy_calc(params: StrategyCalcParams):
+    """统一策略计算器 - 支持 Roll/New/Grid 三种模式"""
+    from services.unified_strategy_engine import (
+        UnifiedStrategyEngine, StrategyParams, StrategyMode, OptionType
+    )
+    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT contracts_data, spot_price FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (params.currency,))
@@ -772,10 +777,37 @@ async def strategy_calc(params: StrategyCalcParams):
 
     spot = row[1] or 0
 
+    # 转换为统一引擎参数
     if params.mode == "roll":
-        return calc_roll_plan(contracts, params, spot)
+        mode = StrategyMode.ROLL
+    elif params.mode == "grid":
+        mode = StrategyMode.GRID
     else:
-        return calc_new_plan(contracts, params, spot)
+        mode = StrategyMode.NEW
+        
+    option_type = OptionType.PUT if params.option_type == "PUT" else OptionType.CALL
+    
+    unified_params = StrategyParams(
+        currency=params.currency,
+        mode=mode,
+        option_type=option_type,
+        reserve_capital=params.reserve_capital,
+        target_max_delta=params.target_max_delta,
+        min_dte=params.min_dte,
+        max_dte=params.max_dte,
+        margin_ratio=params.margin_ratio,
+        old_strike=params.old_strike,
+        old_qty=params.old_qty,
+        close_cost_total=params.close_cost_total,
+        max_qty_multiplier=params.max_qty_multiplier,
+        target_apr=getattr(params, 'target_apr', 200.0),
+        put_count=getattr(params, 'put_count', 5),
+        call_count=getattr(params, 'call_count', 0),
+        min_apr=getattr(params, 'min_apr', 8.0)
+    )
+
+    engine = UnifiedStrategyEngine()
+    return engine.execute(contracts, unified_params, spot)
 
 
 @app.post("/api/calculator/roll")

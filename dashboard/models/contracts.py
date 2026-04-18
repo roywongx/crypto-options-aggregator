@@ -40,9 +40,9 @@ class QuickScanParams(BaseModel):
             raise ValueError(f"min_dte ({self.min_dte}) must be <= max_dte ({self.max_dte})")
 
 class StrategyCalcParams(BaseModel):
-    """统一策略计算器参数 - 支持滚仓模式和新建模式"""
+    """统一策略计算器参数 - 支持滚仓/新建/网格三种模式"""
     currency: str = Field(default="BTC", description="币种")
-    mode: str = Field(default="roll", pattern="^(roll|new)$", description="模式: roll=滚仓, new=新建")
+    mode: str = Field(default="roll", pattern="^(roll|new|grid)$", description="模式: roll=滚仓, new=新建, grid=网格")
     option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$", description="期权类型")
     reserve_capital: float = Field(default=50000.0, ge=0, description="可用后备资金(USDT)")
     target_max_delta: float = Field(default=0.35, ge=0.01, le=0.8, description="目标最大Delta")
@@ -55,6 +55,10 @@ class StrategyCalcParams(BaseModel):
     close_cost_total: float = Field(default=0, ge=0, description="平仓总成本USDT (滚仓模式)")
     max_qty_multiplier: float = Field(default=3.0, ge=1.0, description="最大倍投倍数 (滚仓模式)")
     target_apr: float = Field(default=200, ge=50, le=500, description="目标年化收益率% (新建模式)")
+    
+    put_count: int = Field(default=5, ge=1, le=15, description="Put 网格数量 (网格模式)")
+    call_count: int = Field(default=0, ge=0, le=10, description="Call 网格数量 (网格模式)")
+    min_apr: float = Field(default=8.0, ge=0, le=200, description="最低 APR (网格模式)")
 
     def model_post_init(self, __context):
         if self.mode == "roll" and self.old_strike is None:
