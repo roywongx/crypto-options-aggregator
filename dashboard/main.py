@@ -1052,103 +1052,87 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
     return results[:limit]
 
 
-# DEPRECATED: Use mark['delta'] from API instead. Kept for Deribit branch fallback only.
+# Martingale Sandbox v2.0 - 马丁格尔沙盘推演引擎
 @app.post("/api/sandbox/simulate")
 async def sandbox_simulate(params: SandboxParams):
+    """沙盘推演：模拟崩盘情景，搜索恢复策略"""
+    from services.martingale_sandbox import MartingaleSandboxEngine
+    
     spot = _get_spot_from_scan()
     if spot < 1000:
         spot = params.crash_price * 1.5
-    steps = []
-
+    
+    opt_type = params.option_type.upper()
+    strike = params.current_strike
+    qty = params.current_qty
+    
+    # Step 1: 计算崩盘损失
+    loss_info = MartingaleSandboxEngine.calculate_loss(
+        strike=strike, crash_price=params.crash_price, qty=qty,
+        avg_premium=params.avg_premium, dte=params.avg_dte, option_type=opt_type
+    )
+    
+    # 计算旧持仓保证金
+    old_margin = strike * params.margin_ratio * qty
+    
+    # Step 2: 搜索恢复候选合约（使用 Binance + Deribit 真实数据）
+    all_contracts = []
     try:
-        parts = params.current_symbol.rsplit('-', 2)
-        base_strike = float(parts[-2]) if len(parts) >= 3 else spot * 0.95
-        opt_type = parts[-1] if len(parts) >= 3 else 'P'
-    except Exception:
-        base_strike = spot * 0.95
-        opt_type = 'P'
-
-    drop = ((params.crash_price - spot) / spot * 100) if spot > 0 else -30
-    intrinsic = max(0, base_strike - params.crash_price) if opt_type.upper() == 'P' else max(0, params.crash_price - base_strike)
-    old_cv = base_strike * params.margin_ratio
-    old_margin = old_cv * params.num_contracts
-
-    summaries = _fetch_deribit_summaries("BTC" if "BTC" in params.current_symbol else "ETH")
-    index_price = spot  # fallback to spot if index not available
-    cands = []
-    for s in summaries:
-        meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta.dte < 14 or meta.dte > 180:
-            continue
-        if meta.option_type != opt_type.upper():
-            continue
-        if opt_type.upper() == 'P' and meta.strike >= params.crash_price * 0.85:
-            continue
-        # mark_iv is in percentage (e.g., 47.5), convert to decimal (0.475)
-        iv = float(s.get("mark_iv") or 0) / 100.0
-        if iv <= 0.05 or iv > 3:
-            continue
-        # mark_price is per unit, multiply by index_price to get USD value
-        prem_usd = float(s.get("mark_price") or 0) * index_price
-        oi = float(s.get("open_interest") or 0)
-        if prem_usd <= 0 or oi < 10:
-            continue
-        ncv = meta.strike * params.margin_ratio
-        apr_e = (prem_usd / ncv) * (365 / meta.dte) * 100 if ncv > 0 else 0
-        if apr_e < 5:
-            continue
-        cands.append({**meta, "premium_usd": prem_usd, "apr": round(apr_e, 1), "oi": oi, "cv": round(ncv, 2)})
-    cands.sort(key=lambda x: x["apr"], reverse=True)
-
-    s1_loss = intrinsic * params.num_contracts
-    s1_vega = s1_loss * 0.15
-    total_cost = s1_loss + s1_vega
-
-    steps.append({"step": 1, "title": f"Loss at ${params.crash_price:,.0f}",
-        "details": [f"Pos: {params.num_contracts}x {params.current_symbol}",
-            f"Intrinsic: ${intrinsic:,.0f}/ct x {params.num_contracts} = ${s1_loss:,.0f}",
-            f"Vega bloat (~15%): ${s1_vega:,.0f}", f"Est loss: ~${total_cost:,.0f}"],
-        "loss_amount": round(total_cost, 0), "status": "warning"})
-
-    plans = []
-    for c in cands[:8]:
-        needed = total_cost
-        pyld = c["apr"] / 100 * (c["dte"] / 365)
-        if pyld <= 0.001:
-            continue
-        nc = max(1, min(20, int(needed / (c["cv"] * pyld))))
-        tnm = c["cv"] * nc
-        ei = tnm * pyld
-        nr = ei - needed
-        tcn = old_margin + tnm
-        ok = tcn <= params.reserve_capital + old_margin
-        st = "success" if ok and nr >= 0 else ("partial" if ok else "danger")
-        plans.append({"symbol": f"{c.get('currency','BTC')}-{c['expiry']}-{int(c['strike'])}-{opt_type}",
-            "strike": int(c["strike"]), "dte": c["dte"], "apr": c["apr"],
-            "prem_ct": round(c["premium_usd"], 2), "contracts": nc, "margin": round(tnm, 0),
-            "income": round(ei, 0), "net": round(nr, 0), "capital": round(tcn, 0),
-            "reserve": round(params.reserve_capital - tnm, 0), "ok": ok, "status": st})
-
-    bp = plans[0] if plans else None
-    if bp:
-        al = ""
-        if bp["status"] == "danger":
-            al = f"MARGIN CALL! Reserve ${params.reserve_capital:,.0f} cannot cover recovery at ${params.crash_price:,.0f}"
-        elif bp["status"] == "partial":
-            al = f"TIGHT! Can open but net may be negative"
-        else:
-            al = f"VIABLE! Loss ~${total_cost:,.0f} -> Deploy ${bp['margin']:,.0f} -> {bp['contracts']}x -> Net ${abs(bp['net']):+.0f}"
-        steps.append({"step": 2, "title": "Recovery Plan",
-            "details": [f"{bp['contracts']}x {bp['symbol']} ({bp['dte']}d APR={bp['apr']}%)",
-                f"Prem/ct: ${bp['prem_ct']}", f"Margin: ${bp['margin']:,.0f}", f"Income: ${bp['income']:,.0f}",
-                f"Net: ${bp['net']:+,.0f}", f"Reserve: ${bp['reserve']:,.0f}"],
-            "loss_amount": 0, "status": bp["status"], "alert": al})
-
-    return {"crash": {"from": round(spot, 0), "to": params.crash_price, "drop_pct": round(drop, 1)},
-        "position": {"symbol": params.current_symbol, "contracts": params.num_contracts, "strike": base_strike},
-        "loss": round(total_cost, 0), "reserve": params.reserve_capital,
-        "steps": steps, "plans": plans[:10], "best": bp,
-        "status": bp.get("status", "none") if bp else "no_candidates", "n_cands": len(plans)}
+        from db.repository import ContractRepository
+        repo = ContractRepository()
+        currency = params.currency if params.currency else "BTC"
+        all_contracts = repo.get_all_contracts(currency)
+    except Exception as e:
+        logger.warning("获取合约数据失败: %s", e)
+        all_contracts = []
+    
+    candidates = MartingaleSandboxEngine.search_recovery_candidates(
+        contracts=all_contracts, crash_price=params.crash_price, spot=spot,
+        margin_ratio=params.margin_ratio, min_dte=params.min_dte, max_dte=params.max_dte,
+        min_apr=params.min_apr, max_contracts=params.max_contracts, option_type=opt_type
+    )
+    
+    # Step 3: 计算每个候选的恢复方案
+    recovery_plans = []
+    for c in candidates[:10]:
+        plan = MartingaleSandboxEngine.calculate_recovery_plan(
+            candidate=c, total_loss=loss_info["total_loss"],
+            reserve_capital=params.reserve_capital, old_margin=old_margin,
+            max_contracts=params.max_contracts
+        )
+        if plan:
+            recovery_plans.append(plan)
+    
+    # 按净恢复值排序
+    recovery_plans.sort(key=lambda x: x["net_recovery"], reverse=True)
+    
+    best_plan = recovery_plans[0] if recovery_plans else None
+    
+    # Step 4: 安全评估
+    safety = MartingaleSandboxEngine.generate_safety_assessment(
+        loss_info=loss_info, reserve_capital=params.reserve_capital, best_plan=best_plan
+    )
+    
+    return {
+        "crash_scenario": {
+            "from_price": round(spot, 0),
+            "to_price": params.crash_price,
+            "drop_pct": round((params.crash_price - spot) / spot * 100, 1),
+        },
+        "position": {
+            "strike": strike,
+            "option_type": opt_type,
+            "quantity": qty,
+            "avg_premium": params.avg_premium,
+            "old_margin": round(old_margin, 0),
+        },
+        "loss_analysis": loss_info,
+        "safety_assessment": safety,
+        "recovery_plans": recovery_plans[:8],
+        "best_plan": best_plan,
+        "total_candidates": len(candidates),
+        "status": safety["level"],
+    }
 
 
 @app.get("/api/bottom-fishing/advice")

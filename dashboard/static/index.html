@@ -1296,24 +1296,74 @@
                     <div id="mpSignal" class="mt-2 text-xs text-center text-gray-400"></div>
                 </div>
 
-                <!-- Module 3: Martingale Sandbox -->
+                <!-- Module 3: Martingale Sandbox v2.0 -->
                 <div class="card-glass rounded-xl p-5 xl:col-span-2">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
                         <i class="fas fa-flask text-purple-400"></i>
-                        🧪 马丁格尔沙盘推演 (Martingale Sandbox)
+                        🧪 马丁格尔沙盘推演 v2.0
                     </h2>
                     <p class="text-xs text-gray-400 mb-3 leading-relaxed">
-                        🔬 <b>使用方法：</b>输入你当前持有的期权合约、假设的极限崩盘价格、后备资金量，
-                        点击"开始推演"模拟崩盘后的亏损及恢复方案。系统会从实时链上寻找可用的恢复合约，
-                        计算加仓所需保证金和净盈亏，帮助你评估风险承受能力。
+                        🔬 <b>使用方法：</b>输入当前持仓信息（行权价/期权类型/数量/权利金）、假设的极限崩盘价格、后备资金量。
+                        系统会精确计算崩盘损失（含 Vega 冲击），从扫描数据库中寻找恢复合约，计算加仓方案和净盈亏。
+                        绿灯 = 安全恢复，红灯 = 资金链断裂。
                     </p>
-                    <div class="grid grid-cols-5 gap-2 mb-3">
-                        <input id="sbSymbol" type="text" value="BTC-26APR26-65000-P" placeholder="当前持仓合约" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
-                        <input id="sbCrash" type="number" value="45000" placeholder="极限底点($)" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
-                        <input id="sbReserve" type="number" value="50000" placeholder="后备资金($)" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
-                        <input id="sbContracts" type="number" value="1" min="1" placeholder="持仓数量" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
-                        <button onclick="runSandbox()" class="bg-purple-600 hover:bg-purple-500 rounded px-3 py-1.5 text-xs font-medium whitespace-nowrap">▶ 开始推演</button>
+                    
+                    <!-- 持仓信息输入 -->
+                    <div class="mb-3">
+                        <div class="text-xs font-semibold text-gray-400 mb-2">📊 当前持仓信息</div>
+                        <div class="grid grid-cols-5 gap-2">
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">行权价 ($)</label>
+                                <input id="sbStrike" type="number" value="65000" placeholder="65000" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">期权类型</label>
+                                <select id="sbOptionType" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                    <option value="P" selected>Put</option>
+                                    <option value="C">Call</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">持仓数量</label>
+                                <input id="sbQty" type="number" value="1" min="0.1" step="0.1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">平均权利金 ($)</label>
+                                <input id="sbPremium" type="number" value="2000" min="1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">剩余 DTE (天)</label>
+                                <input id="sbDTE" type="number" value="30" min="1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                        </div>
                     </div>
+                    
+                    <!-- 崩盘情景 + 恢复参数 -->
+                    <div class="mb-3">
+                        <div class="text-xs font-semibold text-gray-400 mb-2">📉 崩盘情景 & 恢复策略</div>
+                        <div class="grid grid-cols-5 gap-2">
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">极限底点 ($)</label>
+                                <input id="sbCrash" type="number" value="45000" placeholder="45000" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">后备资金 ($)</label>
+                                <input id="sbReserve" type="number" value="50000" placeholder="50000" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">保证金比率</label>
+                                <input id="sbMargin" type="number" value="0.20" step="0.05" min="0.05" max="1.0" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-gray-500 block mb-1">最小 APR (%)</label>
+                                <input id="sbMinAPR" type="number" value="5" step="1" min="1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                            </div>
+                            <div class="flex items-end">
+                                <button onclick="runSandbox()" class="bg-purple-600 hover:bg-purple-500 rounded px-4 py-1.5 text-xs font-medium w-full">▶ 开始推演</button>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div id="sandboxResult" class="space-y-3">
                         <div class="text-gray-500 text-center py-6 text-sm">👆 点击「开始推演」进行沙盘模拟</div>
                     </div>

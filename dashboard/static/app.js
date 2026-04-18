@@ -2790,13 +2790,18 @@ async function loadMaxPain() {
 }
 
 // ============================================================
-// Module 3: Martingale Sandbox
+// Module 3: Martingale Sandbox v2.0
 // ============================================================
 async function runSandbox() {
-    var symbol = (document.getElementById('sbSymbol').value || '').trim() || 'BTC-26APR26-65000-P';
+    var strike = parseFloat(document.getElementById('sbStrike').value) || 65000;
+    var optionType = document.getElementById('sbOptionType').value || 'P';
+    var qty = parseFloat(document.getElementById('sbQty').value) || 1;
+    var premium = parseFloat(document.getElementById('sbPremium').value) || 2000;
+    var dte = parseInt(document.getElementById('sbDTE').value) || 30;
     var crash = parseFloat(document.getElementById('sbCrash').value) || 45000;
     var reserve = parseFloat(document.getElementById('sbReserve').value) || 50000;
-    var nContracts = parseInt(document.getElementById('sbContracts').value) || 1;
+    var margin = parseFloat(document.getElementById('sbMargin').value) || 0.20;
+    var minAPR = parseFloat(document.getElementById('sbMinAPR').value) || 5;
 
     var resultDiv = document.getElementById('sandboxResult');
     if (!resultDiv) { alert('沙盘容器未找到'); return; }
@@ -2806,49 +2811,125 @@ async function runSandbox() {
         var resp = await safeFetch(API_BASE + '/api/sandbox/simulate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ current_symbol: symbol, crash_price: crash, reserve_capital: reserve, num_contracts: nContracts })
+            body: JSON.stringify({
+                current_strike: strike, option_type: optionType,
+                current_qty: qty, avg_premium: premium, avg_dte: dte,
+                crash_price: crash, reserve_capital: reserve,
+                margin_ratio: margin, min_apr: minAPR
+            })
         });
         var d = await resp.json();
 
         var html = '';
-        html += '<div class="p-3 rounded-lg ' + (d.crash && d.crash.drop_pct < -20 ? 'bg-red-900/30 border border-red-500/30' : 'bg-gray-800') + ' mb-3">';
-        html += '<div class="flex justify-between items-center mb-2">';
-        html += '<span class="text-sm font-medium">📉 崩盘情景模拟</span>';
-        html += '<span class="text-xs font-mono">$' + (d.crash ? d.crash.from.toLocaleString() : '?') + ' -> $' + (d.crash ? d.crash.to.toLocaleString() : '?') + (' (' + (d.crash ? d.crash.drop_pct : '?') + '%)</span>');
+
+        // ===== 安全评估卡片 =====
+        var safety = d.safety_assessment || {};
+        var safetyColors = {
+            'SAFE': 'bg-green-900/30 border-green-500/40 text-green-300',
+            'WARNING': 'bg-yellow-900/30 border-yellow-500/40 text-yellow-300',
+            'DANGER': 'bg-red-900/30 border-red-500/40 text-red-300',
+            'CRITICAL': 'bg-red-900/50 border-red-500/60 text-red-200'
+        };
+        var sc = safetyColors[safety.level] || 'bg-gray-800 border-gray-600 text-gray-300';
+        html += '<div class="p-4 rounded-lg border ' + sc + '">';
+        html += '<div class="flex items-center justify-between mb-2">';
+        html += '<span class="text-sm font-bold">🛡️ 安全评估</span>';
+        html += '<span class="text-xs font-mono bg-black/20 px-2 py-1 rounded">资金覆盖率 ' + (safety.reserve_sufficiency || 0) + '%</span>';
         html += '</div>';
-        html += '<div class="grid grid-cols-3 gap-2 text-xs">';
-        html += '<div>当前持仓: <span class="text-white">' + (d.position ? d.position.symbol : '?') + '</span></div>';
-        html += '<div>预估亏损: <span class="' + (d.loss > 0 ? 'text-red-400' : '') + '">$' + (d.loss || 0).toLocaleString() + '</span></div>';
-        html += '<div>后备资金: <span class="text-cyan-400">$' + (d.reserve || 0).toLocaleString() + '</span></div>';
+        html += '<div class="text-sm">' + safety.message + '</div>';
+        html += '</div>';
+
+        // ===== 崩盘情景 + 损失分析 =====
+        var crash = d.crash_scenario || {};
+        var loss = d.loss_analysis || {};
+        html += '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">';
+        
+        // 左：崩盘情景
+        html += '<div class="p-3 rounded-lg bg-gray-800 border border-gray-700/30">';
+        html += '<div class="text-xs font-semibold text-gray-400 mb-2">📉 崩盘情景</div>';
+        html += '<div class="space-y-1 text-xs">';
+        html += '<div class="flex justify-between"><span class="text-gray-500">当前价格</span><span class="font-mono">$' + (crash.from_price || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">崩盘目标</span><span class="font-mono text-red-400">$' + (crash.to_price || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">跌幅</span><span class="font-mono text-red-400">' + (crash.drop_pct || 0) + '%</span></div>';
         html += '</div></div>';
 
-        (d.steps || []).forEach(function(st) {
-            var sc = st.status === 'danger' ? 'border-red-500/50 bg-red-900/20' : st.status === 'warning' ? 'border-yellow-500/50 bg-yellow-900/20' : 'border-green-500/50 bg-green-900/20';
-            html += '<div class="p-3 rounded-lg border ' + sc + ' mb-2">';
-            html += '<div class="text-sm font-medium mb-1">第 ' + st.step + ': ' + st.title + '</div>';
-            (st.details || []).forEach(function(det) { html += '<div class="text-xs text-gray-300 ml-2 py-0.5">' + det + '</div>'; });
-            if (st.alert) {
-                var ac = st.status === 'danger' ? 'text-red-400' : st.status === 'warning' ? 'text-yellow-400' : 'text-green-400';
-                html += '<div class="mt-2 text-xs font-medium ' + ac + '">' + st.alert + '</div>';
-            }
-            html += '</div>';
-        });
+        // 右：损失分析
+        html += '<div class="p-3 rounded-lg bg-gray-800 border border-gray-700/30">';
+        html += '<div class="text-xs font-semibold text-gray-400 mb-2">💥 损失分解</div>';
+        html += '<div class="space-y-1 text-xs">';
+        html += '<div class="flex justify-between"><span class="text-gray-500">本金损失</span><span class="font-mono text-red-400">$' + (loss.intrinsic_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">Vega 冲击</span><span class="font-mono text-orange-400">$' + (loss.vega_impact || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">总损失</span><span class="font-mono text-red-300 font-bold">$' + (loss.total_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">损失比例</span><span class="font-mono text-red-400">' + (loss.loss_pct || 0) + '%</span></div>';
+        html += '</div></div>';
+        html += '</div>';
 
-        if (d.best) {
-            html += '<div class="p-3 rounded-lg bg-purple-900/20 border border-purple-500/30 mt-2">';
-            html += '<div class="text-sm font-medium mb-2">🎯 推荐恢复方案</div>';
-            html += '<div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">';
-            html += '<div>恢复合约: <span class="text-white">' + (d.best.symbol || '?') + '</span></div>';
-            html += '<div>加仓数量: <span class="text-white">' + (d.best.contracts || 0) + 'x</span></div>';
-            html += '<div>所需保证金: <span class="text-yellow-400">$' + ((d.best.margin || 0)).toLocaleString() + '</span></div>';
-            var nc = d.best.net >= 0 ? 'text-green-400' : 'text-red-400';
-            html += '<div>净盈亏: <span class="' + nc + '">$' + ((d.best.net || 0)).toLocaleString() + '</span></div>';
-            var rc = d.best.reserve >= 0 ? 'text-green-400' : 'text-red-400';
-            html += '<div>剩余后备金: <span class="' + rc + '">$' + ((d.best.reserve || 0)).toLocaleString() + '</span></div>';
-            html += '</div></div>';
+        // ===== 最佳恢复方案 =====
+        var best = d.best_plan;
+        if (best) {
+            var planBorder = best.status === 'success' ? 'border-green-500/40' : best.status === 'partial' ? 'border-yellow-500/40' : 'border-red-500/40';
+            var planBg = best.status === 'success' ? 'bg-green-900/10' : best.status === 'partial' ? 'bg-yellow-900/10' : 'bg-red-900/10';
+            html += '<div class="p-3 rounded-lg border ' + planBorder + ' ' + planBg + ' mb-3">';
+            html += '<div class="text-sm font-bold mb-2">🎯 最佳恢复方案</div>';
+            html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">';
+            html += '<div><span class="text-gray-500 block">恢复合约</span><span class="font-mono">' + (best.symbol || '-') + '</span></div>';
+            html += '<div><span class="text-gray-500 block">行权价 / DTE</span><span class="font-mono">$' + best.strike + ' / ' + best.dte + 'D</span></div>';
+            html += '<div><span class="text-gray-500 block">APR / Delta</span><span class="font-mono">' + best.apr + '% / ' + best.delta + '</span></div>';
+            html += '<div><span class="text-gray-500 block">OI</span><span class="font-mono">' + best.oi + '</span></div>';
+            html += '</div>';
+            html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">';
+            html += '<div><span class="text-gray-500 block">每张权利金</span><span class="font-mono">$' + best.premium_per_contract + '</span></div>';
+            html += '<div><span class="text-gray-500 block">加仓数量</span><span class="font-mono">' + best.contracts + 'x</span></div>';
+            html += '<div><span class="text-gray-500 block">所需保证金</span><span class="font-mono text-yellow-400">$' + best.margin_required.toLocaleString() + '</span></div>';
+            var nc = best.net_recovery >= 0 ? 'text-green-400' : 'text-red-400';
+            html += '<div><span class="text-gray-500 block">净恢复</span><span class="font-mono ' + nc + '">$' + best.net_recovery.toLocaleString() + '</span></div>';
+            html += '</div>';
+            html += '<div class="grid grid-cols-2 gap-2 text-xs mt-2">';
+            var rc = best.remaining_reserve >= 0 ? 'text-green-400' : 'text-red-400';
+            html += '<div><span class="text-gray-500 block">剩余后备金</span><span class="font-mono ' + rc + '">$' + best.remaining_reserve.toLocaleString() + '</span></div>';
+            html += '<div><span class="text-gray-500 block">安全距离</span><span class="font-mono">' + best.distance_from_crash + '%</span></div>';
+            html += '</div>';
+            html += '</div>';
         }
 
-        if (d.n_cands === 0) {
+        // ===== 候选恢复合约列表 =====
+        if (d.recovery_plans && d.recovery_plans.length > 0) {
+            html += '<div class="mb-3">';
+            html += '<div class="text-xs font-semibold text-gray-400 mb-2">📋 恢复合约列表（Top ' + d.recovery_plans.length + '）</div>';
+            html += '<div class="overflow-x-auto">';
+            html += '<table class="w-full text-xs text-center">';
+            html += '<thead><tr class="text-gray-500">';
+            html += '<th class="py-1 px-2 text-left">合约</th>';
+            html += '<th class="py-1 px-2">行权价</th>';
+            html += '<th class="py-1 px-2">DTE</th>';
+            html += '<th class="py-1 px-2">APR</th>';
+            html += '<th class="py-1 px-2">权利金</th>';
+            html += '<th class="py-1 px-2">数量</th>';
+            html += '<th class="py-1 px-2">保证金</th>';
+            html += '<th class="py-1 px-2">净恢复</th>';
+            html += '<th class="py-1 px-2">状态</th>';
+            html += '</tr></thead>';
+            html += '<tbody class="divide-y divide-gray-800/30">';
+            d.recovery_plans.forEach(function(p) {
+                var stClass = p.status === 'success' ? 'text-green-400' : p.status === 'partial' ? 'text-yellow-400' : 'text-red-400';
+                var stText = p.status === 'success' ? '✅' : p.status === 'partial' ? '⚠️' : '🔴';
+                var nc2 = p.net_recovery >= 0 ? 'text-green-400' : 'text-red-400';
+                html += '<tr class="hover:bg-gray-800/30">';
+                html += '<td class="py-1 px-2 text-left font-mono text-gray-300">' + safeHTML(p.symbol || '-') + '</td>';
+                html += '<td class="py-1 px-2 font-mono">$' + p.strike.toLocaleString() + '</td>';
+                html += '<td class="py-1 px-2 font-mono">' + p.dte + 'D</td>';
+                html += '<td class="py-1 px-2 font-mono">' + p.apr + '%</td>';
+                html += '<td class="py-1 px-2 font-mono">$' + p.premium_per_contract + '</td>';
+                html += '<td class="py-1 px-2 font-mono">' + p.contracts + 'x</td>';
+                html += '<td class="py-1 px-2 font-mono text-yellow-400">$' + p.margin_required.toLocaleString() + '</td>';
+                html += '<td class="py-1 px-2 font-mono ' + nc2 + '">$' + p.net_recovery.toLocaleString() + '</td>';
+                html += '<td class="py-1 px-2 ' + stClass + '">' + stText + '</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table></div></div>';
+        }
+
+        if (d.total_candidates === 0) {
             html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">⚠️ 该价格水平下无可用恢复合约（链上无深度或IV过高）</div>';
         }
 

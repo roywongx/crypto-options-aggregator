@@ -61,9 +61,22 @@ class StrategyCalcParams(BaseModel):
             raise ValueError("滚仓模式需要提供 old_strike")
 
 class SandboxParams(BaseModel):
-    currency: str = Field(default="BTC", pattern="^(BTC|ETH|SOL)$")
-    spot_price: float = Field(..., gt=0)
-    volatility: float = Field(..., gt=0, description="波动率 (%)")
-    risk_free_rate: float = Field(default=0.02, ge=0, le=0.2, description="无风险利率")
-    time_to_expiry: float = Field(..., gt=0, description="到期时间 (年)")
-    scenarios: list = Field(default_factory=list, description="情景列表")
+    """马丁格尔沙盘推演参数 v2.0"""
+    # 当前持仓信息
+    current_strike: float = Field(default=65000, gt=0)
+    option_type: str = Field(default="P", pattern="^[PC]$")
+    current_qty: float = Field(default=1.0, gt=0)
+    avg_premium: float = Field(default=2000, gt=0)
+    avg_dte: int = Field(default=30, ge=1)
+    
+    # 崩盘情景
+    crash_price: float = Field(default=45000, gt=1000)
+    reserve_capital: float = Field(default=50000, ge=0)
+    margin_ratio: float = Field(default=0.20, ge=0.05, le=1.0)
+    
+    # 恢复策略参数
+    min_dte: int = Field(default=14, ge=1)
+    max_dte: int = Field(default=180, ge=1)
+    min_apr: float = Field(default=5.0, ge=1)
+    max_contracts: int = Field(default=20, ge=1)
+    currency: str = Field(default="BTC")
