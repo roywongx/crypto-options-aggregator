@@ -29,6 +29,9 @@ class GridLevel:
     liquidity_score: float
     recommendation: RecommendationLevel
     reason: str
+    win_rate: float = 50.0  # 胜率（百分比）
+    bs_price: Optional[float] = None  # Black-Scholes 理论价格
+    theta_decay: Optional[float] = None  # Theta 衰减（每日）
 
 @dataclass
 class GridRecommendation:

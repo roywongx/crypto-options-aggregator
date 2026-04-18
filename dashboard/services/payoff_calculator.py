@@ -1,11 +1,16 @@
 """
-Payoff 可视化计算引擎
+Payoff 可视化计算引擎 v2.0
 支持 Sell Put / Sell Call / Wheel 策略的盈亏图计算
 增强版：策略评分、实操建议、智能估算、对比功能
+使用共享计算模块统一核心逻辑
 """
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import math
+from services.shared_calculations import (
+    norm_cdf, black_scholes_price, calc_win_rate, 
+    calc_liquidity_score, score_to_rating
+)
 
 
 @dataclass
@@ -192,7 +197,7 @@ class PayoffCalculator:
                        iv: float, dte: int) -> float:
         """
         计算策略胜率（基于正态分布近似）
-        返回 0-1 之间的概率值
+        使用共享计算模块
         """
         if not legs:
             return 0.5
@@ -203,59 +208,26 @@ class PayoffCalculator:
         strike = leg.get("strike", spot)
         premium = leg.get("premium", 0) or 0
         
-        if spot <= 0 or dte <= 0 or iv <= 0:
-            return 0.5
-        
-        breakeven = strike - premium if option_type == "P" else strike + premium
-        
-        volatility_factor = spot * (iv / 100) * math.sqrt(dte / 365)
-        if volatility_factor <= 0:
-            return 0.5
-        
-        z = (breakeven - spot) / volatility_factor
-        
-        if direction == "sell":
-            if option_type == "P":
-                prob = 1 - self._norm_cdf(z)
-            else:
-                prob = self._norm_cdf(z)
-        else:
-            if option_type == "P":
-                prob = self._norm_cdf(z)
-            else:
-                prob = 1 - self._norm_cdf(z)
-        
-        return max(0.0, min(1.0, prob))
+        return calc_win_rate(option_type, direction, strike, premium, spot, iv, dte)
     
     @staticmethod
     def _norm_cdf(x: float) -> float:
-        """标准正态分布累积分布函数近似计算"""
-        return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+        """标准正态分布累积分布函数 - 使用共享模块"""
+        return norm_cdf(x)
     
     def generate_strategy_advice(self, score_data: Dict[str, Any], 
                                 legs: List[Dict[str, Any]], 
                                 spot: float) -> Dict[str, Any]:
         """
-        生成实操建议
+        生成实操建议（使用共享评分框架）
         """
         total_score = score_data.get("total_score", 0)
         metrics = score_data.get("metrics", {})
         
-        if total_score >= 80:
-            rating = "强烈推荐"
-            rating_level = "green"
-        elif total_score >= 70:
-            rating = "推荐"
-            rating_level = "emerald"
-        elif total_score >= 60:
-            rating = "中性"
-            rating_level = "yellow"
-        elif total_score >= 50:
-            rating = "谨慎"
-            rating_level = "orange"
-        else:
-            rating = "不推荐"
-            rating_level = "red"
+        # 使用共享评级系统
+        rating_data = score_to_rating(total_score)
+        rating = rating_data["rating"]
+        rating_level = rating_data["level"]
         
         leg = legs[0] if legs else {}
         direction = leg.get("direction", "sell")
@@ -301,6 +273,7 @@ class PayoffCalculator:
         return {
             "rating": rating,
             "rating_level": rating_level,
+            "rating_description": rating_data["description"],
             "scenario": scenario,
             "advice_text": advice_text,
             "risks": risks,
@@ -310,35 +283,25 @@ class PayoffCalculator:
     def estimate_premium(self, option_type: str, strike: float, spot: float, 
                         dte: int = 30, iv: float = 50) -> Dict[str, Any]:
         """
-        智能估算权利金（基于 Black-Scholes 公式近似）
+        智能估算权利金（使用共享 Black-Scholes 公式）
         """
         option_type = self._normalize_option_type(option_type)
-        T = dte / 365.0
-        sigma = iv / 100.0
-        r = 0.05
         
-        if strike <= 0 or spot <= 0 or sigma <= 0:
+        if strike <= 0 or spot <= 0 or iv <= 0 or dte <= 0:
             return {"estimated_premium": 0, "error": "Invalid parameters"}
         
-        d1 = (math.log(spot / strike) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
-        d2 = d1 - sigma * math.sqrt(T)
-        
-        if option_type == "P":
-            premium = strike * math.exp(-r * T) * self._norm_cdf(-d2) - spot * self._norm_cdf(-d1)
-        else:
-            premium = spot * self._norm_cdf(d1) - strike * math.exp(-r * T) * self._norm_cdf(d2)
-        
-        premium = max(0, premium)
-        
-        delta = self._norm_cdf(d1) if option_type == "C" else self._norm_cdf(d1) - 1
+        bs_result = black_scholes_price(option_type, strike, spot, dte, iv)
         
         return {
-            "estimated_premium": round(premium, 2),
-            "delta": round(delta, 3),
+            "estimated_premium": bs_result["premium"],
+            "delta": bs_result["delta"],
+            "gamma": bs_result["gamma"],
+            "theta": bs_result["theta"],
+            "vega": bs_result["vega"],
             "dte": dte,
             "iv": iv,
-            "intrinsic_value": round(max(0, strike - spot) if option_type == "P" else max(0, spot - strike), 2),
-            "time_value": round(max(0, premium - max(0, strike - spot) if option_type == "P" else max(0, premium - max(0, spot - strike))), 2)
+            "intrinsic_value": bs_result["intrinsic_value"],
+            "time_value": bs_result["time_value"]
         }
     
     def compare_strategies(self, strategies: List[Dict[str, Any]], spot: float) -> Dict[str, Any]:

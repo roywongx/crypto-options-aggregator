@@ -8,6 +8,11 @@ from models.grid import (
     GridDirection, RecommendationLevel, VolDirectionSignal
 )
 from constants import get_dynamic_spot_price
+from services.shared_calculations import (
+    calc_grid_score, score_to_recommendation_level, 
+    calc_win_rate, black_scholes_price, calc_liquidity_score,
+    score_to_rating
+)
 
 try:
     import numpy as np
@@ -25,38 +30,6 @@ def _norm_cdf(x: float) -> float:
     if HAS_SCIPY:
         return norm.cdf(x)
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
-def _calc_grid_score(
-    apr: float,
-    distance_pct: float,
-    oi: int,
-    volume: int,
-    dte: int
-) -> float:
-    apr_score = min(apr / 100.0, 1.0)
-    safety_score = 1.0 - min(abs(distance_pct) / 15.0, 1.0)
-    liquidity_score = min((oi / 500.0 + volume / 100.0), 1.0) / 2.0
-
-    if 14 <= dte <= 21:
-        theta_score = 1.0
-    elif dte < 14:
-        theta_score = 0.5 + (dte / 14.0) * 0.5
-    else:
-        theta_score = max(0.3, 1.0 - (dte - 21) / 30.0)
-
-    score = apr_score * 0.35 + safety_score * 0.30 + liquidity_score * 0.20 + theta_score * 0.15
-    return score
-
-def _score_to_level(score: float) -> RecommendationLevel:
-    if score >= 0.75:
-        return RecommendationLevel.BEST
-    elif score >= 0.60:
-        return RecommendationLevel.GOOD
-    elif score >= 0.45:
-        return RecommendationLevel.OK
-    elif score >= 0.30:
-        return RecommendationLevel.CAUTION
-    return RecommendationLevel.SKIP
 
 def _generate_reason(apr: float, distance_pct: float, oi: int, dte: int, iv: float) -> str:
     reasons = []
@@ -136,12 +109,19 @@ def calculate_grid_levels(
             if not expiry:
                 expiry = c.get("symbol", "").split("-")[-1] if "-" in c.get("symbol", "") else ""
 
-            score = _calc_grid_score(apr, distance_pct, oi, volume, dte)
-            recommendation = _score_to_level(score)
+            score = calc_grid_score(apr, distance_pct, oi, volume, dte)
+            recommendation_level = score_to_recommendation_level(score)
+            # 将字符串转换为 Enum
+            recommendation = RecommendationLevel[recommendation_level]
             reason = _generate_reason(apr, distance_pct, oi, dte, iv)
 
             liquidity_score = min((oi / 500.0 + volume / 100.0), 1.0) / 2.0
-
+            
+            # 使用共享计算：胜率 + BS定价 + Theta衰减
+            option_type = "P" if direction == GridDirection.PUT else "C"
+            win_rate = calc_win_rate(option_type, "sell", strike, premium_usd, spot_price, iv, dte)
+            bs_data = black_scholes_price(option_type, strike, spot_price, dte, iv)
+            
             candidates.append(GridLevel(
                 direction=direction,
                 strike=strike,
@@ -156,13 +136,16 @@ def calculate_grid_levels(
                 volume=volume,
                 liquidity_score=liquidity_score,
                 recommendation=recommendation,
-                reason=reason
+                reason=reason,
+                win_rate=round(win_rate * 100, 1),
+                bs_price=bs_data.get("premium"),
+                theta_decay=bs_data.get("theta")
             ))
         except (ValueError, TypeError):
             continue
 
     # 按分数排序
-    candidates.sort(key=lambda x: _calc_grid_score(x.apr, x.distance_pct, x.oi, x.volume, x.dte), reverse=True)
+    candidates.sort(key=lambda x: calc_grid_score(x.apr, x.distance_pct, x.oi, x.volume, x.dte), reverse=True)
 
     # 去重：同一 strike 只保留分数最高的一个
     selected_by_strike = {}
@@ -310,6 +293,11 @@ def simulate_scenario(
     target_price: float,
     position_size: float = 1.0
 ) -> Dict[str, Any]:
+    """
+    模拟场景盈亏
+    
+    修复: premium_usd 已经是 USD 金额，不需要 * 100
+    """
     spot_pnl = (target_price - spot_price) * position_size
 
     level_results = []
@@ -323,13 +311,15 @@ def simulate_scenario(
         exercise_loss = 0
         if level.direction == GridDirection.PUT:
             if target_price < level.strike:
-                exercise_loss = (level.strike - target_price) * position_size * 100
+                # 修复: 移除错误的 * 100
+                exercise_loss = (level.strike - target_price) * position_size
                 net_pnl = premium - exercise_loss
             else:
                 net_pnl = premium
         else:
             if target_price > level.strike:
-                exercise_loss = (target_price - level.strike) * position_size * 100
+                # 修复: 移除错误的 * 100
+                exercise_loss = (target_price - level.strike) * position_size
                 net_pnl = premium - exercise_loss
             else:
                 net_pnl = premium
@@ -344,11 +334,12 @@ def simulate_scenario(
         })
 
     total_pnl = total_premium - total_exercise_loss
-    vs_hold_pnl = total_pnl - (spot_pnl * 100)
+    # 修复: 移除错误的 * 100
+    vs_hold_pnl = total_pnl - spot_pnl
 
     return {
         "target_price": target_price,
-        "spot_pnl": round(spot_pnl * 100, 2),
+        "spot_pnl": round(spot_pnl, 2),
         "total_premium": round(total_premium, 2),
         "total_exercise_loss": round(total_exercise_loss, 2),
         "level_results": level_results,

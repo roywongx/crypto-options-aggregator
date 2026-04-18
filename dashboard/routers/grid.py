@@ -126,9 +126,12 @@ async def get_grid_recommend(
                     "oi": l.oi,
                     "volume": l.volume,
                     "liquidity_score": round(l.liquidity_score, 2),
-                    "recommendation": l.recommendation.name,
+                    "recommendation": l.recommendation.name if hasattr(l.recommendation, 'name') else str(l.recommendation),
                     "reason": l.reason,
-                    "suggested_position_pct": _calc_suggested_position(l)
+                    "suggested_position_pct": _calc_suggested_position(l),
+                    "win_rate": getattr(l, 'win_rate', 50.0),
+                    "bs_price": getattr(l, 'bs_price', None),
+                    "theta_decay": getattr(l, 'theta_decay', None)
                 }
                 for l in recommendation.put_levels
             ],
@@ -146,9 +149,12 @@ async def get_grid_recommend(
                     "oi": l.oi,
                     "volume": l.volume,
                     "liquidity_score": round(l.liquidity_score, 2),
-                    "recommendation": l.recommendation.name,
+                    "recommendation": l.recommendation.name if hasattr(l.recommendation, 'name') else str(l.recommendation),
                     "reason": l.reason,
-                    "suggested_position_pct": _calc_suggested_position(l)
+                    "suggested_position_pct": _calc_suggested_position(l),
+                    "win_rate": getattr(l, 'win_rate', 50.0),
+                    "bs_price": getattr(l, 'bs_price', None),
+                    "theta_decay": getattr(l, 'theta_decay', None)
                 }
                 for l in recommendation.call_levels
             ],
