@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # 缓存：{currency: (price, timestamp)}
 _spot_cache: Dict[str, tuple] = {}
-_CACHE_TTL_SECONDS = 300  # 5分钟
+_CACHE_TTL_SECONDS = 5  # 5秒缓存，确保所有组件使用相同的时间戳和价格
 
 def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
     """从 Binance 获取现货价格"""

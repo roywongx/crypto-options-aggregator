@@ -594,13 +594,17 @@ def _quick_scan_sync(params: QuickScanParams = None):
             })
 
     # Process Binance
-    if r_info and r_info.get('optionSymbols'):
+    if r_info and isinstance(r_info, dict) and r_info.get('optionSymbols'):
         import time
         now_ms = time.time() * 1000
         req_type = _p.option_type.upper()
         fetch_all = req_type in ("ALL", "BOTH")
         max_delta = _p.max_delta
         margin_ratio = _p.margin_ratio
+
+        # 关键优化：将 r_mark 和 r_ticker 转换为字典，O(1) 查找替代 O(N)
+        mark_dict = {m['symbol']: m for m in r_mark} if isinstance(r_mark, list) else {}
+        ticker_dict = {t['symbol']: t for t in r_ticker} if isinstance(r_ticker, list) else {}
 
         for s in r_info.get('optionSymbols', []):
             if s['underlying'] != f"{currency}USDT": continue
@@ -613,16 +617,18 @@ def _quick_scan_sync(params: QuickScanParams = None):
             b_strike = float(s['strikePrice'])
             if _p.strike and abs(b_strike - _p.strike) > 0.5: continue
 
-            mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
-            if not mark or float(mark['markPrice']) <= 0: continue
+            # O(1) 字典查找
+            mark = mark_dict.get(s['symbol'])
+            if not mark or float(mark.get('markPrice', 0)) <= 0: continue
             
-            delta_val = abs(float(mark['delta']))
+            delta_val = abs(float(mark.get('delta', 0)))
             if delta_val > max_delta: continue
             
-            ticker = next((t for t in r_ticker if t['symbol'] == s['symbol']), None)
-            volume = float(ticker['volume']) if ticker else 0
-            bid = float(ticker['bidPrice']) if ticker else 0
-            ask = float(ticker['askPrice']) if ticker else 0
+            # O(1) 字典查找
+            ticker = ticker_dict.get(s['symbol'])
+            volume = float(ticker.get('volume', 0)) if ticker else 0
+            bid = float(ticker.get('bidPrice', 0)) if ticker else 0
+            ask = float(ticker.get('askPrice', 0)) if ticker else 0
             
             if volume < config.MIN_VOLUME_FILTER: continue
             
@@ -633,7 +639,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
             prem_usd = float(mark['markPrice'])
             cv = strike * margin_ratio
             apr = (prem_usd / cv) * (365 / dte) * 100 if cv > 0 else 0
-            iv = float(mark['markIV']) * 100
+            iv = float(mark.get('markIV', 0)) * 100
             opt_type = 'P' if s['side'] == 'PUT' else 'C'
             liq_score = min(50, (volume / 100) * 50) + max(0, 50 - (spread_pct * 5))
 

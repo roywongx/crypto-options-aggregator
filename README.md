@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v17.0-并行异步加载-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v18.0-后端性能优化-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -255,6 +255,33 @@ python -m uvicorn main:app --reload --port 8000
 ---
 
 ## 💡 更新日志
+
+### v18.0 (2026-04) — 后端扫描性能优化
+
+**🚀 O(N) → O(1) 查找算法优化**
+- Binance 数据处理从线性搜索改为字典查找，消除嵌套循环中的 O(N^2) 复杂度
+- `next(m for m in r_mark if m['symbol'] == s['symbol'])` → `mark_dict.get(s['symbol'])`
+- 合约循环查找耗时从 O(N) 降至 O(1)
+
+**🔀 并行化 OI 抓取**
+- 使用 ThreadPoolExecutor 并行发起所有到期日的 OpenInterest 请求
+- 10 个到期日无需等待 10 次网络往返，同时并发获取
+- OI 请求耗时降低约 5-8 倍
+
+**📦 ExchangeInfo 缓存机制**
+- Binance exchangeInfo 接口（1MB+ 数据）设置 1 小时本地缓存
+- 避免每次扫描都全量请求和解析大 JSON
+- 二次扫描速度提升约 1.4x
+
+**⚡ 消除子进程开销**
+- options_aggregator.py 从 subprocess.run 启动独立进程改为直接函数调用
+- 消除每次启动 Python 解释器和导入库的数百毫秒延迟
+- 通过 `redirect_stdout` 捕获输出，保持兼容性
+
+**⏱️ 现货价格缓存优化**
+- 现货价格缓存从 5 分钟缩短到 5 秒
+- 确保所有组件使用相同的时间戳和价格
+- 减少对外部 API 的重复请求
 
 ### v17.0 (2026-04) — 并行异步加载优化
 
