@@ -33,6 +33,12 @@ let chartPeriods = { apr: 168, dvol: 168, pcr: 168 };
 let currentSpotPrice = null;
 let scanStatusInterval = null;
 
+const TABLE_PAGE_SIZE = 30;
+let _allContracts = [];
+let _displayedCount = 0;
+let _currentSortField = null;
+let _currentSortDir = 'desc';
+
 const API_BASE = '';
 const API_TIMEOUT_MS = 15000;
 const FETCH_MAX_RETRIES = 1;
@@ -651,15 +657,39 @@ async function loadLatestData(showSuccess = true) {
         }
         
         const currency = document.getElementById('currencySelect').value;
-        const response = await safeFetch(`${API_BASE}/api/latest?currency=${currency}`);
-        const data = await response.json();
+        
+        // 渐进式加载：先获取宏观数据（快速），再获取合约数据（慢速）
+        const [macroRes, fullRes] = await Promise.all([
+            safeFetch(`${API_BASE}/api/macro?currency=${currency}`),
+            safeFetch(`${API_BASE}/api/latest?currency=${currency}`)
+        ]);
+        
+        // 1. 先更新宏观指标（秒开）
+        const macroData = await macroRes.json();
+        if (macroData.success && macroData.spot_price) {
+            currentSpotPrice = macroData.spot_price;
+            updateMacroIndicators(macroData);
+            updateLastUpdateTime(macroData.timestamp);
+            
+            // 合约计数先显示
+            const countEl = document.getElementById('contractCount');
+            if (countEl && macroData.contracts_count !== undefined) {
+                countEl.textContent = `${macroData.contracts_count} 个合约`;
+            }
+        }
+        
+        // 2. 合约数据加载完成后再更新表格
+        const data = await fullRes.json();
         currentData = data;
         if (data.spot_price) currentSpotPrice = data.spot_price;
 
-        updateMacroIndicators(data);
-        updateOpportunitiesTable(data.contracts || []);
+        // 仅在合约数据真正变更时才重新渲染表格（避免排序状态丢失）
+        if (!data._contracts_same) {
+            updateOpportunitiesTable(data.contracts || []);
+        }
+        
         updateLargeTrades(data.large_trades_details || [], data.large_trades_count || 0);
-        updateLastUpdateTime(data.timestamp);
+        if (!macroData.timestamp) updateLastUpdateTime(data.timestamp);
 
         if (showSuccess) showAlert('数据刷新成功', 'success');
 
@@ -694,6 +724,17 @@ function loadPageDataAsync() {
     loadTermStructure().catch(() => {});
     loadMaxPain().catch(() => {});
     loadPcrChart(currency, chartPeriods.pcr || 168).catch(() => {});
+    loadDerivData(currency).catch(() => {});
+}
+
+async function loadDerivData(currency) {
+    try {
+        const res = await safeFetch(`${API_BASE}/api/derivatives/${currency}`);
+        const data = await res.json();
+        updateDerivativeMetrics(data);
+    } catch (e) {
+        console.error('Failed to load derivatives:', e);
+    }
 }
 
 async function loadRiskDashboard(currency = 'BTC') {
@@ -1389,41 +1430,57 @@ function updateMacroIndicators(data) {
 
 let _expandedRow = null;
 
-// 更新后的表格渲染函数 - 精简为12列核心数据
+// 更新后的表格渲染函数 - 分页加载（前30条+加载更多）
 function updateOpportunitiesTable(contracts) {
-    const tbody = document.getElementById('opportunitiesTable');
-    const countEl = document.getElementById('contractCount');
-    countEl.textContent = `${contracts.length} 个合约`;
+    _allContracts = contracts || [];
+    _displayedCount = 0;
+    window.contractPage = 1;
 
-    if (contracts.length === 0) {
+    const countEl = document.getElementById('contractCount');
+    const loadMoreContainer = document.getElementById('loadMoreContainer');
+
+    if (_allContracts.length === 0) {
+        countEl.textContent = '0 个合约';
+        loadMoreContainer.classList.add('hidden');
+        const tbody = document.getElementById('opportunitiesTable');
         tbody.innerHTML = `<tr><td colspan="25" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
         return;
     }
 
+    countEl.textContent = `${_allContracts.length} 个合约`;
+    renderTablePage();
+}
+
+function renderTablePage() {
+    const tbody = document.getElementById('opportunitiesTable');
+    const loadMoreContainer = document.getElementById('loadMoreContainer');
+    const loadedCountEl = document.getElementById('loadedCount');
+    const totalCountEl = document.getElementById('totalCount');
+
+    _displayedCount = Math.min(window.contractPage * TABLE_PAGE_SIZE, _allContracts.length);
+    const displayContracts = _allContracts.slice(0, _displayedCount);
+
+    if (loadedCountEl) loadedCountEl.textContent = _displayedCount;
+    if (totalCountEl) totalCountEl.textContent = _allContracts.length;
+
+    const hasMore = _displayedCount < _allContracts.length;
+    if (hasMore) {
+        loadMoreContainer.classList.remove('hidden');
+    } else {
+        loadMoreContainer.classList.add('hidden');
+    }
+
     let highRiskContracts = [];
-
-    // 分页加载：初始显示20个，支持加载更多
-    let PAGE_SIZE = 20;
-    if (!window.displayedContracts) window.displayedContracts = [];
-    if (!window.contractPage) window.contractPage = 1;
-    // 始终用传入的 contracts 更新显示数据（排序时需要更新）
-    window.displayedContracts = contracts.slice(0, window.contractPage * PAGE_SIZE);
-    const displayContracts = window.displayedContracts;
-    const hasMore = displayContracts.length < contracts.length;
-
     tbody.innerHTML = displayContracts.map((contract, idx) => {
         const platformColor = contract.platform === 'Deribit' ? 'text-blue-400' : 'text-yellow-400';
-        const platformBg = contract.platform === 'Deribit' ? 'bg-blue-500/10' : 'bg-yellow-500/10';
         const liqColor = contract.liquidity_score >= 70 ? 'text-green-400' : contract.liquidity_score >= 40 ? 'text-yellow-400' : 'text-red-400';
-        const liqBg = contract.liquidity_score >= 70 ? 'bg-green-500/10' : contract.liquidity_score >= 40 ? 'bg-yellow-500/10' : 'bg-red-500/10';
         const deltaAbs = Math.abs(contract.delta);
 
         const symbol = contract.symbol || contract.instrument_name || 'N/A';
         contract.symbol = symbol;
 
-        let riskClass = '';
         let riskBadge = '';
-        let riskLevel = '';
+        let riskClass = '';
 
         let distancePct = null;
         if (currentSpotPrice && contract.strike) {
@@ -1436,32 +1493,25 @@ function updateOpportunitiesTable(contracts) {
         if (isHighDelta && isNearStrike) {
             riskClass = 'risk-alert-high';
             riskBadge = '<span class="risk-badge bg-red-500 text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation-triangle"></i> 极高</span>';
-            riskLevel = '极高';
             highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` });
         } else if (isHighDelta) {
             riskClass = 'risk-alert-high';
             riskBadge = '<span class="risk-badge bg-red-500 text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation"></i> 高</span>';
-            riskLevel = '高';
             highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45` });
         } else if (isNearStrike) {
             riskClass = 'risk-alert-medium';
             riskBadge = '<span class="bg-orange-500 text-[10px] text-white px-1.5 py-0.5 rounded"><i class="fas fa-exclamation-circle"></i> 接近</span>';
-            riskLevel = '中';
         } else if (deltaAbs > 0.35) {
             riskBadge = '<span class="bg-yellow-500/80 text-[10px] text-white px-1.5 py-0.5 rounded">警告</span>';
-            riskLevel = '警告';
         } else {
             riskBadge = '<span class="bg-green-500/50 text-[10px] text-white px-1.5 py-0.5 rounded">正常</span>';
-            riskLevel = '正常';
         }
 
-        // 精简版12列表格数据
         const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
         const lossVal = Math.abs(contract.loss_at_10pct || 0);
         const breakeven = contract.breakeven || 0;
         const oi = contract.open_interest || 0;
         const spreadPct = contract.spread_pct || 0;
-
         const gamma = contract.gamma || 0;
         const vega = contract.vega || 0;
         const theta = contract.theta || 0;
@@ -1509,6 +1559,17 @@ function updateOpportunitiesTable(contracts) {
             icon: '/static/favicon.ico'
         });
     }
+}
+
+function loadMoreContracts() {
+    window.contractPage = (window.contractPage || 1) + 1;
+    renderTablePage();
+}
+
+function resetTableSort() {
+    _currentSortField = null;
+    _currentSortDir = 'desc';
+    document.querySelectorAll('#tableHeaders th').forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
 }
 
 function showRollSuggestion(idx) {
@@ -2332,11 +2393,9 @@ let currentSort = { field: null, direction: 'desc' };
 function sortContracts(field) {
     if (!currentData || !currentData.contracts || currentData.contracts.length === 0) return;
 
-    // 保存当前展开行的 symbol
     const expandedSymbols = new Set();
     document.querySelectorAll('tr[data-expanded="true"]').forEach(r => expandedSymbols.add(r.dataset.symbol));
 
-    // 字段名映射：HTML使用的名称 -> API返回的名称
     const fieldMap = {
         'mark_iv': 'iv',
         'premium': 'premium_usd',
@@ -2345,7 +2404,6 @@ function sortContracts(field) {
     };
     const actualField = fieldMap[field] || field;
 
-    // 切换排序方向
     if (currentSort.field === actualField) {
         currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
     } else {
@@ -2353,47 +2411,43 @@ function sortContracts(field) {
         currentSort.direction = 'desc';
     }
 
-    // 更新表头图标
     updateSortIcons(actualField, currentSort.direction);
 
-    // 排序数据
-    const sortedContracts = [...currentData.contracts].sort((a, b) => {
-        let valA = a[actualField];
-        let valB = b[actualField];
+    // 排序全局合约数据（_allContracts 是 currentData.contracts 的引用或副本）
+    if (_allContracts.length > 0) {
+        _allContracts.sort((a, b) => {
+            let valA = a[actualField];
+            let valB = b[actualField];
+            if (field === 'delta') {
+                valA = Math.abs(valA);
+                valB = Math.abs(valB);
+            }
+            if (typeof valA === 'string') {
+                valA = valA.toLowerCase();
+                valB = valB.toLowerCase();
+            }
+            if (field === 'option_type') {
+                const order = { 'PUT': 0, 'CALL': 1 };
+                valA = order[valA] ?? 9;
+                valB = order[valB] ?? 9;
+            }
+            if (valA === undefined || valA === null) valA = 0;
+            if (valB === undefined || valB === null) valB = 0;
+            if (currentSort.direction === 'asc') {
+                return valA > valB ? 1 : valA < valB ? -1 : 0;
+            } else {
+                return valA < valB ? 1 : valA > valB ? -1 : 0;
+            }
+        });
+        // 同时更新 currentData.contracts 以保持同步
+        currentData.contracts = _allContracts;
+    }
 
-        // 处理特殊字段
-        if (field === 'delta') {
-            valA = Math.abs(valA);
-            valB = Math.abs(valB);
-        }
-
-        // 处理字符串排序
-        if (typeof valA === 'string') {
-            valA = valA.toLowerCase();
-            valB = valB.toLowerCase();
-        }
-        if (field === 'option_type') {
-            const order = { 'PUT': 0, 'CALL': 1 };
-            valA = order[valA] ?? 9;
-            valB = order[valB] ?? 9;
-        }
-
-        if (valA === undefined || valA === null) valA = 0;
-        if (valB === undefined || valB === null) valB = 0;
-
-        if (currentSort.direction === 'asc') {
-            return valA > valB ? 1 : valA < valB ? -1 : 0;
-        } else {
-            return valA < valB ? 1 : valA > valB ? -1 : 0;
-        }
-    });
-
-    // 更新表格
-    updateOpportunitiesTable(sortedContracts);
+    window.contractPage = 1;
+    renderTablePage();
 
     showAlert(`已按 ${getFieldName(field)} ${currentSort.direction === 'asc' ? '升序' : '降序'} 排序`, 'info');
 
-    // 恢复之前展开的行
     setTimeout(() => {
         expandedSymbols.forEach(symbol => {
             const row = document.querySelector(`tr[data-symbol="${symbol}"]`);

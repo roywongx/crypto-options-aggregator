@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Dep
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 # 配置日志
@@ -65,6 +66,22 @@ def _get_deribit_monitor():
         from deribit_options_monitor import DeribitOptionsMonitor
         _deribit_monitor_cache['mon'] = DeribitOptionsMonitor()
     return _deribit_monitor_cache['mon']
+
+def _get_cached_contracts_count(currency: str = "BTC") -> int:
+    """快速获取最近一次扫描的合约数量（不解析完整合约数据）"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT contracts_data FROM scan_records 
+        WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
+    """, (currency,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        try:
+            return len(json.loads(row[0]))
+        except Exception:
+            pass
+    return 0
 
 
 def init_database():
@@ -266,6 +283,7 @@ def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):
         raise HTTPException(status_code=403, detail="Invalid or missing API key. Set DASHBOARD_API_KEY env to enable.")
 
 app = FastAPI(title="期权监控面板", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 app.include_router(grid_router)
 app.include_router(charts_router)
@@ -442,6 +460,65 @@ async def get_latest(currency: str = Query(default="BTC")):
         "large_trades_details": large_trades,
         "large_trades_count": row[5] or 0,
         "timestamp": row[0]
+    }
+
+
+@app.get("/api/macro")
+async def get_macro(currency: str = Query(default="BTC")):
+    """获取宏观数据（DVOL + 现货 + 大单统计），轻量快速响应
+    
+    用于页面初始加载，不返回合约详情，确保秒开。
+    合约数据通过 /api/latest 单独获取。
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
+               large_trades_count, raw_output
+        FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
+    """, (currency,))
+    row = cursor.fetchone()
+
+    if not row:
+        return {
+            "success": True,
+            "currency": currency,
+            "spot_price": get_spot_price(currency),
+            "dvol_current": 0,
+            "dvol_z_score": 0,
+            "dvol_signal": "",
+            "dvol_trend": "",
+            "dvol_trend_label": "",
+            "dvol_confidence": "",
+            "dvol_percentile_7d": 50,
+            "dvol_interpretation": "",
+            "large_trades_count": 0,
+            "timestamp": None,
+            "contracts_count": 0
+        }
+
+    raw = {}
+    if row[6]:
+        try:
+            raw = json.loads(row[6])
+        except Exception:
+            raw = {}
+
+    return {
+        "success": True,
+        "currency": currency,
+        "spot_price": row[1] or get_spot_price(currency),
+        "dvol_current": row[2] or 0,
+        "dvol_z_score": row[3] or 0,
+        "dvol_signal": row[4] or '',
+        "dvol_interpretation": raw.get("interpretation", ""),
+        "dvol_trend": raw.get("trend", ""),
+        "dvol_trend_label": raw.get("trend_label", ""),
+        "dvol_confidence": raw.get("confidence", ""),
+        "dvol_percentile_7d": raw.get("percentile_7d", 50),
+        "large_trades_count": row[5] or 0,
+        "timestamp": row[0],
+        "contracts_count": _get_cached_contracts_count(currency)
     }
 
 

@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v19.0-代码质量修复-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v20.0-前端加载优化-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -282,6 +282,29 @@ python -m uvicorn main:app --reload --port 8000
 - 现货价格缓存从 5 分钟缩短到 5 秒
 - 确保所有组件使用相同的时间戳和价格
 - 减少对外部 API 的重复请求
+
+### v20.0 (2026-04) — 前端加载与展示优化
+
+**📄 表格分页加载**
+- 合约表格初始仅渲染前 30 条最优质合约
+- 添加「加载更多」按钮，动态追加剩余合约
+- 避免一次性向 DOM 注入数百行导致的浏览器渲染卡顿
+- 排序时自动重置到第 1 页，保持分页状态一致
+
+**🗜️ API 响应 GZIP 压缩**
+- main.py 添加 FastAPI GZipMiddleware，响应 >500 字节自动压缩
+- 减少网络传输量约 60-80%，加快 API 响应速度
+
+**⚡ 渐进式页面加载**
+- 拆分 API 接口：`/api/macro` 返回 DVOL+现货+大单（轻量）
+- `/api/latest` 返回完整合约详情（重量）
+- 页面加载时并发请求两个接口，宏观指标先渲染，合约数据后加载
+- 实现"秒开"感官体验，避免长时间白屏
+
+**🔄 优化自动加载逻辑**
+- loadLatestData 支持 Promise.all 并发加载 macro 和 latest
+- 宏观指标更新与合约表格渲染解耦
+- 页面打开自动预加载宏观指标+合约数据+IV期限结构+最大痛点+PCR
 
 ### v19.0 (2026-04) — 代码质量修复
 
