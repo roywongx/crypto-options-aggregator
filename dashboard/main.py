@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
 from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
 sys.path.insert(0, str(Path(__file__).parent.parent))

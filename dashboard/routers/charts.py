@@ -273,10 +273,10 @@ def _get_iv_term_analysis(term_structure: list) -> dict:
     
     try:
         from services.iv_term_structure import IVTermStructureAnalyzer
-        from services.spot_price import get_latest_spot_price
+        from services.spot_price import get_spot_price
         
         currency = "BTC"
-        spot = get_latest_spot_price(currency) or 0
+        spot = get_spot_price(currency) or 0
         
         # 尝试获取历史波动率（30天）
         hist_vol = None
