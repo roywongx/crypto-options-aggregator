@@ -674,10 +674,6 @@ async function loadLatestData() {
         // v8.0: Load risk dashboard (unified)
         loadRiskDashboard(currency);
         
-        
-        // v8.0: 非阻塞式加载网格策略数据
-        loadGridStrategyData().catch(() => {});
-        
         showAlert('数据刷新成功', 'success');
     } catch (error) {
         console.error('加载数据失败:', error);
@@ -1889,13 +1885,6 @@ document.getElementById('rollModal').addEventListener('click', (e) => {
     if (e.target.id === 'rollModal') closeRollModal();
 });
 
-
-// v8.0: 网格策略数据加载 - 委托给 grid-strategy.js
-async function loadGridStrategyData() {
-    if (typeof loadGridStrategy === 'function') {
-        await loadGridStrategy();
-    }
-}
 
 // v8.0: Payoff可视化
 let payoffChart = null;
