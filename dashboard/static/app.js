@@ -795,111 +795,176 @@ function updateOnchainMetrics(onchain) {
         return;
     }
     
-    // MVRV Ratio
-    const mvrvEl = document.getElementById('onchainMVRV');
-    const mvrvSignalEl = document.getElementById('onchainMVRVSignal');
-    console.log('[OnChain] MVRV元素:', mvrvEl ? '找到' : '未找到');
+    // ===== 汇合仪表盘 =====
+    updateConvergenceDashboard(onchain.convergence_score);
     
-    if (mvrvEl && mvrvSignalEl) {
-        if (onchain.mvrv_ratio !== null && onchain.mvrv_ratio !== undefined) {
-            mvrvEl.textContent = onchain.mvrv_ratio.toFixed(2);
-            mvrvSignalEl.textContent = onchain.mvrv_signal || '--';
-            console.log('[OnChain] MVRV更新:', onchain.mvrv_ratio);
-            
-            // 根据 MVRV 值设置颜色
-            if (onchain.mvrv_ratio < 1) {
-                mvrvEl.className = 'text-xl font-bold text-green-400';
-                mvrvSignalEl.className = 'text-xs mt-1 text-green-500';
-            } else if (onchain.mvrv_ratio < 3.5) {
-                mvrvEl.className = 'text-xl font-bold text-yellow-400';
-                mvrvSignalEl.className = 'text-xs mt-1 text-yellow-500';
-            } else {
-                mvrvEl.className = 'text-xl font-bold text-red-400';
-                mvrvSignalEl.className = 'text-xs mt-1 text-red-500';
-            }
-        } else {
-            mvrvEl.textContent = '--';
-            mvrvSignalEl.textContent = onchain.mvrv_signal || '数据加载中...';
-        }
+    // ===== MVRV Ratio =====
+    setMetricValue('onchainMVRV', onchain.mvrv_ratio, 2);
+    setMetricText('onchainMVRVSignal', onchain.mvrv_signal || '--');
+    if (onchain.mvrv_ratio !== null && onchain.mvrv_ratio !== undefined) {
+        const mvrvEl = document.getElementById('onchainMVRV');
+        const sigEl = document.getElementById('onchainMVRVSignal');
+        if (mvrvEl) mvrvEl.className = 'text-xl font-bold ' + (onchain.mvrv_ratio < 1 ? 'text-green-400' : onchain.mvrv_ratio < 3.5 ? 'text-yellow-400' : 'text-red-400');
+        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.mvrv_ratio < 1 ? 'text-green-500' : onchain.mvrv_ratio < 3.5 ? 'text-yellow-500' : 'text-red-500');
     }
     
-    // 200周均线
-    const wmaEl = document.getElementById('onchain200WMA');
-    const wmaRatioEl = document.getElementById('onchain200WMARatio');
-    if (wmaEl && wmaRatioEl) {
-        if (onchain.price_200wma !== null && onchain.price_200wma !== undefined) {
-            wmaEl.textContent = `$${onchain.price_200wma.toLocaleString()}`;
-            if (onchain.price_to_200wma_ratio) {
-                const ratio = onchain.price_to_200wma_ratio;
-                wmaRatioEl.textContent = `当前价格 / 200WMA = ${ratio.toFixed(2)}x`;
-                if (ratio > 1.5) {
-                    wmaRatioEl.className = 'text-xs mt-1 text-red-400';
-                } else if (ratio > 1.0) {
-                    wmaRatioEl.className = 'text-xs mt-1 text-yellow-400';
-                } else {
-                    wmaRatioEl.className = 'text-xs mt-1 text-green-400';
-                }
-            }
-        } else {
-            wmaEl.textContent = '--';
-            wmaRatioEl.textContent = '数据加载中...';
-        }
-    }
+    // ===== MVRV Z-Score =====
+    const zscore = onchain.mvrv_z_score;
+    const zzone = onchain.mvrv_z_zone;
+    const zzoneName = onchain.mvrv_z_zone_name;
+    const zExtremes = onchain.mvrv_z_extremes || {};
     
-    // Balanced Price
-    const bpEl = document.getElementById('onchainBalancedPrice');
-    const bpRatioEl = document.getElementById('onchainBalancedPriceRatio');
-    if (bpEl && bpRatioEl) {
-        if (onchain.balanced_price !== null && onchain.balanced_price !== undefined) {
-            bpEl.textContent = `$${onchain.balanced_price.toLocaleString()}`;
-            if (onchain.current_price && onchain.balanced_price > 0) {
-                const ratio = (onchain.current_price / onchain.balanced_price).toFixed(2);
-                bpRatioEl.textContent = `当前价格 / BP = ${ratio}x`;
-            }
-        } else {
-            bpEl.textContent = '--';
-            bpRatioEl.textContent = '数据加载中...';
-        }
-    }
+    setMetricValue('onchainMVRVZScore', zscore, 2);
+    setMetricText('onchainMVRVZSignal', zzoneName || onchain.mvrv_z_signal || '--');
     
-    // 减半倒计时
-    const halvingEl = document.getElementById('onchainHalvingDays');
-    const halvingDateEl = document.getElementById('onchainHalvingDate');
-    if (halvingEl) {
-        if (onchain.halving_days_remaining !== null && onchain.halving_days_remaining !== undefined) {
-            halvingEl.textContent = `${onchain.halving_days_remaining} 天`;
-            
-            // 估算减半日期
-            const halvingDate = new Date();
-            halvingDate.setDate(halvingDate.getDate() + onchain.halving_days_remaining);
-            halvingDateEl.textContent = `预计 ${halvingDate.getFullYear()}年${halvingDate.getMonth() + 1}月`;
-        } else {
-            halvingEl.textContent = '--';
-            halvingDateEl.textContent = '--';
-        }
-    }
-    
-    // MVRV 周期模式分析（参考 Murphy 的推文）
-    const analysisEl = document.getElementById('onchainMVRVAnalysis');
-    if (analysisEl && onchain.mvrv_ratio !== null && onchain.mvrv_ratio !== undefined) {
-        analysisEl.classList.remove('hidden');
+    if (zscore !== null && zscore !== undefined) {
+        const zEl = document.getElementById('onchainMVRVZScore');
+        const sigEl = document.getElementById('onchainMVRVZSignal');
         
-        let analysisText = '<i class="fas fa-chart-line mr-2"></i> ';
-        analysisText += '<b>MVRV 周期模式分析（参考 Messari & Murphy）</b><br>';
-        analysisText += '• BTC 前3轮减半后 MVRV 走势高度同频<br>';
-        analysisText += '• 历史顶部信号：MVRV > 3.5（Messari 2022年报告）<br>';
-        analysisText += '• 历史底部信号：MVRV < 1.0<br>';
-        
-        if (onchain.mvrv_ratio < 1) {
-            analysisText += `<br><span class="text-green-400">📊 当前 MVRV ${onchain.mvrv_ratio.toFixed(2)} 处于历史底部区域，可能是积累机会</span>`;
-        } else if (onchain.mvrv_ratio < 3.5) {
-            analysisText += `<br><span class="text-yellow-400">📊 当前 MVRV ${onchain.mvrv_ratio.toFixed(2)} 处于正常区间</span>`;
+        // Bitcoin Magazine Pro 颜色带区标准
+        let zColor, sigColor;
+        if (zzone === 'green') {
+            zColor = 'text-green-400';
+            sigColor = 'text-green-500';
+        } else if (zzone === 'pink') {
+            zColor = 'text-pink-400';
+            sigColor = 'text-pink-500';
         } else {
-            analysisText += `<br><span class="text-red-400">📊 当前 MVRV ${onchain.mvrv_ratio.toFixed(2)} 处于过热区域，注意风险</span>`;
+            zColor = 'text-yellow-400';
+            sigColor = 'text-yellow-500';
         }
         
-        analysisEl.innerHTML = analysisText;
+        if (zEl) zEl.className = 'text-xl font-bold ' + zColor;
+        if (sigEl) sigEl.className = 'text-xs mt-1 ' + sigColor;
     }
+    
+    // Z-Score 历史极值提示
+    if (zExtremes && zExtremes.min_z !== undefined) {
+        const histEl = document.getElementById('onchainMVRVZHistory');
+        if (histEl) {
+            const histText = `历史极值: ${zExtremes.min_z} ~ ${zExtremes.max_z} | 百分位: ${zExtremes.current_percentile}%`;
+            histEl.textContent = histText;
+            histEl.className = 'text-[10px] text-gray-600 mt-1';
+        }
+    }
+    
+    // ===== NUPL =====
+    if (onchain.nupl !== null && onchain.nupl !== undefined) {
+        setMetricValue('onchainNUPL', onchain.nupl, 3);
+        setMetricText('onchainNUPLSignal', onchain.nupl_signal || '--');
+        const nuplEl = document.getElementById('onchainNUPL');
+        const sigEl = document.getElementById('onchainNUPLSignal');
+        if (nuplEl) nuplEl.className = 'text-xl font-bold ' + (onchain.nupl < 0 ? 'text-red-400' : onchain.nupl < 0.25 ? 'text-yellow-400' : onchain.nupl < 0.75 ? 'text-yellow-300' : 'text-green-400');
+        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.nupl < 0 ? 'text-red-500' : onchain.nupl < 0.25 ? 'text-yellow-500' : onchain.nupl < 0.75 ? 'text-yellow-300' : 'text-green-500');
+    }
+    
+    // ===== Mayer Multiple =====
+    setMetricValue('onchainMayer', onchain.mayer_multiple, 2);
+    setMetricText('onchainMayerSignal', onchain.mayer_signal || '--');
+    if (onchain.mayer_multiple !== null && onchain.mayer_multiple !== undefined) {
+        const mEl = document.getElementById('onchainMayer');
+        const sigEl = document.getElementById('onchainMayerSignal');
+        if (mEl) mEl.className = 'text-xl font-bold ' + (onchain.mayer_multiple < 1 ? 'text-green-400' : onchain.mayer_multiple < 2.4 ? 'text-yellow-400' : 'text-red-400');
+        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.mayer_multiple < 1 ? 'text-green-500' : onchain.mayer_multiple < 2.4 ? 'text-yellow-500' : 'text-red-500');
+    }
+    
+    // ===== 200WMA =====
+    setMetricValue('onchain200WMA', onchain.price_200wma, 0, '$');
+    setMetricText('onchain200WMARatio', onchain.price_to_200wma_ratio ? `当前价格 / 200WMA = ${onchain.price_to_200wma_ratio.toFixed(2)}x` : '--');
+    
+    // ===== Balanced Price =====
+    setMetricValue('onchainBalancedPrice', onchain.balanced_price, 0, '$');
+    setMetricText('onchainBalancedPriceRatio', onchain.balanced_price_ratio ? `当前价格 / BP = ${onchain.balanced_price_ratio.toFixed(2)}x` : '--');
+    
+    // ===== 200DMA =====
+    setMetricValue('onchain200DMA', onchain.price_200dma, 0, '$');
+    
+    // ===== 减半倒计时 =====
+    if (onchain.halving_days_remaining !== null && onchain.halving_days_remaining !== undefined) {
+        setMetricText('onchainHalvingDays', `${onchain.halving_days_remaining} 天`);
+    }
+    
+    // ===== Puell Multiple =====
+    setMetricValue('onchainPuell', onchain.puell_multiple, 2);
+    setMetricText('onchainPuellSignal', onchain.puell_signal || '--');
+    if (onchain.puell_multiple !== null && onchain.puell_multiple !== undefined) {
+        const pEl = document.getElementById('onchainPuell');
+        const sigEl = document.getElementById('onchainPuellSignal');
+        if (pEl) pEl.className = 'text-xl font-bold ' + (onchain.puell_multiple < 0.4 ? 'text-green-400' : onchain.puell_multiple < 2.0 ? 'text-yellow-400' : 'text-red-400');
+        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.puell_multiple < 0.4 ? 'text-green-500' : onchain.puell_multiple < 2.0 ? 'text-yellow-500' : 'text-red-500');
+    }
+}
+
+function updateConvergenceDashboard(convergence) {
+    const badgeEl = document.getElementById('convergenceScoreBadge');
+    const scoreEl = document.getElementById('convergenceScoreValue');
+    const probEl = document.getElementById('convergenceBottomProb');
+    const activeEl = document.getElementById('convergenceActiveCount');
+    const signalsEl = document.getElementById('convergenceSignals');
+    
+    if (!convergence || !badgeEl || !scoreEl || !probEl || !activeEl || !signalsEl) {
+        return;
+    }
+    
+    // 设置徽章
+    badgeEl.textContent = convergence.icon + ' ' + convergence.name;
+    badgeEl.className = `px-3 py-1 rounded-full text-xs font-bold ${convergence.color || 'text-gray-400'} ${getConvergenceBg(convergence.level)}`;
+    
+    // 设置分数
+    scoreEl.textContent = convergence.score > 0 ? `+${convergence.score}` : `${convergence.score}`;
+    scoreEl.className = 'text-2xl font-bold ' + (convergence.color || 'text-gray-400');
+    
+    // 设置底部概率
+    probEl.textContent = convergence.bottom_probability || '--';
+    probEl.className = 'text-sm font-bold ' + (convergence.color || 'text-gray-400');
+    
+    // 设置激活指标
+    activeEl.textContent = `${convergence.active_indicators || 0} / 7`;
+    
+    // 设置信号列表
+    if (convergence.signals && convergence.signals.length > 0) {
+        signalsEl.innerHTML = convergence.signals.map(([icon, name, type]) => {
+            const colors = {
+                'bottom': 'text-green-400 bg-green-500/10 border-green-500/30',
+                'top': 'text-red-400 bg-red-500/10 border-red-500/30',
+                'neutral': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
+            };
+            const c = colors[type] || colors.neutral;
+            return `<div class="p-2 rounded border ${c}">${icon} ${name}</div>`;
+        }).join('');
+    } else {
+        signalsEl.innerHTML = '<div class="text-gray-600 text-center py-2 col-span-4">无信号</div>';
+    }
+}
+
+function getConvergenceBg(level) {
+    const bgMap = {
+        'STRONG_BOTTOM': 'bg-red-500/20',
+        'BOTTOM': 'bg-yellow-500/20',
+        'ACCUMULATION': 'bg-green-500/20',
+        'NEUTRAL': 'bg-gray-500/20',
+        'DISTRIBUTION': 'bg-orange-500/20',
+        'TOP': 'bg-red-500/20'
+    };
+    return bgMap[level] || 'bg-gray-500/20';
+}
+
+function setMetricValue(elementId, value, decimals = null, prefix = '') {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    if (value === null || value === undefined) {
+        el.textContent = '--';
+    } else if (decimals !== null) {
+        el.textContent = prefix + Number(value).toFixed(decimals);
+    } else {
+        el.textContent = prefix + value;
+    }
+}
+
+function setMetricText(elementId, text) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    el.textContent = text || '--';
 }
 
 function updatePressureTest(pt) {

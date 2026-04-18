@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v10.0-压力测试+AI情绪分析-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v12.0-筑底信号v3.0-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -18,16 +18,27 @@
 
 ## 🌟 核心亮点
 
-### 🔗 链上数据引擎 — 数据精度与 fuckbtc.com 一致
+### 🔗 链上数据引擎 v2.0 — 基于 BTC 筑底信号深度研究报告的多维指标体系
 
-| 指标 | 数据源 | 精度验证 |
-|------|--------|----------|
-| **MVRV Ratio** | looknode-proxy API | 与 fuckbtc.com 精确匹配 (1.38) |
-| **200周均线** | Binance 200周K线 | 误差 <0.002% ($59,947 vs $59,948) |
-| **Balanced Price** | 链上API直接获取 | 零偏差 ($40,437) |
-| **减半倒计时** | blockchain.info 实时区块 | 实时更新 (725天) |
+全面引入学术论文《BTC 筑底信号与宏观周期指标深度研究报告》的链上分析框架，从单一 MVRV 扩展到 7 维指标汇合系统。
 
-> 全面弃用硬编码/估算，所有链上指标均来自真实API，配备指数退避重试机制确保稳定性。
+| 指标 | 数据源 | 学术依据 | 底部信号 | 当前值示例 |
+|------|--------|----------|----------|------------|
+| **MVRV Ratio** | looknode-proxy API | Messari (2022) | < 1.0 历史底部 | 1.42 |
+| **MVRV Z-Score** | MVRV 历史统计 | 统计学 Z 分布 | < -1 极度低估 | -0.38 |
+| **NUPL** | MVRV 推导 | 净未实现损益模型 | < 0 恐惧区 | 0.295 |
+| **Mayer Multiple** | Binance 200DMA | Mayer (2014) | < 1.0 低估 | 0.88 |
+| **200WMA** | Binance 200周K线 | 长期趋势基准 | 价格接近 | $59,939 |
+| **200DMA** | Binance 200日K线 | 中期成本基准 | 价格低于 | $86,805 |
+| **Balanced Price** | 链上API直接获取 | 已实现-转移价格 | 价格低于 | $40,449 |
+
+**多重指标汇合评分系统**:
+- 每个指标贡献 -10 到 +10 分，总分范围 -70 ~ +70
+- 6 级判定：STRONG_BOTTOM / BOTTOM / ACCUMULATION / NEUTRAL / DISTRIBUTION / TOP
+- 底部概率估计：极高 (>80%) → 极低 (<5%)
+- 信号明细输出：7 个独立指标信号逐一亮相
+
+> 全面覆盖研究报告中的 5 大维度：链上成本基准、盈亏心理振荡器、长期技术指标、资本流转、宏观综合信号
 
 ### 💰 真实 Margin-APR — 反映资金真实效率
 
@@ -133,7 +144,7 @@
 | 数据维度 | 来源 | 建议影响 |
 |----------|------|----------|
 | 风险层级 | 动态风险框架 | 基础仓位指导（NORMAL/PANIC） |
-| 链上指标 | MVRV/200WMA/BP | 周期位置判断（底部/顶部信号） |
+| 链上指标 | 8维筑底信号系统 | 周期位置判断 + 汇合评分 |
 | 压力测试 | Vanna/Volga/Gamma | 高阶风险对冲建议 |
 | AI情绪分析 | 大宗交易意图识别 | 机构行为预警 |
 | 最大痛点 | 期权持仓分析 | 价格回归方向判断 |
@@ -236,6 +247,41 @@ python -m uvicorn main:app --reload --port 8000
 ---
 
 ## 💡 更新日志
+
+### v12.0 (2026-04) — 筑底信号 v3.0（Bitcoin Magazine Pro 标准）
+
+**🔬 MVRV Z-Score 修正**
+- 修正计算逻辑：使用标准 MVRV 历史统计 Z-Score 方法
+- 引入 Bitcoin Magazine Pro 颜色带区标准：绿色带（Z < 0）= 低估区，粉色带（Z > 1）= 过热区
+- 新增历史极值记录：min/max Z-Score + 当前百分位
+- 前端新增颜色渐变指示条（绿→黄→粉）
+
+**📊 8 维筑底信号汇合系统**
+- 新增 Puell Multiple（矿工收入倍数）：基于 Binance 365 天价格估算矿工收入
+- 汇合评分扩展为 8 个指标，总分范围 -80 ~ +80
+- 阈值调整：STRONG_BOTTOM ≤ -40, BOTTOM ≤ -20, ACCUMULATION ≤ -5, NEUTRAL ≤ 15, DISTRIBUTION ≤ 30, TOP > 30
+- 8 个激活指标实时显示信号明细
+
+### v11.0 (2026-04) — 链上数据引擎 v2.0 + 筑底信号系统
+
+**🔗 链上数据引擎 v2.0（基于 BTC 筑底信号深度研究报告）**
+- 新增 MVRV Z-Score：基于 MVRV 365天历史统计，识别极端低估区域
+- 新增 NUPL（Net Unrealized Profit/Loss）：净未实现损益情绪振荡器
+- 新增 Mayer Multiple：价格/200DMA，经典超买超卖识别
+- 新增 200日均线（200DMA）：Binance 200日收盘均价
+- 全面升级数据准确性：修复 current_price 判定逻辑，确保 0 值正确处理
+
+**📊 多重指标汇合评分系统**
+- 7 维度综合评分：每个指标贡献 -10 ~ +10 分
+- 6 级自动判定：STRONG_BOTTOM / BOTTOM / ACCUMULATION / NEUTRAL / DISTRIBUTION / TOP
+- 底部概率估计：结合历史周期经验给出概率区间
+- 信号明细输出：7 个独立指标逐一亮相（底部/中性/顶部信号）
+
+**🎨 前端增强**
+- 新增「筑底信号汇合仪表盘」：综合评分 + 底部概率 + 激活指标 + 信号明细
+- 新增 4 个指标卡片：MVRV Z-Score / NUPL / Mayer Multiple / 200DMA
+- 全新色彩系统：不同指标使用不同主题色（紫/靛蓝/玫瑰红/青绿/天蓝）
+- 智能颜色编码：根据信号强度自动切换绿/黄/红三色
 
 ### v10.0 (2026-04) — 压力测试系统 + AI情绪分析v2.0 + 马丁格尔沙盘v2.0
 
