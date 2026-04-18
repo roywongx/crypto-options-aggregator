@@ -353,6 +353,66 @@
                 </div>
             </div>
             
+            <!-- 衍生品市场过热检测（v12.0新增） -->
+            <div class="mt-6 border-t border-gray-700 pt-4">
+                <h4 class="text-sm font-semibold text-indigo-400 mb-3 flex items-center gap-2">
+                    <i class="fas fa-fire"></i> 衍生品市场过热检测（Sharpe + Funding Rate + 期货/现货比率）
+                </h4>
+                
+                <!-- 综合评估卡片 -->
+                <div id="derivOverheatCard" class="mb-3 p-4 rounded-xl border border-gray-700/50 bg-gradient-to-r from-gray-800/60 to-gray-900/60">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-sm font-bold text-white flex items-center gap-2">
+                            <i class="fas fa-chart-line text-indigo-400"></i> 衍生品市场状态
+                        </div>
+                        <div id="derivOverheatBadge" class="px-3 py-1 rounded-full text-xs font-bold bg-gray-700 text-gray-400">
+                            加载中...
+                        </div>
+                    </div>
+                    <div id="derivOverheatAdvice" class="text-xs text-gray-400">--</div>
+                    <div id="derivOverheatSignals" class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-xs">
+                        <div class="text-gray-600 text-center py-2 col-span-4">等待加载...</div>
+                    </div>
+                </div>
+                
+                <!-- 核心指标 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <!-- Sharpe Ratio 7d -->
+                    <div class="p-3 bg-gray-800/40 rounded-lg border border-cyan-500/20">
+                        <div class="text-xs text-gray-400 mb-1">Sharpe Ratio (7d)</div>
+                        <div id="derivSharpe7d" class="text-xl font-bold text-cyan-300">--</div>
+                        <div id="derivSharpe7dSignal" class="text-xs mt-1 text-gray-500">--</div>
+                    </div>
+                    
+                    <!-- Sharpe Ratio 30d -->
+                    <div class="p-3 bg-gray-800/40 rounded-lg border border-teal-500/20">
+                        <div class="text-xs text-gray-400 mb-1">Sharpe Ratio (30d)</div>
+                        <div id="derivSharpe30d" class="text-xl font-bold text-teal-300">--</div>
+                        <div id="derivSharpe30dSignal" class="text-xs mt-1 text-gray-500">--</div>
+                    </div>
+                    
+                    <!-- 资金费率 -->
+                    <div class="p-3 bg-gray-800/40 rounded-lg border border-rose-500/20">
+                        <div class="text-xs text-gray-400 mb-1">资金费率 (8h)</div>
+                        <div id="derivFundingRate" class="text-xl font-bold text-rose-300">--</div>
+                        <div id="derivFundingSignal" class="text-xs mt-1 text-gray-500">--</div>
+                        <div class="text-xs text-gray-600 mt-1">&gt; 0.1% 过热 · &lt; -0.1% 空头</div>
+                    </div>
+                    
+                    <!-- 期货/现货比率 -->
+                    <div class="p-3 bg-gray-800/40 rounded-lg border border-violet-500/20">
+                        <div class="text-xs text-gray-400 mb-1">期货/现货成交量比</div>
+                        <div id="derivVolRatio" class="text-xl font-bold text-violet-300">--</div>
+                        <div id="derivVolRatioSignal" class="text-xs mt-1 text-gray-500">--</div>
+                        <div class="text-xs text-gray-600 mt-1">&gt; 3 杠杆高 · 1.5~3 正常</div>
+                    </div>
+                </div>
+                
+                <div class="mt-2 text-xs text-gray-600 text-center">
+                    数据来源: Binance Futures API · Deribit API · Binance Spot API
+                </div>
+            </div>
+            
             <!-- 压力测试系统（v9.0新增） -->
             <div class="mt-6 border-t border-gray-700 pt-4">
                 <h4 class="text-sm font-semibold text-amber-400 mb-3 flex items-center gap-2">

@@ -1265,6 +1265,24 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         logger.warning("压力测试计算失败: %s", str(e))
         pressure_test_data = {"error": str(e)}
 
+    # 衍生品市场指标（Sharpe Ratio、资金费率、期货/现货比率）
+    derivative_data = {}
+    try:
+        from services.derivative_metrics import DerivativeMetrics
+        derivative_data = DerivativeMetrics.get_all_metrics()
+        
+        # 根据衍生品评估补充策略建议
+        if "overheating_assessment" in derivative_data:
+            oa = derivative_data["overheating_assessment"]
+            if oa.get("level") in ["OVERHEATED", "EXTREME_OVERHEAT"]:
+                advice.append(f"⚠️ 衍生品{oa['name']}：{oa['advice']}")
+                actions.append("降低杠杆暴露，关注资金费率和期货/现货比率")
+            elif oa.get("level") in ["STRONG_BOTTOM", "BOTTOM"]:
+                advice.append(f"🔴 衍生品底部信号：{oa['advice']}")
+    except Exception as e:
+        logger.warning("衍生品指标计算失败: %s", str(e))
+        derivative_data = {"error": str(e)}
+
     # AI 驱动的情绪分析 - 基于大宗交易数据
     ai_sentiment_data = {}
     try:
@@ -1308,6 +1326,7 @@ async def get_risk_overview(currency: str = Query(default="BTC")):
         "put_wall": put_wall,
         "gamma_flip": gamma_flip,
         "onchain_metrics": onchain_data,
+        "derivative_metrics": derivative_data,
         "pressure_test": pressure_test_data,
         "ai_sentiment": ai_sentiment_data,
         "timestamp": risk_data["timestamp"]

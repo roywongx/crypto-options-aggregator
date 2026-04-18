@@ -780,6 +780,9 @@ function updateRiskDashboardUI(data) {
     // 更新链上核心指标（v8.1新增）
     updateOnchainMetrics(data.onchain_metrics);
     
+    // 衍生品市场过热检测（v12.0新增）
+    updateDerivativeMetrics(data.derivative_metrics);
+    
     // 压力测试系统（v9.0新增）
     updatePressureTest(data.pressure_test);
     
@@ -965,6 +968,83 @@ function setMetricText(elementId, text) {
     const el = document.getElementById(elementId);
     if (!el) return;
     el.textContent = text || '--';
+}
+
+function updateDerivativeMetrics(dm) {
+    if (!dm || dm.error) {
+        console.log('[Derivative] 警告: 数据为空');
+        return;
+    }
+    
+    // Sharpe 7d
+    setMetricValue('derivSharpe7d', dm.sharpe_ratio_7d, 2);
+    setMetricText('derivSharpe7dSignal', dm.sharpe_signal_7d || '--');
+    if (dm.sharpe_ratio_7d !== null && dm.sharpe_ratio_7d !== undefined) {
+        const el = document.getElementById('derivSharpe7d');
+        if (el) el.className = 'text-xl font-bold ' + (dm.sharpe_ratio_7d < -1 ? 'text-green-400' : dm.sharpe_ratio_7d < 0 ? 'text-yellow-400' : dm.sharpe_ratio_7d < 2 ? 'text-cyan-400' : 'text-red-400');
+    }
+    
+    // Sharpe 30d
+    setMetricValue('derivSharpe30d', dm.sharpe_ratio_30d, 2);
+    setMetricText('derivSharpe30dSignal', dm.sharpe_signal_30d || '--');
+    if (dm.sharpe_ratio_30d !== null && dm.sharpe_ratio_30d !== undefined) {
+        const el = document.getElementById('derivSharpe30d');
+        if (el) el.className = 'text-xl font-bold ' + (dm.sharpe_ratio_30d < -1 ? 'text-green-400' : dm.sharpe_ratio_30d < 0 ? 'text-yellow-400' : dm.sharpe_ratio_30d < 2 ? 'text-teal-400' : 'text-red-400');
+    }
+    
+    // 资金费率
+    if (dm.funding_rate !== null && dm.funding_rate !== undefined) {
+        const pct = dm.funding_rate * 100;
+        setMetricText('derivFundingRate', pct.toFixed(3) + '%');
+        setMetricText('derivFundingSignal', dm.funding_signal || '--');
+        const el = document.getElementById('derivFundingRate');
+        if (el) el.className = 'text-xl font-bold ' + (pct > 0.1 ? 'text-red-400' : pct > 0.05 ? 'text-orange-400' : pct < -0.05 ? 'text-green-400' : 'text-rose-400');
+    }
+    
+    // 期货/现货比率
+    setMetricValue('derivVolRatio', dm.futures_spot_ratio, 2);
+    setMetricText('derivVolRatioSignal', dm.futures_spot_signal || '--');
+    if (dm.futures_spot_ratio !== null && dm.futures_spot_ratio !== undefined) {
+        const el = document.getElementById('derivVolRatio');
+        if (el) el.className = 'text-xl font-bold ' + (dm.futures_spot_ratio > 3 ? 'text-red-400' : dm.futures_spot_ratio > 1.5 ? 'text-yellow-400' : 'text-violet-400');
+    }
+    
+    // 综合评估
+    const oa = dm.overheating_assessment;
+    if (oa) {
+        const badge = document.getElementById('derivOverheatBadge');
+        const advice = document.getElementById('derivOverheatAdvice');
+        const signals = document.getElementById('derivOverheatSignals');
+        
+        if (badge) {
+            badge.textContent = oa.icon + ' ' + oa.name;
+            badge.className = 'px-3 py-1 rounded-full text-xs font-bold ' + (oa.color || 'text-gray-400') + ' ' + getDerivBg(oa.level);
+        }
+        if (advice) advice.textContent = oa.advice || '--';
+        
+        if (signals && oa.signals && oa.signals.length > 0) {
+            const colors = {
+                'bottom': 'text-green-400 bg-green-500/10 border-green-500/30',
+                'top': 'text-red-400 bg-red-500/10 border-red-500/30',
+                'neutral': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
+            };
+            signals.innerHTML = oa.signals.map(([icon, name, type]) => {
+                const c = colors[type] || colors.neutral;
+                return '<div class="p-2 rounded border ' + c + '">' + icon + ' ' + name + '</div>';
+            }).join('');
+        }
+    }
+}
+
+function getDerivBg(level) {
+    const bgMap = {
+        'STRONG_BOTTOM': 'bg-red-500/20',
+        'BOTTOM': 'bg-yellow-500/20',
+        'NEUTRAL': 'bg-gray-500/20',
+        'OVERHEATED': 'bg-orange-500/20',
+        'EXTREME_OVERHEAT': 'bg-red-500/20'
+    };
+    return bgMap[level] || 'bg-gray-500/20';
 }
 
 function updatePressureTest(pt) {
