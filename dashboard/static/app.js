@@ -60,18 +60,16 @@ async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
 
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();
-    loadLatestData();
+    loadPageDataAsync();
     loadStats();
     setupEventListeners();
     updateParamDisplay();
     setAutoRefresh(5);
     requestNotificationPermission();
-    loadPcrChart();
     
-    // v8.0: 添加网络状态监听
     window.addEventListener('online', () => {
         showAlert('网络连接已恢复', 'success');
-        loadLatestData();
+        loadLatestData(false);
     });
 
     window.addEventListener('offline', () => {
@@ -645,9 +643,8 @@ function displayRecoveryResult(result) {
     }
 }
 
-async function loadLatestData() {
+async function loadLatestData(showSuccess = true) {
     try {
-        // 添加网络状态检测
         if (!navigator.onLine) {
             showAlert('网络连接已断开，刷新失败', 'error');
             return;
@@ -655,41 +652,48 @@ async function loadLatestData() {
         
         const currency = document.getElementById('currencySelect').value;
         const response = await safeFetch(`${API_BASE}/api/latest?currency=${currency}`);
-
         const data = await response.json();
         currentData = data;
         if (data.spot_price) currentSpotPrice = data.spot_price;
 
         updateMacroIndicators(data);
-        if (data.dvol_interpretation || data.dvol_trend_label) {
-            showDvolAdvice(data.currency || 'BTC');
-        }
         updateOpportunitiesTable(data.contracts || []);
         updateLargeTrades(data.large_trades_details || [], data.large_trades_count || 0);
         updateLastUpdateTime(data.timestamp);
+
+        if (showSuccess) showAlert('数据刷新成功', 'success');
+
+        if (data.dvol_interpretation || data.dvol_trend_label) {
+            showDvolAdvice(data.currency || 'BTC');
+        }
+
         loadAprChartData();
         loadDvolChartData();
         loadPcrChart(currency, chartPeriods.pcr || 168);
         
-        // v8.0: Load risk dashboard (unified)
         loadRiskDashboard(currency);
-        
-        showAlert('数据刷新成功', 'success');
     } catch (error) {
         console.error('加载数据失败:', error);
         showAlert(`数据刷新失败: ${error.message}`, 'error');
         
-        // 错误重试机制 - 只重试一次，避免无限循环
         if (!loadLatestData._retrying) {
             loadLatestData._retrying = true;
             setTimeout(() => {
                 if (navigator.onLine) {
-                    loadLatestData();
+                    loadLatestData(false);
                 }
                 loadLatestData._retrying = false;
-            }, 10000);
+            }, 5000);
         }
     }
+}
+
+function loadPageDataAsync() {
+    const currency = document.getElementById('currencySelect')?.value || 'BTC';
+    loadLatestData(false).catch(() => {});
+    loadTermStructure().catch(() => {});
+    loadMaxPain().catch(() => {});
+    loadPcrChart(currency, chartPeriods.pcr || 168).catch(() => {});
 }
 
 async function loadRiskDashboard(currency = 'BTC') {
