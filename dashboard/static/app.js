@@ -2560,6 +2560,76 @@ async function loadTermStructure() {
             }
         });
         console.log('TS chart rendered:', validTs.length, 'points');
+
+        // ===== v2.0 学术分析展示 =====
+        const analysis = d.analysis;
+        if (!analysis || analysis.error) {
+            console.warn('IV分析不可用:', analysis?.error || '无数据');
+        } else {
+            // 结构标签
+            const structLabel = document.getElementById('tsStructureLabel');
+            if (structLabel && analysis.structure_type) {
+                const st = analysis.structure_type;
+                structLabel.textContent = st.icon + ' ' + st.name;
+                structLabel.className = 'text-xs px-2 py-0.5 rounded-full font-medium ' + (st.color.includes('text-') ? 'bg-' + st.color.replace('text-','').replace('-400','-500/20').replace('-300','-500/20') + ' ' + st.color : 'bg-gray-700 text-gray-400');
+            }
+            // 斜率标签
+            const slopeLabel = document.getElementById('tsSlopeLabel');
+            if (slopeLabel && analysis.slope) {
+                const s = analysis.slope;
+                slopeLabel.textContent = (s.percent > 0 ? '+' : '') + s.percent + '%';
+                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (s.percent >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+            }
+            // 市场状态
+            const msEl = document.getElementById('ivMarketState');
+            const msAdvice = document.getElementById('ivMarketAdvice');
+            if (msEl && analysis.market_state) {
+                const ms = analysis.market_state;
+                msEl.textContent = ms.icon + ' ' + ms.name;
+                msEl.className = 'text-lg font-bold ' + ms.color;
+                if (msAdvice) msAdvice.textContent = ms.advice;
+            }
+            // VRP
+            const vrpEl = document.getElementById('ivVRPValue');
+            const vrpDesc = document.getElementById('ivVRPDesc');
+            if (vrpEl && analysis.vrp) {
+                const v = analysis.vrp;
+                const vrpColor = v.signal && v.signal.includes('SELL') ? 'text-green-400' : v.signal === 'BUY_EDGE' ? 'text-blue-400' : 'text-gray-400';
+                vrpEl.textContent = (v.value > 0 ? '+' : '') + v.value + '%';
+                vrpEl.className = 'text-lg font-bold ' + vrpColor;
+                if (vrpDesc) vrpDesc.textContent = v.description;
+            }
+            // 形态指标
+            const slopeGrade = document.getElementById('ivSlopeGrade');
+            if (slopeGrade && analysis.slope) {
+                const s = analysis.slope;
+                slopeGrade.textContent = s.grade || '--';
+                slopeGrade.className = 'text-xs font-bold ' + (s.grade === 'SEVERELY_INVERTED' || s.grade === 'INVERTED' ? 'text-red-400' : s.grade === 'STEEP' || s.grade === 'VERY_STEEP' ? 'text-green-400' : 'text-gray-400');
+            }
+            const curvEl = document.getElementById('ivCurvatureType');
+            if (curvEl && analysis.curvature) {
+                curvEl.textContent = analysis.curvature.type || '--';
+                curvEl.className = 'text-xs font-bold ' + (analysis.curvature.type === 'HUMP' ? 'text-yellow-400' : 'text-gray-400');
+            }
+            const regEl = document.getElementById('ivRegime');
+            if (regEl && analysis.iv_levels) {
+                const il = analysis.iv_levels;
+                regEl.textContent = il.avg_iv + '%';
+                regEl.className = 'text-xs font-bold ' + (il.regime === 'EXTREME' ? 'text-red-400' : il.regime === 'HIGH' ? 'text-orange-400' : il.regime === 'LOW' || il.regime === 'VERY_LOW' ? 'text-blue-400' : 'text-green-400');
+            }
+            // 策略建议
+            const recsEl = document.getElementById('ivRecommendations');
+            if (recsEl && analysis.recommendations && analysis.recommendations.length > 0) {
+                const typeColors = {'warning': 'border-red-500/30 bg-red-500/5', 'opportunity': 'border-green-500/30 bg-green-500/5', 'info': 'border-blue-500/30 bg-blue-500/5'};
+                recsEl.innerHTML = analysis.recommendations.map(r =>
+                    '<div class="p-2.5 rounded border ' + (typeColors[r.type] || 'border-gray-700/30 bg-gray-800/30') + '">' +
+                    '<div class="text-xs font-bold mb-1">' + r.title + '</div>' +
+                    '<div class="text-[11px] text-gray-400 leading-relaxed">' + r.body + '</div>' +
+                    '<div class="text-[11px] text-cyan-300 mt-1 font-medium">→ ' + r.action + '</div>' +
+                    '</div>'
+                ).join('');
+            }
+        }
     } catch(e) {
         console.error('TS error:', e);
         const ctx = document.getElementById('termStructureChart');

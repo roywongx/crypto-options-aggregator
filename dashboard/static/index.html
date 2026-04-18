@@ -1140,12 +1140,12 @@
                     </div>
                 </div>
 
-                <!-- Module 1: IV Term Structure -->
+                <!-- Module 1: IV Term Structure v2.0 -->
                 <div class="card-glass rounded-xl p-5">
                     <div class="flex items-center justify-between mb-3">
                         <h2 class="text-lg font-semibold flex items-center gap-2">
                             <i class="fas fa-chart-area text-cyan-400"></i>
-                            IV 期限结构
+                            IV 期限结构 v2.0
                         </h2>
                         <div class="flex items-center gap-2">
                             <span id="tsStructureLabel" class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">--</span>
@@ -1193,6 +1193,44 @@
                     <div class="flex items-center justify-between mt-2 text-[10px] text-gray-600">
                         <span>Contango = 远期IV > 近期IV (正常)</span>
                         <span>Backwardation = 近期IV > 远期IV (恐慌)</span>
+                    </div>
+                    
+                    <!-- 学术分析区块 v2.0 -->
+                    <div id="ivAnalysisSection" class="mt-4 border-t border-gray-700 pt-3">
+                        <!-- 市场状态 + VRP -->
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+                            <div class="p-3 bg-gray-800/40 rounded-lg border border-gray-700/30">
+                                <div class="text-[10px] text-gray-500 mb-1">市场状态</div>
+                                <div id="ivMarketState" class="text-lg font-bold">--</div>
+                                <div id="ivMarketAdvice" class="text-xs text-gray-400 mt-1">--</div>
+                            </div>
+                            <div class="p-3 bg-gray-800/40 rounded-lg border border-gray-700/30">
+                                <div class="text-[10px] text-gray-500 mb-1">波动率风险溢价 (VRP)</div>
+                                <div id="ivVRPValue" class="text-lg font-bold">--</div>
+                                <div id="ivVRPDesc" class="text-xs text-gray-400 mt-1">--</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 形态指标 -->
+                        <div class="grid grid-cols-3 gap-2 mb-3">
+                            <div class="p-2 bg-gray-800/30 rounded text-center">
+                                <div class="text-[9px] text-gray-500">斜率</div>
+                                <div id="ivSlopeGrade" class="text-xs font-bold">--</div>
+                            </div>
+                            <div class="p-2 bg-gray-800/30 rounded text-center">
+                                <div class="text-[9px] text-gray-500">曲率</div>
+                                <div id="ivCurvatureType" class="text-xs font-bold">--</div>
+                            </div>
+                            <div class="p-2 bg-gray-800/30 rounded text-center">
+                                <div class="text-[9px] text-gray-500">IV 区间</div>
+                                <div id="ivRegime" class="text-xs font-bold">--</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 策略建议 -->
+                        <div id="ivRecommendations" class="space-y-2">
+                            <div class="text-gray-600 text-sm">等待分析...</div>
+                        </div>
                     </div>
                 </div>
 

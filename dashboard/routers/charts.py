@@ -262,5 +262,55 @@ async def get_vol_surface(currency: str = "BTC"):
     return {
         "surface": expiry_data,
         "term_structure": term_structure,
-        "backwardation": backwardation
+        "backwardation": backwardation,
+        "analysis": _get_iv_term_analysis(term_structure)
     }
+
+def _get_iv_term_analysis(term_structure: list) -> dict:
+    """获取 IV 期限结构学术分析报告"""
+    if not term_structure or len(term_structure) < 2:
+        return {"error": "数据不足"}
+    
+    try:
+        from services.iv_term_structure import IVTermStructureAnalyzer
+        from services.spot_price import get_latest_spot_price
+        
+        currency = "BTC"
+        spot = get_latest_spot_price(currency) or 0
+        
+        # 尝试获取历史波动率（30天）
+        hist_vol = None
+        try:
+            import requests
+            resp = requests.get(
+                "https://api.binance.com/api/v3/ticker/24hr",
+                params={"symbol": "BTCUSDT"},
+                timeout=5
+            )
+            data = resp.json()
+            # 估算30天历史波动率（简化：使用priceChangePercent作为参考）
+            # 更精确的方法：获取30天K线计算标准差
+            klines_resp = requests.get(
+                "https://api.binance.com/api/v3/klines",
+                params={"symbol": "BTCUSDT", "interval": "1d", "limit": 30},
+                timeout=5
+            )
+            klines = klines_resp.json()
+            if len(klines) >= 10:
+                import math
+                closes = [float(k[4]) for k in klines]
+                returns = [math.log(closes[i]/closes[i-1]) for i in range(1, len(closes))]
+                mean_ret = sum(returns) / len(returns)
+                variance = sum((r - mean_ret)**2 for r in returns) / (len(returns) - 1)
+                daily_vol = math.sqrt(variance)
+                hist_vol = daily_vol * math.sqrt(365) * 100  # 年化
+        except Exception:
+            hist_vol = None
+        
+        return IVTermStructureAnalyzer.analyze_term_structure(
+            term_data=term_structure,
+            spot=spot,
+            hist_vol=hist_vol
+        )
+    except Exception as e:
+        return {"error": str(e)}
