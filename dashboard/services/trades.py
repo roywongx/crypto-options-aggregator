@@ -46,11 +46,9 @@ def fetch_deribit_summaries(currency: str = "BTC") -> List[Dict]:
 
 
 def fetch_large_trades(currency: str = "BTC", days: int = 7, limit: int = 50) -> List[Dict]:
-    from db.connection import get_db_connection
+    from db.connection import execute_read
     try:
-        conn = get_db_connection(read_only=True)
-        cursor = conn.cursor()
-        cursor.execute("""
+        rows = execute_read("""
             SELECT timestamp, currency, source, title, message, direction, strike,
                    volume, option_type, flow_label, notional_usd, delta, instrument_name
             FROM large_trades_history
@@ -58,7 +56,8 @@ def fetch_large_trades(currency: str = "BTC", days: int = 7, limit: int = 50) ->
             AND timestamp >= datetime('now', ?)
             ORDER BY timestamp DESC LIMIT ?
         """, (currency, f'-{days} days', limit))
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        col_names = ['timestamp', 'currency', 'source', 'title', 'message', 'direction', 'strike',
+                     'volume', 'option_type', 'flow_label', 'notional_usd', 'delta', 'instrument_name']
+        return [{col_names[i]: val for i, val in enumerate(row) if i < len(col_names)} for row in rows]
     except Exception:
         return []

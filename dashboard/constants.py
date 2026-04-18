@@ -41,17 +41,14 @@ def get_dynamic_spot_price(currency: str, fallback: float = None) -> float:
     
     # 第二优先级：从数据库获取最近一次扫描价格
     try:
-        from db.connection import get_db_connection
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
+        from db.connection import execute_read
+        rows = execute_read("""
             SELECT spot_price FROM scan_records 
             WHERE currency = ? AND spot_price > 0
             ORDER BY timestamp DESC LIMIT 1
         """, (currency,))
-        row = cursor.fetchone()
-        if row and row[0]:
-            return float(row[0])
+        if rows and rows[0][0]:
+            return float(rows[0][0])
     except Exception as e:
         import logging
         logging.getLogger(__name__).debug("database spot price fallback failed: %s", str(e))

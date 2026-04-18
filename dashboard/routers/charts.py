@@ -1,19 +1,15 @@
-import sqlite3
+import json
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query
 
 router = APIRouter(prefix="/api/charts", tags=["charts"])
 
 
-def get_db_path():
-    from pathlib import Path
-    return Path(__file__).parent.parent / "data" / "monitor.db"
-
-
 @router.get("/pcr")
 async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
     from services.trades import fetch_deribit_summaries
     from services.instrument import _parse_inst_name
+    from db.connection import execute_read
 
     summaries = fetch_deribit_summaries(currency)
     if not summaries:
@@ -44,31 +40,22 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
     if hours <= 24:
         return [{"time": now, "pcr": round(current_pcr, 3), "puts": round(ne["put_oi"], 0), "calls": round(ne["call_oi"], 0)}]
 
-    conn = sqlite3.connect(str(get_db_path()), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
     since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
-
-    cursor.execute("""
+    rows = execute_read("""
         SELECT timestamp, large_trades_details, spot_price FROM scan_records
         WHERE currency = ? AND timestamp >= ? AND large_trades_details IS NOT NULL AND large_trades_details != ''
         ORDER BY timestamp ASC
     """, (currency, since))
-    rows = cursor.fetchall()
-    conn.close()
 
     result = []
     for row in rows:
         ts = row[0]
         ltd = row[1]
-        spot = row[2] or 70000
         try:
-            import json
             trades = json.loads(ltd) if ltd else []
             if not trades:
                 continue
             
-            # Filter out trades with suspicious volume (> 10000 is likely notional value instead of contract count)
             valid_trades = [t for t in trades if (t.get('volume') or 0) < 10000]
             if not valid_trades:
                 continue
@@ -79,7 +66,6 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
                 continue
             pcr_val = puts / calls if calls > 0 else 0
             
-            # Filter out extreme PCR values (likely data error)
             if pcr_val > 50:
                 continue
                 
@@ -95,25 +81,20 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
 
 @router.get("/apr")
 async def get_apr_chart(currency: str = "BTC", hours: int = 168):
-    conn = sqlite3.connect(str(get_db_path()), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    from db.connection import execute_read
 
-    cursor.execute("""
+    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = execute_read("""
         SELECT timestamp, contracts_data FROM scan_records
         WHERE currency = ? AND timestamp >= ?
         ORDER BY timestamp ASC
     """, (currency, since))
-    rows = cursor.fetchall()
-    conn.close()
 
     result = []
     for row in rows:
         ts = row[0]
         contracts_json = row[1]
         try:
-            import json
             contracts = json.loads(contracts_json) if contracts_json else []
             if not contracts:
                 continue
@@ -144,18 +125,14 @@ async def get_apr_chart(currency: str = "BTC", hours: int = 168):
 
 @router.get("/dvol")
 async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
-    conn = sqlite3.connect(str(get_db_path()), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    from db.connection import execute_read
 
-    cursor.execute("""
+    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = execute_read("""
         SELECT timestamp, dvol_current FROM scan_records
         WHERE currency = ? AND timestamp >= ? AND dvol_current IS NOT NULL
         ORDER BY timestamp ASC
     """, (currency, since))
-    rows = cursor.fetchall()
-    conn.close()
 
     result = []
     for row in rows:
@@ -267,7 +244,6 @@ async def get_vol_surface(currency: str = "BTC"):
     }
 
 def _get_iv_term_analysis(term_structure: list) -> dict:
-    """获取 IV 期限结构学术分析报告"""
     if not term_structure or len(term_structure) < 2:
         return {"error": "数据不足"}
     
@@ -278,18 +254,9 @@ def _get_iv_term_analysis(term_structure: list) -> dict:
         currency = "BTC"
         spot = get_spot_price(currency) or 0
         
-        # 尝试获取历史波动率（30天）
         hist_vol = None
         try:
             import requests
-            resp = requests.get(
-                "https://api.binance.com/api/v3/ticker/24hr",
-                params={"symbol": "BTCUSDT"},
-                timeout=5
-            )
-            data = resp.json()
-            # 估算30天历史波动率（简化：使用priceChangePercent作为参考）
-            # 更精确的方法：获取30天K线计算标准差
             klines_resp = requests.get(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1d", "limit": 30},
@@ -303,7 +270,7 @@ def _get_iv_term_analysis(term_structure: list) -> dict:
                 mean_ret = sum(returns) / len(returns)
                 variance = sum((r - mean_ret)**2 for r in returns) / (len(returns) - 1)
                 daily_vol = math.sqrt(variance)
-                hist_vol = daily_vol * math.sqrt(365) * 100  # 年化
+                hist_vol = daily_vol * math.sqrt(365) * 100
         except Exception:
             hist_vol = None
         

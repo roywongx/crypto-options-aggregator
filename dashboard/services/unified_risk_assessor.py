@@ -154,14 +154,11 @@ class UnifiedRiskAssessor:
         factors = []
 
         try:
-            from db.database import get_db_connection
-            conn = get_db_connection(read_only=True)
-            cursor = conn.cursor()
-            cursor.execute("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
-            row = cursor.fetchone()
-            if row and row[0]:
+            from db.connection import execute_read
+            rows = execute_read("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
+            if rows and rows[0][0]:
                 import json
-                contracts = json.loads(row[0])
+                contracts = json.loads(rows[0][0])
                 if contracts:
                     spreads = [c.get("spread_pct", 0) for c in contracts if c.get("spread_pct", 0) > 0]
                     ois = [c.get("open_interest", 0) for c in contracts]

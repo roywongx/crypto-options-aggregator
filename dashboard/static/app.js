@@ -143,7 +143,10 @@ async function setAutoRefresh(minutes) {
     if (minutes > 0) {
         autoRefreshInterval = setInterval(async () => {
             if (navigator.onLine) {
+                const currency = document.getElementById('currencySelect')?.value || 'BTC';
                 await loadLatestData();
+                refreshAndLoadDvol(currency).catch(e => console.warn('Auto DVOL refresh failed:', e));
+                refreshAndLoadTrades(currency).catch(e => console.warn('Auto trades refresh failed:', e));
             } else {
                 showAlert('网络断开，跳过自动刷新', 'warning');
             }
@@ -1032,15 +1035,67 @@ function updateMaxPainUI(data) {
 
 function loadPageDataAsync() {
     const currency = document.getElementById('currencySelect')?.value || 'BTC';
-    // 所有数据源并行加载，互不阻塞
     loadLatestData(false, true).catch(e => console.error('[loadPageDataAsync] loadLatestData failed:', e));
     loadWindAnalysis().catch(e => console.error('[loadPageDataAsync] loadWindAnalysis failed:', e));
     loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
     loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
     loadPcrChart(currency, chartPeriods.pcr || 168).catch(e => console.error('[loadPageDataAsync] loadPcrChart failed:', e));
     loadAprChartData().catch(e => console.error('[loadPageDataAsync] loadAprChartData failed:', e));
-    loadDvolChartData().catch(e => console.error('[loadPageDataAsync] loadDvolChartData failed:', e));
+    refreshAndLoadDvol(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadDvol failed:', e));
+    refreshAndLoadTrades(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadTrades failed:', e));
     loadRiskDashboard(currency).catch(e => console.error('[loadPageDataAsync] loadRiskDashboard failed:', e));
+}
+
+async function refreshAndLoadDvol(currency) {
+    try {
+        const res = await safeFetch(`${API_BASE}/api/dvol/refresh?currency=${currency}`);
+        const data = await res.json();
+        if (data.success && data.dvol_current) {
+            updateDvolDisplay(data);
+        }
+    } catch (e) {
+        console.warn('DVOL refresh failed, loading chart from cache:', e);
+    }
+    await loadDvolChartData();
+}
+
+async function refreshAndLoadTrades(currency) {
+    try {
+        const res = await safeFetch(`${API_BASE}/api/trades/refresh?currency=${currency}`);
+        const data = await res.json();
+        if (data.success) {
+            updateLargeTrades(data.large_trades_details || [], data.large_trades_count || 0);
+        }
+    } catch (e) {
+        console.warn('Trades refresh failed:', e);
+    }
+}
+
+function updateDvolDisplay(data) {
+    const dvolEl = document.getElementById('dvolValue');
+    if (dvolEl && data.dvol_current) dvolEl.textContent = data.dvol_current.toFixed(2);
+
+    const dvolSignal = document.getElementById('dvolSignal');
+    if (dvolSignal) {
+        const interp = data.dvol_interpretation || '';
+        const trend = data.dvol_trend_label || data.dvol_trend || '';
+        const signal = data.dvol_signal || '';
+        const zScore = data.dvol_z_score;
+
+        if (interp) {
+            dvolSignal.textContent = interp;
+            dvolSignal.className = trend.includes('上涨') ? 'text-xs mt-1 text-red-400 font-medium' : trend.includes('下跌') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+        } else if (signal) {
+            dvolSignal.textContent = signal;
+            dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-red-400 font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+        } else if (zScore !== null && zScore !== undefined) {
+            if (zScore > 2) { dvolSignal.textContent = '异常偏高 ⚠️'; dvolSignal.className = 'text-xs mt-1 text-red-400 font-medium'; }
+            else if (zScore > 1) { dvolSignal.textContent = '偏高'; dvolSignal.className = 'text-xs mt-1 text-yellow-400 font-medium'; }
+            else if (zScore < -2) { dvolSignal.textContent = '异常偏低'; dvolSignal.className = 'text-xs mt-1 text-green-400 font-medium'; }
+            else if (zScore < -1) { dvolSignal.textContent = '偏低'; dvolSignal.className = 'text-xs mt-1 text-blue-400 font-medium'; }
+            else { dvolSignal.textContent = '正常区间'; dvolSignal.className = 'text-xs mt-1 text-gray-400'; }
+        }
+    }
 }
 
 async function loadRiskDashboard(currency = 'BTC') {

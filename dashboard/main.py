@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'crypto-options-aggregator-link'))
 
 
 
@@ -398,23 +399,18 @@ async def health_check():
 
 @app.get("/api/export/csv")
 async def export_csv(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
-    """导出扫描数据为 CSV"""
     import csv
     import io
-    conn = get_db_connection(read_only=True)
-    cursor = conn.cursor()
-    cursor.execute("""
+    rows = execute_read("""
         SELECT contracts_data FROM scan_records
         WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
     """, (currency,))
-    row = cursor.fetchone()
-    conn.close()
     
-    if not row or not row[0]:
+    if not rows or not rows[0][0]:
         return JSONResponse(content={"error": "No data available"}, status_code=404)
     
     try:
-        contracts = json.loads(row[0])
+        contracts = json.loads(rows[0][0])
     except Exception:
         return JSONResponse(content={"error": "Data parse error"}, status_code=500)
     
@@ -557,40 +553,32 @@ async def dashboard_init(currency: str = Query(default="BTC")):
 
 
 def _fetch_wind_analysis(currency: str, days: int = 30):
-    """同步获取 Wind Analysis 数据"""
-    from routers.trades_api import get_db_path
     from services.risk_framework import RiskFramework
     
-    db_path = get_db_path()
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
     since = datetime.utcnow() - timedelta(days=days)
+    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
     
-    cursor.execute("""
+    grouped = execute_read("""
         SELECT direction, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp >= ?
         GROUP BY direction, option_type
-    """, (currency, since.strftime('%Y-%m-%d %H:%M:%S')))
-    grouped = cursor.fetchall()
+    """, (currency, since_str))
     
-    cursor.execute("""
+    strike_rows = execute_read("""
         SELECT strike, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp >= ?
         GROUP BY strike, option_type
         ORDER BY strike ASC
-    """, (currency, since.strftime('%Y-%m-%d %H:%M:%S')))
-    strike_rows = cursor.fetchall()
-    conn.close()
+    """, (currency, since_str))
     
     summary_data = {'buy_put': 0, 'sell_call': 0, 'buy_call': 0, 'sell_put': 0, 'total': 0, 'put_vol': 0, 'call_vol': 0}
     for row in grouped:
-        direction = (row['direction'] or '').lower()
-        ot = (row['option_type'] or 'PUT').upper()
-        count = row['trade_count'] or 0
-        vol = row['total_volume'] or 0
+        direction = (row[0] or '').lower()
+        ot = (row[1] or 'PUT').upper()
+        count = row[3] or 0
+        vol = row[2] or 0
         summary_data['total'] += count
         if direction == 'buy' and ot == 'PUT':
             summary_data['buy_put'] += count
@@ -792,6 +780,87 @@ async def get_macro(currency: str = Query(default="BTC")):
     }
 
 
+@app.get("/api/dvol/refresh")
+async def refresh_dvol(currency: str = Query(default="BTC")):
+    dvol_data = await asyncio.to_thread(get_dvol_from_deribit, currency)
+    
+    dvol_current = dvol_data.get('current', 0) or 0
+    dvol_z = dvol_data.get('z_score', 0) or 0
+    dvol_signal = dvol_data.get('signal', '正常区间')
+    
+    if dvol_current > 0:
+        try:
+            conn = get_db_connection(read_only=False)
+            cursor = conn.cursor()
+            _raw_out = json.dumps({
+                "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
+                "trend_label": dvol_data.get("trend_label", ""),
+                "confidence": dvol_data.get("confidence", ""),
+                "interpretation": dvol_data.get("interpretation", ""),
+                "percentile_7d": dvol_data.get("percentile_7d", 50)
+            }, ensure_ascii=False)
+            cursor.execute("""
+                INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
+                    dvol_signal, large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
+                VALUES (?, ?, ?, ?, ?, ?, 0, '[]', '[]', '[]', ?)
+            """, (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), currency,
+                  get_spot_price(currency), dvol_current, dvol_z, dvol_signal, _raw_out))
+            conn.commit()
+        except Exception as e:
+            logger.warning("DVOL DB write failed: %s", str(e))
+    
+    return {
+        "success": True,
+        "currency": currency,
+        "dvol_current": dvol_current,
+        "dvol_z_score": dvol_z,
+        "dvol_signal": dvol_signal,
+        "dvol_trend": dvol_data.get("trend", ""),
+        "dvol_trend_label": dvol_data.get("trend_label", ""),
+        "dvol_confidence": dvol_data.get("confidence", ""),
+        "dvol_interpretation": dvol_data.get("interpretation", ""),
+        "dvol_percentile_7d": dvol_data.get("percentile_7d", 50),
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+
+@app.get("/api/trades/refresh")
+async def refresh_large_trades(currency: str = Query(default="BTC")):
+    large_trades = await _fetch_large_trades_async(currency, days=1, limit=40)
+    
+    if large_trades and isinstance(large_trades, list):
+        try:
+            conn = get_db_connection(read_only=False)
+            cursor = conn.cursor()
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            for trade in large_trades:
+                parsed = parse_trade_alert(trade, currency, timestamp)
+                cursor.execute("""
+                    INSERT INTO large_trades_history
+                    (timestamp, currency, source, title, message, direction, strike, volume,
+                     option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    parsed['timestamp'], parsed['currency'], parsed['source'],
+                    parsed['title'], parsed['message'], parsed['direction'],
+                    parsed['strike'], parsed['volume'], parsed['option_type'],
+                    parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
+                    parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
+                ))
+            cursor.execute("DELETE FROM large_trades_history WHERE timestamp < datetime('now', '-90 days')")
+            conn.commit()
+        except Exception as e:
+            logger.warning("Large trades DB write failed: %s", str(e))
+    
+    return {
+        "success": True,
+        "currency": currency,
+        "large_trades_count": len(large_trades) if large_trades else 0,
+        "large_trades_details": large_trades[:20] if large_trades else [],
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+
 async def quick_scan(params: QuickScanParams = None):
     """异步快速扫描：使用 httpx.AsyncClient 实现全异步网络请求"""
     from datetime import datetime
@@ -858,7 +927,6 @@ async def quick_scan(params: QuickScanParams = None):
 
     # Step 2: 异步获取 Binance 数据
     try:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'crypto-options-aggregator-link'))
         from binance_options import fetch_binance_options
         
         binance_contracts = await asyncio.to_thread(

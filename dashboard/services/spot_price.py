@@ -231,15 +231,11 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
     )
 
 def _get_spot_from_scan(currency: str = "BTC"):
-    """从数据库获取现货价格（用于扫描时）"""
     try:
-        from main import get_db_connection
-        conn = get_db_connection(read_only=True)
-        cur = conn.cursor()
-        cur.execute("SELECT spot_price FROM scan_records WHERE currency=? AND spot_price > 0 ORDER BY timestamp DESC LIMIT 1", (currency,))
-        row = cur.fetchone()
-        if row and float(row[0]) > 0:
-            return float(row[0])
+        from db.connection import execute_read
+        rows = execute_read("SELECT spot_price FROM scan_records WHERE currency=? AND spot_price > 0 ORDER BY timestamp DESC LIMIT 1", (currency,))
+        if rows and float(rows[0][0]) > 0:
+            return float(rows[0][0])
     except Exception:
         pass
 

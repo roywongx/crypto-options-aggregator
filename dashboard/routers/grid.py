@@ -20,22 +20,18 @@ class ScenarioRequest(BaseModel):
     position_size: float = 1.0
 
 def _get_contracts_from_db(currency: str):
-    """从数据库获取最近的合约数据"""
     try:
-        from db.connection import get_db_connection
+        from db.connection import execute_read
 
-        conn = get_db_connection(read_only=True)
-        cursor = conn.cursor()
-        cursor.execute("""
+        rows = execute_read("""
             SELECT contracts_data FROM scan_records
             WHERE currency = ? AND timestamp > datetime('now', '-3 days')
             ORDER BY timestamp DESC LIMIT 1
         """, (currency,))
-        row = cursor.fetchone()
 
-        if row and row[0]:
+        if rows and rows[0][0]:
             try:
-                contracts = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                contracts = json.loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
                 return contracts
             except Exception as e:
                 import sys
@@ -320,17 +316,13 @@ async def get_revenue_summary(
     days: int = Query(30, ge=1, le=365)
 ):
     try:
-        from db.connection import get_db_connection
+        from db.connection import execute_read
 
-        conn = get_db_connection(read_only=True)
-        cursor = conn.cursor()
-        cursor.execute("""
+        rows = execute_read("""
             SELECT timestamp, contracts_data FROM scan_records
             WHERE currency = ? AND timestamp > datetime('now', ?||' days')
             ORDER BY timestamp ASC
         """, (currency, -days))
-
-        rows = cursor.fetchall()
 
         total_premium = 0.0
         scan_count = len(rows)

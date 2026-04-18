@@ -1,14 +1,7 @@
-# Trades API routes
 from fastapi import APIRouter, Query
 from datetime import datetime, timedelta
-import sqlite3
-from pathlib import Path
 
 router = APIRouter(prefix="/api/trades", tags=["trades"])
-
-
-def get_db_path():
-    return Path(__file__).parent.parent / "data" / "monitor.db"
 
 
 @router.get("/history")
@@ -17,11 +10,9 @@ async def get_trades_history(
     direction: str = Query(default=""),
     source: str = Query(default="")
 ):
-    conn = sqlite3.connect(str(get_db_path()), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(days=days)
-    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
+    from db.connection import execute_read
+
+    since_str = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
     query = "SELECT * FROM large_trades_history WHERE timestamp > ?"
     params = [since_str]
@@ -34,10 +25,13 @@ async def get_trades_history(
         params.append(source)
 
     query += " ORDER BY timestamp DESC LIMIT 500"
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    rows = execute_read(query, tuple(params))
+    
+    col_names = ['id', 'timestamp', 'currency', 'source', 'title', 'message',
+                 'direction', 'strike', 'volume', 'option_type', 'flow_label',
+                 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
+    
+    return [{col_names[i]: val for i, val in enumerate(row) if i < len(col_names)} for row in rows]
 
 
 @router.get("/strike-distribution")
@@ -45,57 +39,50 @@ async def get_strike_distribution(
     currency: str = Query(default="BTC"),
     days: int = Query(default=7)
 ):
-    conn = sqlite3.connect(str(get_db_path()), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(days=days)
-    cursor.execute("""
+    from db.connection import execute_read
+
+    since_str = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = execute_read("""
         SELECT strike, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp > ?
         GROUP BY strike, option_type
         ORDER BY total_volume DESC
         LIMIT 50
-    """, (currency, since.strftime('%Y-%m-%d %H:%M:%S')))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    """, (currency, since_str))
+    
+    return [{"strike": r[0], "option_type": r[1], "total_volume": r[2], "trade_count": r[3]} for r in rows]
 
 
 @router.get("/wind-analysis")
 async def get_wind_analysis(currency: str = Query(default="BTC"), days: int = Query(default=30)):
     from services.trades import fetch_deribit_summaries
     from services.risk_framework import RiskFramework
+    from db.connection import execute_read
 
-    conn = sqlite3.connect(str(get_db_path()), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    since = datetime.utcnow() - timedelta(days=days)
+    since_str = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
-    cursor.execute("""
+    grouped = execute_read("""
         SELECT direction, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp >= ?
         GROUP BY direction, option_type
-    """, (currency, since.strftime('%Y-%m-%d %H:%M:%S')))
-    grouped = cursor.fetchall()
+    """, (currency, since_str))
 
-    cursor.execute("""
+    strike_rows = execute_read("""
         SELECT strike, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp >= ?
         GROUP BY strike, option_type
         ORDER BY strike ASC
-    """, (currency, since.strftime('%Y-%m-%d %H:%M:%S')))
-    strike_rows = cursor.fetchall()
-    conn.close()
+    """, (currency, since_str))
 
     summary_data = {'buy_put': 0, 'sell_call': 0, 'buy_call': 0, 'sell_put': 0, 'total': 0, 'put_vol': 0, 'call_vol': 0}
     for row in grouped:
-        direction = (row['direction'] or '').lower()
-        ot = (row['option_type'] or 'PUT').upper()
-        count = row['trade_count'] or 0
-        vol = row['total_volume'] or 0
+        direction = (row[0] or '').lower()
+        ot = (row[1] or 'PUT').upper()
+        count = row[3] or 0
+        vol = row[2] or 0
         summary_data['total'] += count
         if direction == 'buy' and ot == 'PUT':
             summary_data['buy_put'] += count
@@ -157,9 +144,9 @@ async def get_wind_analysis(currency: str = Query(default="BTC"), days: int = Qu
 
     strikes = {}
     for row in strike_rows:
-        strike = int(row['strike'] / 1000) * 1000
-        ot = (row['option_type'] or 'PUT').upper()
-        vol = row['total_volume'] or 0
+        strike = int(row[0] / 1000) * 1000
+        ot = (row[1] or 'PUT').upper()
+        vol = row[2] or 0
         if strike not in strikes:
             strikes[strike] = {'call': 0, 'put': 0, 'total': 0}
         if ot == 'CALL':
