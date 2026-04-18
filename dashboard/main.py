@@ -48,11 +48,16 @@ from routers.charts import router as charts_router
 from routers.trades_api import router as trades_router
 from routers.status import router as status_router
 from routers.maxpain import router as maxpain_router
-from db.connection import get_db_connection as _db_conn
+from db.connection import get_db_connection as _db_conn, execute_read, execute_write
 from db.schema import init_database_schema
 
-def get_db_connection():
-    return _db_conn()
+def get_db_connection(read_only: bool = True):
+    """获取数据库连接（默认只读）
+    
+    读操作（SELECT）: get_db_connection(read_only=True)
+    写操作（INSERT/UPDATE）: get_db_connection(read_only=False)
+    """
+    return _db_conn(read_only=read_only)
 
 _deribit_monitor_cache = {}
 
@@ -69,7 +74,7 @@ def _get_deribit_monitor():
 
 def _get_cached_contracts_count(currency: str = "BTC") -> int:
     """快速获取最近一次扫描的合约数量（不解析完整合约数据）"""
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=True)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT contracts_data FROM scan_records 
@@ -79,13 +84,13 @@ def _get_cached_contracts_count(currency: str = "BTC") -> int:
     if row and row[0]:
         try:
             return len(json.loads(row[0]))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("_get_cached_contracts_count parse error: %s", str(e))
     return 0
 
 
 def init_database():
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=5000")
@@ -95,7 +100,7 @@ def init_database():
 
 
 def save_scan_record(data: Dict[str, Any]):
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=False)
     cursor = conn.cursor()
 
     now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
@@ -339,7 +344,7 @@ async def health_check():
     
     # 检查数据库连接
     try:
-        conn = get_db_connection()
+        conn = get_db_connection(read_only=True)
         cursor = conn.cursor()
         cursor.execute("SELECT 1")
         cursor.fetchone()
@@ -389,7 +394,7 @@ async def quick_scan(params: QuickScanParams = None):
 @app.get("/api/latest")
 async def get_latest(currency: str = Query(default="BTC")):
     """获取最新扫描数据（用于页面加载和自动刷新）"""
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=True)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
@@ -470,7 +475,7 @@ async def get_macro(currency: str = Query(default="BTC")):
     用于页面初始加载，不返回合约详情，确保秒开。
     合约数据通过 /api/latest 单独获取。
     """
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=True)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
@@ -784,7 +789,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     # DB persistence
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=False)
     cursor = conn.cursor()
     _raw_out = json.dumps({
         "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
@@ -844,7 +849,7 @@ async def strategy_calc(params: StrategyCalcParams):
         UnifiedStrategyEngine, StrategyParams, StrategyMode, OptionType
     )
     
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=True)
     cursor = conn.cursor()
     cursor.execute("SELECT contracts_data, spot_price FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (params.currency,))
     row = cursor.fetchone()
@@ -894,7 +899,7 @@ async def strategy_calc(params: StrategyCalcParams):
 
 @app.post("/api/calculator/roll")
 async def calculate_net_credit_roll(params: RollCalcParams):
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=True)
     cursor = conn.cursor()
     cursor.execute("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (params.currency,))
     row = cursor.fetchone()
@@ -1032,7 +1037,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
     spot = get_spot_price(currency)
     
     since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db_connection()
+    conn = get_db_connection(read_only=True)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta,

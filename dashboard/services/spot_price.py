@@ -146,7 +146,7 @@ def _get_spot_from_scan(currency: str = "BTC"):
     """从数据库获取现货价格（用于扫描时）"""
     try:
         from main import get_db_connection
-        conn = get_db_connection()
+        conn = get_db_connection(read_only=True)
         cur = conn.cursor()
         cur.execute("SELECT spot_price FROM scan_records WHERE currency=? AND spot_price > 0 ORDER BY timestamp DESC LIMIT 1", (currency,))
         row = cur.fetchone()

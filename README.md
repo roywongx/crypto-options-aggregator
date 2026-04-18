@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v2.1-性能优化-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v2.2-并发优化-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -137,11 +137,17 @@ crypto-options-aggregator/
 - ExchangeInfo 1 小时缓存
 - GZIP 响应压缩
 - 前端分页渲染（30条/页）
-- SQLite WAL 模式 + 60s busy_timeout
+- SQLite 读写分离 + 写入序列化（避免并发冲突）
 
 ---
 
 ## 📝 更新日志
+
+### v2.2
+
+- SQLite 并发优化：读写分离 + 写入锁序列化
+- 消除 threading.local() 跨线程冲突风险
+- execute_read/write 封装简化数据库操作
 
 ### v2.1
 

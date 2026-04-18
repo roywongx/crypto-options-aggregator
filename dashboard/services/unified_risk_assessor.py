@@ -155,7 +155,7 @@ class UnifiedRiskAssessor:
 
         try:
             from db.database import get_db_connection
-            conn = get_db_connection()
+            conn = get_db_connection(read_only=True)
             cursor = conn.cursor()
             cursor.execute("SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
             row = cursor.fetchone()

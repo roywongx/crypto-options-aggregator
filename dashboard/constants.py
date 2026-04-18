@@ -52,8 +52,9 @@ def get_dynamic_spot_price(currency: str, fallback: float = None) -> float:
         row = cursor.fetchone()
         if row and row[0]:
             return float(row[0])
-    except Exception:
-        pass  # 数据库不可用，继续下一步
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("database spot price fallback failed: %s", str(e))
     
     # 第三优先级：使用回退值
     if fallback:

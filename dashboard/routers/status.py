@@ -11,9 +11,9 @@ router = APIRouter(tags=["status"])
 DB_PATH = Path(__file__).parent.parent / "data" / "monitor.db"
 
 
-def get_db_connection():
+def get_db_connection(read_only: bool = True):
     from db.connection import get_db_connection as _db_conn
-    return _db_conn()
+    return _db_conn(read_only=read_only)
 
 
 @router.get("/api/stats")

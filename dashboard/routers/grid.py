@@ -24,7 +24,7 @@ def _get_contracts_from_db(currency: str):
     try:
         from db.connection import get_db_connection
 
-        conn = get_db_connection()
+        conn = get_db_connection(read_only=True)
         cursor = conn.cursor()
         cursor.execute("""
             SELECT contracts_data FROM scan_records
@@ -322,7 +322,7 @@ async def get_revenue_summary(
     try:
         from db.connection import get_db_connection
 
-        conn = get_db_connection()
+        conn = get_db_connection(read_only=True)
         cursor = conn.cursor()
         cursor.execute("""
             SELECT timestamp, contracts_data FROM scan_records

@@ -48,7 +48,7 @@ def fetch_deribit_summaries(currency: str = "BTC") -> List[Dict]:
 def fetch_large_trades(currency: str = "BTC", days: int = 7, limit: int = 50) -> List[Dict]:
     from db.connection import get_db_connection
     try:
-        conn = get_db_connection()
+        conn = get_db_connection(read_only=True)
         cursor = conn.cursor()
         cursor.execute("""
             SELECT timestamp, currency, source, title, message, direction, strike,
