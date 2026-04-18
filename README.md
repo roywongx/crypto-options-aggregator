@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v2.2-并发优化-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v2.3-消除重复逻辑-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -142,6 +142,12 @@ crypto-options-aggregator/
 ---
 
 ## 📝 更新日志
+
+### v2.3
+
+- 消除 main.py 中冗余的 Binance 抓取逻辑
+- 直接调用 binance_options.fetch_binance_options()
+- 删除 80+ 行重复代码，减少 O(N^2) 查找
 
 ### v2.2
 

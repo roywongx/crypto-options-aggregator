@@ -535,36 +535,19 @@ def _quick_scan_sync(params: QuickScanParams = None):
     currency = _p.currency
 
     # Step 1: Parallel Fetching
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         f_spot = executor.submit(get_spot_price, currency)
         f_dvol = executor.submit(get_dvol_from_deribit, currency)
         f_deribit = executor.submit(_fetch_deribit_summaries, currency)
         f_trades = executor.submit(_fetch_large_trades, currency, days=1, limit=40)
         
-        # Parallel fetch Binance data components
-        def _fetch_bin(url):
-            try:
-                resp = requests.get(url, timeout=10)
-                resp.raise_for_status()
-                return resp.json()
-            except Exception: return {}
-            
-        f_bin_mark = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/mark')
-        f_bin_info = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/exchangeInfo')
-        f_bin_ticker = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/ticker')
-
         # Collect results
         try:
             spot = f_spot.result(timeout=15)
             dvol_data = f_dvol.result(timeout=15)
             summaries = f_deribit.result(timeout=15)
             large_trades = f_trades.result(timeout=15)
-            r_mark = f_bin_mark.result(timeout=15)
-            r_info = f_bin_info.result(timeout=15)
-            r_ticker = f_bin_ticker.result(timeout=15)
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error("Parallel fetch failed: %s", str(e))
             # Fallback: try to get essential data individually
             try: spot = get_spot_price(currency)
@@ -575,7 +558,6 @@ def _quick_scan_sync(params: QuickScanParams = None):
             except Exception: summaries = []
             try: large_trades = _fetch_large_trades(currency, days=1, limit=40)
             except Exception: large_trades = []
-            r_mark, r_info, r_ticker = {}, {}, {}
 
     _min_spot = {"BTC": 1000, "ETH": 100, "SOL": 10, "XRP": 0.5}.get(currency, 100)
     if not spot or spot < _min_spot:
@@ -597,6 +579,29 @@ def _quick_scan_sync(params: QuickScanParams = None):
         except Exception:
             dvol_pct = round(50 + dvol_z * 20, 1)
             dvol_pct = max(1, min(99, dvol_pct))
+
+    # Step 2: Fetch Binance data using optimized function
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'crypto-options-aggregator-link'))
+        from binance_options import fetch_binance_options
+        
+        binance_contracts = fetch_binance_options(
+            currency=currency,
+            min_dte=_p.min_dte,
+            max_dte=_p.max_dte,
+            max_delta=_p.max_delta,
+            strike=_p.strike,
+            min_vol=config.MIN_VOLUME_FILTER,
+            max_spread=config.MAX_SPREAD_PCT,
+            margin_ratio=_p.margin_ratio,
+            option_type=_p.option_type,
+            return_results=True
+        )
+        if not isinstance(binance_contracts, list):
+            binance_contracts = []
+    except Exception as e:
+        logger.warning("binance_options fetch failed: %s", str(e))
+        binance_contracts = []
 
     contracts = []
     floors = RiskFramework._get_floors()
@@ -674,74 +679,45 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 "liquidity_score": min(100, int((oi / 500) * 100))
             })
 
-    # Process Binance
-    if r_info and isinstance(r_info, dict) and r_info.get('optionSymbols'):
-        import time
-        now_ms = time.time() * 1000
-        req_type = _p.option_type.upper()
-        fetch_all = req_type in ("ALL", "BOTH")
-        max_delta = _p.max_delta
-        margin_ratio = _p.margin_ratio
-
-        # 关键优化：将 r_mark 和 r_ticker 转换为字典，O(1) 查找替代 O(N)
-        mark_dict = {m['symbol']: m for m in r_mark} if isinstance(r_mark, list) else {}
-        ticker_dict = {t['symbol']: t for t in r_ticker} if isinstance(r_ticker, list) else {}
-
-        for s in r_info.get('optionSymbols', []):
-            if s['underlying'] != f"{currency}USDT": continue
-            if not fetch_all and s['side'] != req_type: continue
+    # Process Binance - 直接使用已优化的 binance_options 返回结果
+    if isinstance(binance_contracts, list):
+        for s in binance_contracts:
+            if not isinstance(s, dict):
+                continue
             
-            dte = (s['expiryDate'] - now_ms) / 86400000
-            if dte <= 0: continue
-            if not (use_min_dte <= dte <= use_max_dte): continue
-            
-            b_strike = float(s['strikePrice'])
-            if _p.strike and abs(b_strike - _p.strike) > 0.5: continue
-
-            # O(1) 字典查找
-            mark = mark_dict.get(s['symbol'])
-            if not mark or float(mark.get('markPrice', 0)) <= 0: continue
-            
-            delta_val = abs(float(mark.get('delta', 0)))
-            if delta_val > max_delta: continue
-            
-            # O(1) 字典查找
-            ticker = ticker_dict.get(s['symbol'])
-            volume = float(ticker.get('volume', 0)) if ticker else 0
-            bid = float(ticker.get('bidPrice', 0)) if ticker else 0
-            ask = float(ticker.get('askPrice', 0)) if ticker else 0
-            
-            if volume < config.MIN_VOLUME_FILTER: continue
-            
-            spread_pct = ((ask - bid) / bid) * 100 if bid > 0 and ask > 0 else 0
-            if spread_pct >= config.MAX_SPREAD_PCT: continue
-            
-            strike = float(s['strikePrice'])
-            prem_usd = float(mark['markPrice'])
+            strike = s.get('strike', 0)
+            prem_usd = s.get('premium_usdt', 0)
+            dte = s.get('dte', 0)
+            delta_val = s.get('delta', 0)
+            iv = s.get('mark_iv', 0)
+            volume = s.get('volume', 0)
+            oi = s.get('oi', 0)
+            spread_pct = s.get('spread_pct', 0)
+            opt_type = 'P' if 'P' in s.get('symbol', '').upper() else 'C'
+            margin_ratio = _p.margin_ratio
             cv = strike * margin_ratio
-            apr = (prem_usd / cv) * (365 / dte) * 100 if cv > 0 else 0
-            iv = float(mark.get('markIV', 0)) * 100
-            opt_type = 'P' if s['side'] == 'PUT' else 'C'
-            liq_score = min(50, (volume / 100) * 50) + max(0, 50 - (spread_pct * 5))
+            apr = s.get('apr', 0)
+            dist = abs(strike - spot) / spot * 100
+            liq_score = s.get('liquidity_score', 50)
 
             contracts.append({
                 "symbol": s['symbol'],
                 "platform": "Binance",
-                "expiry": s['symbol'].split('-')[1],
+                "expiry": s['symbol'].split('-')[1] if '-' in s.get('symbol', '') else '',
                 "dte": round(dte, 1),
                 "option_type": opt_type,
                 "strike": strike,
                 "apr": round(apr, 1),
                 "premium_usd": round(prem_usd, 2),
-                "delta": round(delta_val, 3),
-                "gamma": round(float(mark.get('gamma', 0)), 6),
-                "theta": round(float(mark.get('theta', 0)), 4),
-                "vega": round(float(mark.get('vega', 0)), 4),
+                "delta": round(abs(delta_val), 3),
+                "gamma": round(s.get('gamma', 0), 6),
+                "theta": round(s.get('theta', 0), 4),
+                "vega": round(s.get('vega', 0), 4),
                 "iv": round(iv, 1),
-                "open_interest": volume,
+                "open_interest": round(oi, 0),
                 "loss_at_10pct": round(max(0, (strike - spot * 0.9) if opt_type == "P" else (spot * 1.1 - strike)), 2),
                 "breakeven": round(strike - prem_usd if opt_type == 'P' else strike + prem_usd, 0),
-                "distance_spot_pct": round(abs(strike - spot) / spot * 100, 1),
+                "distance_spot_pct": round(dist, 1),
                 "support_distance_pct": round((strike - regular_floor) / regular_floor * 100, 1) if regular_floor > 0 and opt_type == "P" else None,
                 "margin_required": round(max(strike * 0.1, (strike - prem_usd) * margin_ratio), 2),
                 "capital_efficiency": round(prem_usd / max(strike * 0.1, (strike - prem_usd) * margin_ratio) * 100, 1) if cv > 0 else 0,
