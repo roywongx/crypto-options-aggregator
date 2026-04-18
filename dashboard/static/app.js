@@ -718,11 +718,121 @@ async function loadLatestData(showSuccess = true) {
     }
 }
 
+async function loadDashboardInit() {
+    // 使用聚合 API 一次性加载 Wind/TermStructure/MaxPain
+    try {
+        const currency = document.getElementById('currencySelect')?.value || 'BTC';
+        const res = await safeFetch(`${API_BASE}/api/dashboard-init?currency=${currency}`);
+        const data = await res.json();
+        
+        if (!data.success) {
+            console.warn('Dashboard init failed:', data);
+            return;
+        }
+        
+        // 更新 Wind Analysis
+        if (data.wind && !data.wind.error) {
+            updateWindUI(data.wind);
+        }
+        
+        // 更新 Term Structure
+        if (data.term_structure && !data.term_structure.error) {
+            updateTermStructureUI(data.term_structure);
+        }
+        
+        // 更新 Max Pain
+        if (data.max_pain && !data.max_pain.error) {
+            updateMaxPainUI(data.max_pain);
+        }
+    } catch (e) {
+        console.error('Failed to load dashboard init:', e);
+    }
+}
+
+function updateWindUI(data) {
+    const summary = data.summary || {};
+    const countEl = document.getElementById('tradesStatsCount');
+    if (countEl) {
+        countEl.textContent = `${summary.total_trades || 0} 笔`;
+        countEl.classList.remove('hidden');
+    }
+    
+    const score = data.sentiment_score || 0;
+    let icon, scoreLabel, scoreClass;
+    if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-green-500/20 text-green-300'; }
+    else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-green-900/30 text-green-400'; }
+    else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
+    else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-red-900/30 text-red-400'; }
+    else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-red-500/20 text-red-300'; }
+    
+    const iconEl = document.getElementById('windSentimentIcon');
+    if (iconEl) iconEl.textContent = icon;
+    
+    const scEl = document.getElementById('windSentimentScore');
+    if (scEl) {
+        scEl.textContent = scoreLabel;
+        scEl.className = `px-2 py-1 rounded-lg text-xs font-bold ${scoreClass}`;
+    }
+}
+
+function updateTermStructureUI(data) {
+    const tsData = data.term_structure || [];
+    const targetDtes = [
+        {key: '7', target: 7},
+        {key: '14', target: 14},
+        {key: '30', target: 30},
+        {key: '60', target: 60},
+        {key: '90', target: 90},
+        {key: '180', target: 180}
+    ];
+    
+    targetDtes.forEach(({key, target}) => {
+        const el = document.getElementById('ts' + key);
+        if (!el) return;
+        
+        let closest = null;
+        let minDiff = Infinity;
+        for (const item of tsData) {
+            const diff = Math.abs(item.dte - target);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = item;
+            }
+        }
+        
+        if (closest && closest.avg_iv) {
+            el.textContent = closest.avg_iv.toFixed(1) + '%';
+            el.classList.remove('text-gray-600');
+            if (closest.avg_iv > 80) el.classList.add('text-red-400');
+            else if (closest.avg_iv > 60) el.classList.add('text-yellow-400');
+            else el.classList.add('text-green-400');
+        } else {
+            el.textContent = '--';
+            el.classList.add('text-gray-600');
+        }
+    });
+}
+
+function updateMaxPainUI(data) {
+    const nearestMp = data.nearest_mp;
+    const mpEl = document.getElementById('maxPainValue');
+    if (mpEl && nearestMp) {
+        mpEl.textContent = `$${nearestMp.toLocaleString()}`;
+    }
+    
+    const mmSignal = data.mm_overview || '';
+    const signalEl = document.getElementById('mmSignalText');
+    if (signalEl && mmSignal) {
+        signalEl.textContent = mmSignal;
+    }
+}
+
 function loadPageDataAsync() {
     const currency = document.getElementById('currencySelect')?.value || 'BTC';
+    // 使用聚合 API 一次性加载 Wind/TermStructure/MaxPain
+    loadDashboardInit().catch(() => {});
+    // 其他独立数据源并行加载
     loadLatestData(false).catch(() => {});
-    loadTermStructure().catch(() => {});
-    loadMaxPain().catch(() => {});
     loadPcrChart(currency, chartPeriods.pcr || 168).catch(() => {});
     loadDerivData(currency).catch(() => {});
 }
@@ -3409,11 +3519,7 @@ async function loadPcrChart(currency = 'BTC', hours = 168) {
     } catch(e) { console.warn('PCR chart failed:', e); }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(function() { loadWindAnalysis(); }, 2000);
-    setTimeout(function() { loadTermStructure(); }, 2500);
-    setTimeout(function() { loadMaxPain(); }, 3000);
-});
+
 
 
 // \u{1F504} 正收益滚仓计算器器逻辑

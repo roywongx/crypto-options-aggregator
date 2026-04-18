@@ -390,8 +390,9 @@ async def health_check():
 
 
 @app.post("/api/quick-scan")
-async def quick_scan(params: QuickScanParams = None):
-    return await run_in_threadpool(_quick_scan_sync, params)
+async def quick_scan_endpoint(params: QuickScanParams = None):
+    """快速扫描端点 - 调用异步 quick_scan 函数"""
+    return await quick_scan(params)
 
 
 @app.get("/api/latest")
@@ -478,6 +479,220 @@ async def get_latest(currency: str = Query(default="BTC")):
     }
 
 
+@app.get("/api/dashboard-init")
+async def dashboard_init(currency: str = Query(default="BTC")):
+    """聚合初始化 API - 一次性返回 Wind/TermStructure/MaxPain 三大模块
+    
+    替代前端 setTimeout 瀑布加载，后端并行获取所有数据源，
+    前端一次请求即可渲染完整的仪表盘。
+    """
+    from routers.maxpain import _calc_max_pain_internal
+    
+    # 并行执行三个独立的数据获取任务
+    wind_task = asyncio.create_task(asyncio.to_thread(_fetch_wind_analysis, currency))
+    ts_task = asyncio.create_task(asyncio.to_thread(_fetch_term_structure, currency))
+    mp_task = asyncio.create_task(_calc_max_pain_internal(currency))
+    
+    # 等待所有任务完成
+    results = await asyncio.gather(
+        wind_task, ts_task, mp_task,
+        return_exceptions=True
+    )
+    
+    wind_data = results[0] if not isinstance(results[0], Exception) else {"error": str(results[0])}
+    ts_data = results[1] if not isinstance(results[1], Exception) else {"error": str(results[1])}
+    mp_data = results[2] if not isinstance(results[2], Exception) else {"error": str(results[2])}
+    
+    return {
+        "success": True,
+        "currency": currency,
+        "wind": wind_data,
+        "term_structure": ts_data,
+        "max_pain": mp_data,
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+
+def _fetch_wind_analysis(currency: str, days: int = 30):
+    """同步获取 Wind Analysis 数据"""
+    import sqlite3
+    from datetime import timedelta
+    from services.risk_framework import RiskFramework
+    
+    db_path = Path(__file__).parent / "data" / "monitor.db"
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    since = datetime.utcnow() - timedelta(days=days)
+    
+    cursor.execute("""
+        SELECT direction, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
+        FROM large_trades_history
+        WHERE currency = ? AND timestamp >= ?
+        GROUP BY direction, option_type
+    """, (currency, since.strftime('%Y-%m-%d %H:%M:%S')))
+    grouped = cursor.fetchall()
+    
+    cursor.execute("""
+        SELECT strike, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
+        FROM large_trades_history
+        WHERE currency = ? AND timestamp >= ?
+        GROUP BY strike, option_type
+        ORDER BY strike ASC
+    """, (currency, since.strftime('%Y-%m-%d %H:%M:%S')))
+    strike_rows = cursor.fetchall()
+    conn.close()
+    
+    summary_data = {'buy_put': 0, 'sell_call': 0, 'buy_call': 0, 'sell_put': 0, 'total': 0, 'put_vol': 0, 'call_vol': 0}
+    for row in grouped:
+        direction = (row['direction'] or '').lower()
+        ot = (row['option_type'] or 'PUT').upper()
+        count = row['trade_count'] or 0
+        vol = row['total_volume'] or 0
+        summary_data['total'] += count
+        if direction == 'buy' and ot == 'PUT':
+            summary_data['buy_put'] += count
+            summary_data['put_vol'] += vol
+        elif direction == 'sell' and ot == 'CALL':
+            summary_data['sell_call'] += count
+            summary_data['call_vol'] += vol
+        elif direction == 'buy' and ot == 'CALL':
+            summary_data['buy_call'] += count
+            summary_data['call_vol'] += vol
+        elif direction == 'sell' and ot == 'PUT':
+            summary_data['sell_put'] += count
+            summary_data['put_vol'] += vol
+    
+    total = summary_data['total'] or 1
+    bp = summary_data['buy_put']
+    sc = summary_data['sell_call']
+    bc = summary_data['buy_call']
+    sp = summary_data['sell_put']
+    
+    bp_ratio = bp / total
+    sc_ratio = sc / total
+    buy_ratio = (bp + bc) / total
+    dominant = "看跌保护" if bp_ratio > 0.3 else ("Covered Call偏好" if sc_ratio > 0.3 else "中性")
+    
+    sentiment_score = round((bp_ratio * 2 + sc_ratio * 1.5 + bc / total * 1) - (sp / total * 1), 2) if total > 10 else 0
+    
+    try:
+        spot = get_spot_price(currency)
+    except Exception:
+        spot = 0
+    
+    return {
+        "currency": currency, "spot": spot, "days": days,
+        "buy_ratio": round(buy_ratio, 3), "dominant_flow": dominant,
+        "risk_level": RiskFramework.get_status(spot),
+        "sentiment_score": sentiment_score,
+        "sentiment_text": dominant,
+        "summary": {"total_trades": summary_data['total'], "buy_puts": bp,
+                    "sell_calls": sc, "buy_calls": bc, "sell_puts": sp}
+    }
+
+
+def _fetch_term_structure(currency: str):
+    """同步获取 IV Term Structure 数据"""
+    from services.trades import fetch_deribit_summaries
+    from services.instrument import _parse_inst_name
+    from scipy import interpolate
+    
+    summaries = fetch_deribit_summaries(currency)
+    if not summaries:
+        return {"error": "无法获取Deribit数据", "surface": [], "term_structure": [], "backwardation": False}
+    
+    parsed = []
+    for s in summaries:
+        meta = _parse_inst_name(s.get("instrument_name", ""))
+        if not meta or meta.dte < 1:
+            continue
+        iv = float(s.get("mark_iv") or 0)
+        oi = float(s.get("open_interest") or 0)
+        if iv < 10 or oi < 10:
+            continue
+        parsed.append({"strike": meta.strike, "expiry": meta.expiry, "dte": meta.dte, 
+                       "option_type": meta.option_type, "iv": iv, "oi": oi})
+    
+    if not parsed:
+        return {"error": "No valid IV data", "surface": [], "term_structure": [], "backwardation": False}
+    
+    expiries = {}
+    for p in parsed:
+        key = p["expiry"]
+        if key not in expiries:
+            expiries[key] = {"dte": p["dte"], "expiry": p["expiry"], "strikes": []}
+        expiries[key]["strikes"].append({"strike": p["strike"], "iv": p["iv"], "oi": p["oi"]})
+    
+    expiry_data = sorted(expiries.values(), key=lambda x: x["dte"])
+    
+    atm_ivs = []
+    dtes = []
+    for ed in expiry_data:
+        strikes = sorted(ed["strikes"], key=lambda x: abs(x["strike"] - (get_spot_price(currency) if get_spot_price(currency) > 1000 else 70000)))
+        atm_iv = None
+        if strikes:
+            atm_iv = strikes[0]["iv"]
+            for s in strikes[:3]:
+                if s["iv"] > 0:
+                    atm_iv = s["iv"]
+                    break
+        atm_ivs.append(atm_iv)
+        dtes.append(ed["dte"])
+    
+    term_structure = []
+    for i, ed in enumerate(expiry_data):
+        atm = atm_ivs[i] if i < len(atm_ivs) else None
+        term_structure.append({"dte": ed["dte"], "avg_iv": atm, "expiry": ed["expiry"]})
+    
+    if len(term_structure) >= 3:
+        ivs = [t["avg_iv"] for t in term_structure]
+        valid_ivs = [(i, iv) for i, iv in enumerate(ivs) if iv is not None]
+        if len(valid_ivs) >= 2:
+            x = [v[0] for v in valid_ivs]
+            y = [v[1] for v in valid_ivs]
+            f = interpolate.interp1d(x, y, kind='linear', fill_value='extrapolate')
+            for i in range(len(term_structure)):
+                if term_structure[i]["avg_iv"] is None:
+                    expected = float(f(i))
+                    term_structure[i]["avg_iv"] = round(expected, 2)
+    
+    backwardation = False
+    if len(term_structure) >= 2:
+        front_iv = term_structure[0]["avg_iv"]
+        back_iv = term_structure[-1]["avg_iv"]
+        if front_iv is not None and back_iv is not None:
+            backwardation = front_iv > back_iv * 1.05
+    
+    return {
+        "currency": currency,
+        "term_structure": term_structure,
+        "backwardation": backwardation,
+        "analysis": _get_iv_term_analysis(term_structure)
+    }
+
+
+def _get_iv_term_analysis(term_structure: list) -> dict:
+    """获取 IV 期限结构分析"""
+    if not term_structure or len(term_structure) < 2:
+        return {"state": "unknown", "signal": "数据不足", "suggestion": ""}
+    
+    front_iv = term_structure[0].get("avg_iv")
+    back_iv = term_structure[-1].get("avg_iv")
+    
+    if front_iv is None or back_iv is None:
+        return {"state": "unknown", "signal": "数据不足", "suggestion": ""}
+    
+    if front_iv > back_iv * 1.05:
+        return {"state": "backwardation", "signal": "近高远低结构", "suggestion": "建议卖出近月期权获取更高权利金"}
+    elif front_iv < back_iv * 0.95:
+        return {"state": "contango", "signal": "正常升水结构", "suggestion": "可正常布局远期策略"}
+    else:
+        return {"state": "flat", "signal": "期限结构平坦", "suggestion": "市场观望情绪浓厚"}
+
+
+
+
 @app.get("/api/macro")
 async def get_macro(currency: str = Query(default="BTC")):
     """获取宏观数据（DVOL + 现货 + 大单统计），轻量快速响应
@@ -537,37 +752,48 @@ async def get_macro(currency: str = Query(default="BTC")):
     }
 
 
-def _quick_scan_sync(params: QuickScanParams = None):
-    """快速扫描：直接获取Deribit数据，不依赖options_aggregator.py"""
+async def quick_scan(params: QuickScanParams = None):
+    """异步快速扫描：使用 httpx.AsyncClient 实现全异步网络请求"""
     from datetime import datetime
-    from concurrent.futures import ThreadPoolExecutor
+    from services.spot_price import get_spot_price_async
     _p = params or QuickScanParams()
     currency = _p.currency
 
-    # Step 1: Parallel Fetching
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        f_spot = executor.submit(get_spot_price, currency)
-        f_dvol = executor.submit(get_dvol_from_deribit, currency)
-        f_deribit = executor.submit(_fetch_deribit_summaries, currency)
-        f_trades = executor.submit(_fetch_large_trades, currency, days=1, limit=40)
+    # Step 1: 并行异步获取所有数据源
+    try:
+        spot_task = asyncio.create_task(get_spot_price_async(currency))
+        dvol_task = asyncio.create_task(asyncio.to_thread(get_dvol_from_deribit, currency))
+        deribit_task = asyncio.create_task(asyncio.to_thread(_fetch_deribit_summaries, currency))
+        trades_task = asyncio.create_task(_fetch_large_trades_async(currency, days=1, limit=40))
         
-        # Collect results
-        try:
-            spot = f_spot.result(timeout=15)
-            dvol_data = f_dvol.result(timeout=15)
-            summaries = f_deribit.result(timeout=15)
-            large_trades = f_trades.result(timeout=15)
-        except Exception as e:
-            logger.error("Parallel fetch failed: %s", str(e))
-            # Fallback: try to get essential data individually
-            try: spot = get_spot_price(currency)
-            except Exception: spot = None
-            try: dvol_data = get_dvol_from_deribit(currency)
-            except Exception: dvol_data = {}
-            try: summaries = _fetch_deribit_summaries(currency)
-            except Exception: summaries = []
-            try: large_trades = _fetch_large_trades(currency, days=1, limit=40)
-            except Exception: large_trades = []
+        spot, dvol_data, summaries, large_trades = await asyncio.gather(
+            spot_task, dvol_task, deribit_task, trades_task,
+            return_exceptions=True
+        )
+        
+        # 处理异常
+        if isinstance(spot, Exception):
+            try:
+                spot = await get_spot_price_async(currency)
+            except Exception:
+                spot = None
+        if isinstance(dvol_data, Exception):
+            dvol_data = {}
+        if isinstance(summaries, Exception):
+            summaries = []
+        if isinstance(large_trades, Exception):
+            large_trades = []
+            
+    except Exception as e:
+        logger.error("Parallel async fetch failed: %s", str(e))
+        try: spot = await get_spot_price_async(currency)
+        except Exception: spot = None
+        try: dvol_data = await asyncio.to_thread(get_dvol_from_deribit, currency)
+        except Exception: dvol_data = {}
+        try: summaries = await asyncio.to_thread(_fetch_deribit_summaries, currency)
+        except Exception: summaries = []
+        try: large_trades = await _fetch_large_trades_async(currency, days=1, limit=40)
+        except Exception: large_trades = []
 
     _min_spot = {"BTC": 1000, "ETH": 100, "SOL": 10, "XRP": 0.5}.get(currency, 100)
     if not spot or spot < _min_spot:
@@ -590,12 +816,13 @@ def _quick_scan_sync(params: QuickScanParams = None):
             dvol_pct = round(50 + dvol_z * 20, 1)
             dvol_pct = max(1, min(99, dvol_pct))
 
-    # Step 2: Fetch Binance data using optimized function
+    # Step 2: 异步获取 Binance 数据
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'crypto-options-aggregator-link'))
         from binance_options import fetch_binance_options
         
-        binance_contracts = fetch_binance_options(
+        binance_contracts = await asyncio.to_thread(
+            fetch_binance_options,
             currency=currency,
             min_dte=_p.min_dte,
             max_dte=_p.max_dte,
@@ -1009,6 +1236,157 @@ def _fetch_deribit_summaries(currency="BTC"):
         return mon._get_book_summaries(currency)
     except Exception:
         return []
+
+
+async def _fetch_large_trades_async(currency: str, days: int = 7, limit: int = 50):
+    """异步获取大单交易：优先DB，不足时从Deribit实时API补充
+    
+    关键概念：
+    - notional_usd = 合约数量 × 标的指数价格 (名义价值，代表交易敞口大小)
+    - premium_usd = 合约数量 × 期权价格 × 标的指数价格 (权利金，实际支付金额)
+    """
+    import httpx
+    from datetime import datetime, timedelta
+    from services.spot_price import get_spot_price_async
+    
+    spot = await get_spot_price_async(currency)
+    
+    since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_connection(read_only=True)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta,
+               premium_usd, severity
+        FROM large_trades_history
+        WHERE currency = ? AND timestamp > ?
+          AND instrument_name IS NOT NULL AND instrument_name != '' 
+          AND instrument_name != '(EMPTY)' AND strike > 100
+        ORDER BY notional_usd DESC LIMIT ?
+    """, (currency, since, limit))
+    rows = cursor.fetchall()
+
+    results = []
+    seen = set()
+    results_by_inst = {}
+    for r in rows:
+        inst = (r[0] or '').strip()
+        strike = r[4] or 0
+        direction = r[1] or ''
+        opt_type = r[5] or ''
+        if not inst or strike <= 100 or inst in seen:
+            continue
+        seen.add(inst)
+        fl = r[6] or ''
+        delta_val = r[7] or 0
+        if not fl or fl == 'unknown':
+            fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
+        
+        notional = r[2] or 0
+        if notional <= 0 and (r[3] or 0) > 0 and strike > 0:
+            notional = float(r[3]) * spot
+        
+        entry = {
+            "instrument_name": inst, "direction": direction,
+            "notional_usd": round(float(notional), 2),
+            "volume": r[3] or 0,
+            "strike": strike, "option_type": opt_type, "flow_label": fl,
+            "delta": delta_val,
+            "premium_usd": r[8] or 0,
+            "severity": r[9] or ''
+        }
+        results.append(entry)
+        results_by_inst[inst] = entry
+
+    MIN_NOTIONAL = 100000
+    db_missing_premium = sum(1 for r in results if not r.get('premium_usd'))
+    need_api = len(results) < max(5, limit // 2) or db_missing_premium > len(results) * 0.5
+    if need_api:
+        try:
+            async with httpx.AsyncClient() as client:
+                api_url = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency"
+                response = await client.get(api_url, params={
+                    "currency": currency, "kind": "option", "count": 500
+                }, timeout=10.0)
+                payload = response.json()
+                trades = payload.get("result", {}).get("trades", [])
+            
+            for t in trades:
+                inst = t.get("instrument_name", "")
+                if not inst:
+                    continue
+                
+                meta = None
+                try:
+                    meta = _parse_inst_name(inst)
+                except Exception:
+                    continue
+                if not meta:
+                    continue
+                    
+                direction = t.get("direction", "")
+                trade_amount = float(t.get("amount", 0))
+                index_price = float(t.get("index_price", 0) or spot)
+                option_price = float(t.get("price", 0))
+                
+                notional_usd = trade_amount * index_price
+                premium_usd = trade_amount * option_price * index_price
+                
+                if notional_usd < MIN_NOTIONAL:
+                    continue
+                
+                trade_iv = float(t.get("iv") or 50) / 100.0
+                delta_val = abs(calc_delta_bs(meta.strike, spot,
+                    trade_iv, meta.dte, meta.option_type))
+                
+                fl = _classify_flow_heuristic(
+                    direction, meta.option_type, delta_val, meta.strike, spot)
+                
+                is_block = t.get("block_trade", False) or t.get("block_trade_id") is not None
+                
+                api_entry = {
+                    "instrument_name": inst, "direction": direction,
+                    "notional_usd": round(notional_usd, 2),
+                    "premium_usd": round(premium_usd, 2),
+                    "volume": round(trade_amount, 4),
+                    "strike": meta.strike,
+                    "option_type": meta.option_type,
+                    "flow_label": fl,
+                    "delta": delta_val,
+                    "iv": round(trade_iv * 100, 1),
+                    "is_block": is_block,
+                    "trade_price": option_price
+                }
+                
+                if inst in results_by_inst:
+                    db_entry = results_by_inst[inst]
+                    if not db_entry.get('premium_usd'):
+                        db_entry['premium_usd'] = round(premium_usd, 2)
+                    if not db_entry.get('iv'):
+                        db_entry['iv'] = round(trade_iv * 100, 1)
+                    if not db_entry.get('is_block'):
+                        db_entry['is_block'] = is_block
+                    if not db_entry.get('trade_price'):
+                        db_entry['trade_price'] = option_price
+                    if not db_entry.get('notional_usd') or db_entry['notional_usd'] < notional_usd:
+                        db_entry['notional_usd'] = round(notional_usd, 2)
+                        db_entry['volume'] = round(trade_amount, 4)
+                else:
+                    seen.add(inst)
+                    results.append(api_entry)
+                    results_by_inst[inst] = api_entry
+                    
+                if len(results) >= limit:
+                    break
+        except Exception as e:
+            print(f"Deribit live trades fallback error: {e}")
+
+    for t in results:
+        if not t.get("severity"):
+            t["severity"] = _severity_from_notional(t.get("notional_usd", 0) or 0)
+        t["risk_level"] = _risk_emoji(abs(t.get("delta", 0) or 0))
+    
+    results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
+    return results[:limit]
 
 
 def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
