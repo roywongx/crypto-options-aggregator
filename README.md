@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v12.0-筑底信号v3.0-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v17.0-并行异步加载-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
@@ -68,14 +68,22 @@
 
 ### 🎯 智能策略引擎
 
-**策略评分系统**: 0-100 分综合评分，4 维度评估
-- 收益性 (30%)、风险性 (30%)、胜率 (25%)、流动性 (15%)
+**智能策略引擎**（统一策略推荐引擎 v14.0+）
+
+**统一策略推荐引擎**: 三种模式共享统一筛选器、评分框架和指标计算
+- **Roll 模式（滚仓优化）**: 自动计算净收益/倍投方案/风险评估，确保 Net Credit > 0
+- **New 模式（新建开仓）**: 综合 ROI/Delta/DTE/流动性评分，智能推荐最优合约
+- **Grid 模式（网格配置）**: 多档位网格生成，支持 Put/Call 双卖，DVOL 信号联动
+
+**共享计算模块** (v13.0):
+- Black-Scholes 期权定价（含完整 Greeks：Delta/Gamma/Theta/Vega）
+- 胜率计算（基于正态分布 CDF）
+- 统一流动性评分系统
+- 通用评分/评级工具（BEST/GOOD/OK/CAUTION/SKIP）
 
 **Payoff 可视化**: 交互式盈亏曲线，支持 Sell/Buy Put/Call，实时显示最大盈亏、盈亏平衡点
 
-**正收益滚仓计算器**: 持仓遇险时自动寻找更优合约，确保滚仓后净信用大于零
-
-**网格策略引擎**: 4 种预设（保守/均衡/激进/智能推荐），根据 DVOL 自动调整参数
+**Wheel ROI 计算器**: 完整 Wheel 策略收益分析，年化 ROI、胜率、Put/Call 收入分解
 
 ### ⚡ 压力测试系统 — 基于 Black-Scholes 的高阶 Greeks 敏感度分析
 
@@ -247,6 +255,62 @@ python -m uvicorn main:app --reload --port 8000
 ---
 
 ## 💡 更新日志
+
+### v17.0 (2026-04) — 并行异步加载优化
+
+**🚀 页面加载重构**
+- 所有数据源并行启动（loadLatestData/loadTermStructure/loadMaxPain/loadPcrChart）
+- 每个模块独立重试，互不影响
+- 页面打开自动预加载，无需手动刷新
+- 重试间隔从 10 秒缩短到 5 秒
+
+**🔧 模块加载可靠性增强**
+- IV 期限结构/最大痛点添加 2 次自动重试（间隔 2 秒）
+- 失败后显示友好错误提示 + 重试按钮
+- 大单风向标添加调试日志
+
+**🎨 前端去重合并 (v15.0)**
+- 删除独立网格策略引擎板块，功能已整合到统一策略推荐引擎
+- 减少约 106 行重复 HTML
+- 用户界面更简洁，消除功能重复困惑
+
+### v16.0 (2026-04) — 三大模块加载优化
+
+- IV 期限结构/最大痛点添加重试机制和错误处理
+- 大单风向标调试日志增强
+
+### v15.0 (2026-04) — 前端去重合并
+
+- 删除独立网格策略引擎板块
+- 优化统一策略推荐引擎入口
+- 清理相关 JavaScript 函数
+
+### v14.0 (2026-04) — 统一策略推荐引擎
+
+**🔧 统一策略推荐引擎**
+- 创建 unified_strategy_engine.py (600+ 行)
+- 统一筛选器 ContractFilter (按类型/DTE/Delta/APR/权利金/未平仓)
+- 统一评分框架 UnifiedScorer (Roll/New/Grid 三种评分算法)
+- 统一输出模型 StrategyRecommendation + StrategyMetrics
+- 三种模式: Roll(滚仓)/New(新建)/Grid(网格)
+
+**🎨 前端整合**
+- 添加网格模式 Tab 按钮
+- 动态显示/隐藏模式特定参数
+- 表格显示新增指标：胜率、BS 定价、Theta 衰减
+
+### v13.0 (2026-04) — 共享计算模块
+
+**🔧 代码重复消除**
+- 创建 shared_calculations.py 共享计算模块 (300+ 行)
+- Black-Scholes 期权定价公式 (含完整 Greeks)
+- 胜率计算框架
+- 统一流动性评分系统
+- 通用评分/评级工具
+
+**🐛 Bug 修复**
+- 修复 Grid Engine simulate_scenario 中错误的 *100 乘数
+- 修复 _calc_grid_score 未定义引用
 
 ### v12.0 (2026-04) — 筑底信号 v3.0（Bitcoin Magazine Pro 标准）
 
