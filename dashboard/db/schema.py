@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS scan_records (
     large_trades_count INTEGER,
     large_trades_details TEXT,
     contracts_data TEXT,
+    top_contracts_data TEXT,
     raw_output TEXT
 )
 """
@@ -42,7 +43,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_trades_strike ON large_trades_history(strike)",
 ]
 
-SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'raw_output']
+SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'top_contracts_data', 'raw_output']
 TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
 
 def init_database_schema(conn: sqlite3.Connection):
@@ -68,3 +69,17 @@ def init_database_schema(conn: sqlite3.Connection):
             cursor.execute(f"ALTER TABLE large_trades_history ADD COLUMN {col} {'REAL' if col in ('notional_usd','delta','premium_usd') else 'TEXT'}")
 
     conn.commit()
+
+
+def ensure_top_contracts_column(conn):
+    """确保 top_contracts_data 字段存在（兼容旧数据库）"""
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT top_contracts_data FROM scan_records LIMIT 1")
+    except Exception:
+        # Column doesn't exist, add it
+        try:
+            cursor.execute("ALTER TABLE scan_records ADD COLUMN top_contracts_data TEXT")
+            conn.commit()
+        except Exception:
+            pass

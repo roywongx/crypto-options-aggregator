@@ -49,7 +49,7 @@ from routers.trades_api import router as trades_router
 from routers.status import router as status_router
 from routers.maxpain import router as maxpain_router
 from db.connection import get_db_connection as _db_conn, execute_read, execute_write
-from db.schema import init_database_schema
+from db.schema import init_database_schema, ensure_top_contracts_column
 
 def get_db_connection(read_only: bool = True):
     """获取数据库连接（默认只读）
@@ -96,6 +96,7 @@ def init_database():
     cursor.execute("PRAGMA busy_timeout=5000")
     cursor.execute("PRAGMA synchronous=NORMAL")
     init_database_schema(conn)
+    ensure_top_contracts_column(conn)
     conn.commit()
 
 
@@ -106,11 +107,12 @@ def save_scan_record(data: Dict[str, Any]):
     now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
 
+    contracts = data.get('contracts', [])
     cursor.execute("""
         INSERT INTO scan_records 
         (currency, spot_price, dvol_current, dvol_z_score, dvol_signal, 
-         large_trades_count, large_trades_details, contracts_data, raw_output)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data.get('currency', 'BTC'),
         data.get('spot_price', 0),
@@ -119,7 +121,8 @@ def save_scan_record(data: Dict[str, Any]):
         data.get('dvol_signal', ''),
         data.get('large_trades_count', 0),
         json.dumps(large_trades, ensure_ascii=False),
-        json.dumps(data.get('contracts', []), ensure_ascii=False),
+        json.dumps(contracts, ensure_ascii=False),
+        json.dumps(contracts[:30], ensure_ascii=False),
         json.dumps({"dvol_raw": data.get('dvol_raw', {}), "trend": data.get('dvol_trend', ''), "trend_label": data.get('dvol_trend_label', ''), "confidence": data.get('dvol_confidence', ''), "interpretation": data.get('dvol_interpretation', '')}, ensure_ascii=False)
     ))
 
@@ -393,12 +396,18 @@ async def quick_scan(params: QuickScanParams = None):
 
 @app.get("/api/latest")
 async def get_latest(currency: str = Query(default="BTC")):
-    """获取最新扫描数据（用于页面加载和自动刷新）"""
+    """获取最新扫描数据（用于页面加载和自动刷新）
+    
+    优先读取 top_contracts_data（前30合约），避免解析全量 JSON。
+    如需完整数据，使用 contracts_data。
+    """
     conn = get_db_connection(read_only=True)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
-               large_trades_count, large_trades_details, contracts_data, raw_output
+               large_trades_count, large_trades_details, 
+               COALESCE(top_contracts_data, contracts_data) as fast_contracts,
+               contracts_data, raw_output
         FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
     """, (currency,))
     row = cursor.fetchone()
@@ -415,6 +424,7 @@ async def get_latest(currency: str = Query(default="BTC")):
             "message": "暂无扫描数据，请先执行扫描"
         }
 
+    # 使用 top_contracts_data（前30合约），避免解析巨型 JSON
     try:
         contracts = json.loads(row[7]) if row[7] else []
     except Exception:
@@ -426,9 +436,9 @@ async def get_latest(currency: str = Query(default="BTC")):
         large_trades = []
 
     raw = {}
-    if row[8]:
+    if row[9]:
         try:
-            raw = json.loads(row[8])
+            raw = json.loads(row[9])
         except Exception:
             raw = {}
 
@@ -776,10 +786,10 @@ def _quick_scan_sync(params: QuickScanParams = None):
     }, ensure_ascii=False)
     cursor.execute("""
         INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
-            dvol_signal, large_trades_count, large_trades_details, contracts_data, raw_output)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            dvol_signal, large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
-          json.dumps(large_trades[:20]), json.dumps(contracts[:30]), _raw_out))
+          json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps(contracts[:30]), _raw_out))
 
     if large_trades and isinstance(large_trades, list):
         for trade in large_trades:
