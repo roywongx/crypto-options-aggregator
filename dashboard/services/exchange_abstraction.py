@@ -368,18 +368,16 @@ class DeribitExchange(BaseExchange):
         max_spread_pct: float = 20.0,
         strike_range: Optional[tuple] = None
     ) -> List[OptionContract]:
-        import httpx
         import sys
         import os
         
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
-        from deribit_options_monitor import DeribitOptionsMonitor
 
         def _fetch():
+            from deribit_options_monitor import DeribitOptionsMonitor
             mon = DeribitOptionsMonitor()
             try:
-                summary = mon.fetch_options_summary(currency, option_type.value)
-                return summary
+                return mon._get_book_summaries(currency)
             except Exception:
                 return []
 

@@ -525,7 +525,7 @@ async def dashboard_init(currency: str = Query(default="BTC")):
     前端一次请求即可渲染完整的仪表盘。
     """
     from routers.maxpain import _calc_max_pain_internal
-    from routers.trades_api import get_db_path
+    from db.connection import DB_PATH
     
     # 并行执行三个独立的数据获取任务
     wind_task = asyncio.create_task(asyncio.to_thread(_fetch_wind_analysis, currency))
@@ -1046,10 +1046,15 @@ async def quick_scan(params: QuickScanParams = None):
                 # 将 WebSocket 数据转换为 scan 格式
                 summaries = []
                 for symbol, opt_data in options_snapshot.items():
+                    # 从 symbol 解析 DTE (Deribit: BTC-26JUN26-55000-P)
+                    inst_meta = _parse_inst_name(symbol)
+                    if not inst_meta:
+                        continue
+                    
                     summaries.append({
                         "instrument_name": opt_data.get("symbol", symbol),
                         "mark_price": opt_data.get("mark_price", 0),
-                        "mark_iv": opt_data.get("iv", 0),
+                        "mark_iv": opt_data.get("iv", 0) * 100 if opt_data.get("iv", 0) <= 1 else opt_data.get("iv", 0),
                         "delta": opt_data.get("delta", 0),
                         "gamma": opt_data.get("gamma", 0),
                         "theta": opt_data.get("theta", 0),
@@ -1061,27 +1066,9 @@ async def quick_scan(params: QuickScanParams = None):
                         "underlying_price": spot
                     })
                 
-                # 获取 Binance 数据也从 DataHub 缓存
-                binance_cache = datahub.get_options_chain_snapshot(currency.lower() if currency in ["BTC", "ETH"] else currency)
-                if binance_cache:
-                    binance_contracts = []
-                    for sym, data in binance_cache.items():
-                        binance_contracts.append({
-                            "symbol": sym,
-                            "strike": 0,
-                            "dte": 30,
-                            "premium_usdt": data.get("mark_price", 0),
-                            "delta": data.get("delta", 0),
-                            "gamma": 0,
-                            "theta": 0,
-                            "vega": 0,
-                            "mark_iv": data.get("iv", 0),
-                            "oi": data.get("open_interest", 0),
-                            "volume": data.get("volume", 0),
-                            "spread_pct": 0,
-                            "liquidity_score": 50,
-                            "apr": 0
-                        })
+                # Binance DataHub 缓存尚未实现（需要额外 WebSocket 订阅）
+                # 此处留空，后续会回退到 REST
+                binance_contracts = []
             else:
                 logger.info("DataHub options data too old (%.1fs), falling back to REST", options_age)
     except ImportError:
@@ -2447,15 +2434,11 @@ async def eventbus_websocket(websocket):
 
 
 @app.on_event("startup")
-async def startup_eventbus():
-    """启动事件总线后台发布器"""
+async def startup_services():
+    """启动后台服务：EventBus + DataHub WebSocket"""
     from services.event_bus import event_bus
     await event_bus.start_background_publishers()
-
-
-@app.on_event("startup")
-async def startup_datahub():
-    """启动 DataHub WebSocket 服务（实时推送，替代 REST 轮询）"""
+    
     try:
         from services.datahub import start_datahub_services
         await start_datahub_services()

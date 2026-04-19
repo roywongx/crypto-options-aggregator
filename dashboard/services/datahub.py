@@ -138,8 +138,8 @@ class DeribitWSConnector:
     async def _subscribe(self):
         channels = []
         for currency in self._currencies:
-            channels.append(f"ticker.{currency}.any")
-            channels.append(f"trade.{currency}.any")
+            channels.append(f"ticker.{currency}.option")
+            channels.append(f"trade.{currency}.option")
         
         subscribe_msg = {
             "jsonrpc": "2.0",
@@ -246,9 +246,10 @@ class BinanceWSConnector:
     async def _connect(self):
         streams = []
         for currency in self._currencies:
-            streams.append(f"{currency.lower()}@markPrice@1s")
+            lower_currency = currency.lower()
+            streams.append(f"{lower_currency}@markPrice@1s")
         
-        uri = f"wss://eapi.binance.com/stream?streams={'/'.join(streams)}"
+        uri = f"wss://eapi.binance.com/eapi/stream?streams={'/'.join(streams)}"
         async with websockets.connect(uri, ping_interval=30, ping_timeout=10) as ws:
             self._ws = ws
             self._reconnect_delay = 2
@@ -273,7 +274,7 @@ class BinanceWSConnector:
         if mark_price <= 0:
             return
         
-        currency = symbol[:3] if symbol.startswith("BTC") or symbol.startswith("ETH") else ""
+        currency = "BTC" if symbol.startswith("BTC") else ("ETH" if symbol.startswith("ETH") else "")
         if not currency:
             return
         

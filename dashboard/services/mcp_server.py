@@ -51,6 +51,18 @@ class MCPToolRegistry:
         )
         
         self.register_tool(
+            name="get_highest_apr_put",
+            description="获取指定 strike 和 DTE 范围内最高 APR 的 Sell Put 合约",
+            handler=self._get_highest_apr_put
+        )
+        
+        self.register_tool(
+            name="calculate_roll_cost",
+            description="计算滚仓成本和收益",
+            handler=self._calculate_roll_cost
+        )
+
+        self.register_tool(
             name="get_paper_portfolio",
             description="获取模拟盘组合状态和持仓信息",
             handler=self._get_paper_portfolio
@@ -125,7 +137,10 @@ class MCPToolRegistry:
             return {"error": "缺少 strike 或 spot 参数"}
         
         from services.quant_engine import calculate_greeks_full
-        return calculate_greeks_full(option_type, strike, spot, iv / 100.0, dte)
+        T = dte / 365.0
+        sigma = iv / 100.0
+        r = 0.05
+        return calculate_greeks_full(spot, strike, T, r, sigma, option_type)
     
     async def _analyze_large_trades(self, params: Dict) -> Dict:
         currency = params.get("currency", "BTC")
@@ -179,6 +194,126 @@ class MCPToolRegistry:
         result["timestamp"] = datetime.utcnow().isoformat()
         return result
     
+    async def _get_highest_apr_put(self, params: Dict) -> Dict:
+        """获取指定 strike 和 DTE 范围内最高 APR 的 Sell Put 合约"""
+        from services.spot_price import get_spot_price
+        from services.quant_engine import bs_put_price, bs_delta
+        
+        currency = params.get("currency", "BTC")
+        target_strike = params.get("strike")
+        target_dte = params.get("dte", 30)
+        margin_ratio = params.get("margin_ratio", 0.2)
+        
+        if not target_strike:
+            return {"error": "缺少 strike 参数"}
+        
+        spot = get_spot_price(currency) or 0
+        if not spot:
+            return {"error": "无法获取现货价格"}
+        
+        dvol = None
+        try:
+            from services.dvol_analyzer import get_dvol_from_deribit
+            dvol_data = get_dvol_from_deribit(currency)
+            dvol = dvol_data.get("current", 50)
+        except Exception:
+            dvol = 50
+        
+        T = target_dte / 365.0
+        sigma = dvol / 100.0 if dvol else 0.5
+        r = 0.05
+        
+        premium = bs_put_price(spot, target_strike, T, r, sigma)
+        delta = bs_delta(spot, target_strike, T, r, sigma, "P")
+        
+        margin_required = target_strike * margin_ratio
+        apr = (premium / margin_required) / T * 100 if margin_required > 0 else 0
+        
+        return {
+            "currency": currency,
+            "spot": spot,
+            "strike": target_strike,
+            "dte": target_dte,
+            "option_type": "PUT",
+            "iv": round(dvol, 2),
+            "premium": round(premium, 2),
+            "delta": round(delta, 4),
+            "margin_required": round(margin_required, 2),
+            "apr": round(apr, 2),
+            "distance_from_spot_pct": round((target_strike - spot) / spot * 100, 1)
+        }
+
+    async def _calculate_roll_cost(self, params: Dict) -> Dict:
+        """计算滚仓成本和收益"""
+        from services.spot_price import get_spot_price
+        from services.quant_engine import bs_put_price, bs_delta
+        
+        currency = params.get("currency", "BTC")
+        current_strike = params.get("current_strike")
+        new_strike = params.get("new_strike")
+        current_dte = params.get("current_dte", 30)
+        new_dte = params.get("new_dte", 45)
+        margin_ratio = params.get("margin_ratio", 0.2)
+        
+        if not current_strike or not new_strike:
+            return {"error": "缺少 current_strike 或 new_strike 参数"}
+        
+        spot = get_spot_price(currency) or 0
+        if not spot:
+            return {"error": "无法获取现货价格"}
+        
+        dvol = None
+        try:
+            from services.dvol_analyzer import get_dvol_from_deribit
+            dvol_data = get_dvol_from_deribit(currency)
+            dvol = dvol_data.get("current", 50)
+        except Exception:
+            dvol = 50
+        
+        T_current = current_dte / 365.0
+        T_new = new_dte / 365.0
+        sigma = dvol / 100.0 if dvol else 0.5
+        r = 0.05
+        
+        current_premium = bs_put_price(spot, current_strike, T_current, r, sigma)
+        new_premium = bs_put_price(spot, new_strike, T_new, r, sigma)
+        
+        roll_credit = new_premium - current_premium
+        roll_cost = -roll_credit if roll_credit < 0 else 0
+        
+        current_margin = current_strike * margin_ratio
+        new_margin = new_strike * margin_ratio
+        margin_delta = new_margin - current_margin
+        
+        current_apr = (current_premium / current_margin) / T_current * 100 if current_margin > 0 else 0
+        new_apr = (new_premium / new_margin) / T_new * 100 if new_margin > 0 else 0
+        
+        return {
+            "currency": currency,
+            "spot": spot,
+            "current_position": {
+                "strike": current_strike,
+                "dte": current_dte,
+                "premium": round(current_premium, 2),
+                "margin": round(current_margin, 2),
+                "apr": round(current_apr, 2)
+            },
+            "new_position": {
+                "strike": new_strike,
+                "dte": new_dte,
+                "premium": round(new_premium, 2),
+                "margin": round(new_margin, 2),
+                "apr": round(new_apr, 2)
+            },
+            "roll_analysis": {
+                "roll_credit": round(roll_credit, 2),
+                "roll_cost": round(roll_cost, 2),
+                "margin_delta": round(margin_delta, 2),
+                "apr_delta": round(new_apr - current_apr, 2),
+                "recommendation": "favorable" if roll_credit > 0 else "costly"
+            }
+        }
+
     async def _get_paper_portfolio(self, params: Dict) -> Dict:
         currency = params.get("currency", "BTC")
         
