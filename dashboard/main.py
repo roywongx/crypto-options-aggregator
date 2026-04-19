@@ -2150,6 +2150,287 @@ async def calc_wheel_roi(data: dict):
     return calc.calc_wheel_roi(put_strike, put_premium, call_strike, call_premium, spot, quantity, put_dte, call_dte)
 
 
+@app.get("/api/exchanges/list")
+async def list_exchanges():
+    """获取已注册的交易所列表"""
+    from services.exchange_abstraction import registry
+    return {"exchanges": registry.list_exchanges()}
+
+
+@app.get("/api/exchanges/chain")
+async def get_exchange_chain(
+    exchange: str = "binance",
+    currency: str = "BTC",
+    option_type: str = "PUT",
+    min_dte: int = 5,
+    max_dte: int = 45,
+    max_delta: float = 0.6,
+    min_volume: float = 0,
+    max_spread_pct: float = 20.0
+):
+    """通过统一接口获取期权链"""
+    from services.exchange_abstraction import registry, ExchangeType, OptionType
+    
+    try:
+        ex_type = ExchangeType(exchange.lower())
+        exchange_adapter = registry.get(ex_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"不支持的交易所: {exchange}")
+    
+    try:
+        opt_type = OptionType(option_type.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"无效的 option_type: {option_type}")
+    
+    chain = await exchange_adapter.get_options_chain(
+        currency=currency,
+        option_type=opt_type,
+        min_dte=min_dte,
+        max_dte=max_dte,
+        max_delta=max_delta,
+        min_volume=min_volume,
+        max_spread_pct=max_spread_pct
+    )
+    
+    return {
+        "exchange": exchange,
+        "currency": currency,
+        "option_type": option_type,
+        "count": len(chain),
+        "contracts": [c.to_dict() for c in chain]
+    }
+
+
+@app.get("/api/exchanges/multi-chain")
+async def get_multi_exchange_chain(
+    currency: str = "BTC",
+    option_type: str = "PUT",
+    min_dte: int = 5,
+    max_dte: int = 45,
+    max_delta: float = 0.6
+):
+    """同时获取多个交易所的期权链"""
+    from services.exchange_abstraction import registry, OptionType
+    
+    try:
+        opt_type = OptionType(option_type.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"无效的 option_type: {option_type}")
+    
+    summary = await registry.get_multi_exchange_summary(
+        currency=currency,
+        option_type=opt_type,
+        min_dte=min_dte,
+        max_dte=max_dte,
+        max_delta=max_delta
+    )
+    
+    return summary
+
+
+@app.get("/api/exchanges/dvol")
+async def get_exchange_dvol(currency: str = "BTC", exchange: str = "deribit"):
+    """获取指定交易所的 DVOL"""
+    from services.exchange_abstraction import registry, ExchangeType
+    
+    try:
+        ex_type = ExchangeType(exchange.lower())
+        exchange_adapter = registry.get(ex_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"不支持的交易所: {exchange}")
+    
+    dvol = await exchange_adapter.get_dvol(currency)
+    return {"exchange": exchange, "currency": currency, "dvol": dvol}
+
+
+@app.get("/api/eventbus/snapshot")
+async def get_eventbus_snapshot():
+    """获取事件总线当前快照数据"""
+    from services.event_bus import event_bus
+    return {
+        "snapshots": event_bus.get_all_snapshots(),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/eventbus/history")
+async def get_eventbus_history(
+    event_type: str = "",
+    limit: int = 50
+):
+    """获取事件历史"""
+    from services.event_bus import event_bus, EventType
+    
+    et = None
+    if event_type:
+        try:
+            et = EventType(event_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"无效的事件类型: {event_type}")
+    
+    return {
+        "events": event_bus.get_event_history(event_type=et, limit=limit),
+        "count": limit
+    }
+
+
+@app.get("/api/eventbus/spot-price")
+async def get_spot_price_from_bus(currency: str = "BTC"):
+    """从事件总线获取最新现货价格（毫秒级响应）"""
+    from services.event_bus import event_bus, EventType
+    
+    snapshot = event_bus.get_snapshot(EventType.SPOT_PRICE)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="现货价格数据尚未就绪")
+    
+    if snapshot.get("currency") != currency:
+        raise HTTPException(status_code=404, detail=f"未找到 {currency} 的现货价格")
+    
+    age = event_bus.get_snapshot_age(EventType.SPOT_PRICE)
+    return {
+        "currency": currency,
+        "price": snapshot.get("price"),
+        "timestamp": snapshot.get("timestamp"),
+        "data_age_seconds": round(age, 1)
+    }
+
+
+@app.get("/api/eventbus/dvol")
+async def get_dvol_from_bus(currency: str = "BTC"):
+    """从事件总线获取最新 DVOL（毫秒级响应）"""
+    from services.event_bus import event_bus, EventType
+    
+    snapshot = event_bus.get_snapshot(EventType.DVOL)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="DVOL 数据尚未就绪")
+    
+    if snapshot.get("currency") != currency:
+        raise HTTPException(status_code=404, detail=f"未找到 {currency} 的 DVOL")
+    
+    age = event_bus.get_snapshot_age(EventType.DVOL)
+    return {
+        "currency": currency,
+        "dvol": snapshot.get("dvol"),
+        "timestamp": snapshot.get("timestamp"),
+        "data_age_seconds": round(age, 1)
+    }
+
+
+@app.websocket("/api/eventbus/ws")
+async def eventbus_websocket(websocket):
+    """WebSocket 端点 - 实时推送事件总线数据"""
+    await websocket.accept()
+    
+    from services.event_bus import event_bus, EventSubscriber, EventType
+    
+    subscriber = EventSubscriber(event_bus)
+    subscriber.subscribe(
+        EventType.SPOT_PRICE,
+        EventType.DVOL,
+        EventType.FUNDING_RATE,
+        EventType.LARGE_TRADE,
+        EventType.RISK_ALERT
+    )
+    
+    try:
+        while True:
+            event = await subscriber.receive(timeout=5.0)
+            if event:
+                await websocket.send_json(event.to_dict())
+            else:
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+    except Exception:
+        pass
+    finally:
+        subscriber.close()
+
+
+@app.on_event("startup")
+async def startup_eventbus():
+    """启动事件总线后台发布器"""
+    from services.event_bus import event_bus
+    await event_bus.start_background_publishers()
+
+
+@app.get("/api/mcp/tools")
+async def mcp_list_tools():
+    """列出所有可用的 MCP 工具"""
+    from services.mcp_server import mcp_registry
+    return {"tools": mcp_registry.list_tools()}
+
+
+@app.post("/api/mcp/execute")
+async def mcp_execute_tool(tool_name: str, params: Dict[str, Any] = None):
+    """
+    执行 MCP 工具
+    
+    外部 AI（Cursor/Claude Desktop）可通过此接口调用本地工具：
+    - get_market_overview: 获取市场概览
+    - calculate_greeks: 计算希腊字母
+    - analyze_large_trades: 分析大宗交易
+    - suggest_roll_strategy: 滚仓建议
+    - get_risk_assessment: 风险评估
+    - get_paper_portfolio: 模拟盘信息
+    """
+    from services.mcp_server import mcp_registry
+    
+    if params is None:
+        params = {}
+    
+    result = await mcp_registry.execute_tool(tool_name, params)
+    return result
+
+
+@app.post("/api/mcp/chat")
+async def mcp_chat(query: str, currency: str = "BTC"):
+    """
+    MCP 对话接口 - 专为外部 AI 设计
+    
+    AI 可以直接调用此接口，自动分析市场并给出建议。
+    示例: "帮我看看现在的盘面适不适合做 Sell Put"
+    """
+    from services.ai_router import ai_chat
+    from services.mcp_server import mcp_registry
+    
+    market_result = await mcp_registry.execute_tool("get_market_overview", {"currency": currency})
+    
+    market_context = ""
+    if market_result.get("success"):
+        data = market_result["data"]
+        parts = []
+        if "dvol" in data:
+            parts.append(f"DVOL: {data['dvol']}")
+        if "fear_greed" in data:
+            fg = data["fear_greed"]
+            parts.append(f"恐惧贪婪指数: {fg.get('value', 'N/A')} ({fg.get('classification', '')})")
+        if "funding_rate" in data:
+            fr = data["funding_rate"]
+            if fr.get("current_rate") is not None:
+                parts.append(f"资金费率: {fr['current_rate']:.4f}%")
+        market_context = "\n".join(parts) if parts else "市场数据获取中"
+    
+    system_prompt = f"""你是一位专业的期权交易 AI 助手。当前市场数据:
+{market_context}
+
+请基于数据给出简洁、专业的交易建议。回答用中文，不超过 300 字。"""
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": query}
+    ]
+    
+    response = ai_chat(messages, preset="chinese", temperature=0.5, max_tokens=500)
+    
+    return {
+        "response": response,
+        "market_context": market_context,
+        "currency": currency
+    }
+
+
 # 启动服务器
 if __name__ == "__main__":
     import uvicorn
