@@ -1,7 +1,7 @@
-import subprocess
 import json
 import argparse
 import sys
+import os
 import concurrent.futures
 from datetime import datetime
 
@@ -47,16 +47,57 @@ def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
     adjusted['_dvol_advice'] = advice
     return adjusted
 
-if sys.platform == 'win32':
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, BASE_DIR)
 
-def run_command(cmd):
+def _call_binance_options(**kwargs):
+    """直接调用 binance_options 函数，避免 subprocess 开销"""
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
-        if result.returncode != 0:
-            return {"error": result.stderr}
-        return json.loads(result.stdout)
+        from binance_options import fetch_binance_options
+        return fetch_binance_options(
+            kwargs.get('currency', 'BTC'),
+            kwargs.get('min_dte', 5),
+            kwargs.get('max_dte', 45),
+            kwargs.get('max_delta', 0.6),
+            strike=kwargs.get('strike'),
+            strike_range=kwargs.get('strike_range'),
+            min_vol=kwargs.get('min_vol', 0),
+            max_spread=kwargs.get('max_spread', 20.0),
+            margin_ratio=kwargs.get('margin_ratio', 0.2),
+            option_type=kwargs.get('option_type', 'PUT'),
+            return_results=True
+        )
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
+
+def _call_deribit_dvol(currency):
+    """直接调用 Deribit DVOL"""
+    try:
+        sys.path.insert(0, os.path.join(BASE_DIR, "deribit-options-monitor"))
+        from deribit_options_monitor import DeribitOptionsMonitor
+        mon = DeribitOptionsMonitor()
+        return mon.get_dvol_signal(currency)
+    except Exception as e:
+        return {"error": str(e)}
+
+def _call_deribit_trades(currency, min_usd_value=200000):
+    """直接调用 Deribit 大单交易"""
+    try:
+        sys.path.insert(0, os.path.join(BASE_DIR, "deribit-options-monitor"))
+        from deribit_options_monitor import DeribitOptionsMonitor
+        mon = DeribitOptionsMonitor()
+        return mon.get_large_trade_alerts(currency=currency, min_usd_value=min_usd_value)
+    except Exception as e:
+        return {"error": str(e)}
+
+def _call_deribit_recommendations(**kwargs):
+    """直接调用 Deribit 推荐"""
+    try:
+        sys.path.insert(0, os.path.join(BASE_DIR, "deribit-options-monitor"))
+        from deribit_options_monitor import DeribitOptionsMonitor
+        mon = DeribitOptionsMonitor()
+        return mon.get_sell_put_recommendations(**kwargs)
     except Exception as e:
         return {"error": str(e)}
 
@@ -248,7 +289,7 @@ def format_report(currency, dvol_data, trades_data, binance_data, deribit_data, 
     return report_data
 
 def main():
-    parser = argparse.ArgumentParser(description="Aggregator v4.1 - Dynamic Spot + Data Validation")
+    parser = argparse.ArgumentParser(description="Aggregator v5.0 - Direct Call + Data Validation")
     parser.add_argument('--currency', default='BTC')
     parser.add_argument('--max-delta', type=float, default=0.3)
     parser.add_argument('--min-dte', type=int, default=7)
@@ -262,46 +303,6 @@ def main():
     parser.add_argument('--json', action='store_true', help='Output JSON format for API integration')
     args = parser.parse_args()
 
-    import os
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    
-    binance_script = os.path.join(BASE_DIR, "binance_options.py")
-    deribit_script = os.path.join(BASE_DIR, "deribit-options-monitor", "__init__.py")
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        f_dvol = executor.submit(run_command, [sys.executable, deribit_script, "dvol", "--currency", args.currency])
-        f_trades = executor.submit(run_command, [sys.executable, deribit_script, "large-trades", "--currency", args.currency])
-        
-        bin_cmd = [
-            sys.executable, binance_script, 
-            "--currency", args.currency, 
-            "--min-dte", str(args.min_dte), 
-            "--max-dte", str(args.max_dte), 
-            "--max-delta", str(args.max_delta), 
-            "--margin-ratio", str(args.margin_ratio),
-            "--option-type", args.option_type
-        ]
-        if args.strike: bin_cmd += ["--strike", str(args.strike)]
-        if args.strike_range: bin_cmd += ["--strike-range", args.strike_range]
-        f_bin = executor.submit(run_command, bin_cmd)
-
-        der_cmd = [
-            sys.executable, deribit_script,
-            "recommend", 
-            "--currency", args.currency, 
-            "--min-dte", str(args.min_dte), 
-            "--max-dte", str(args.max_dte), 
-            "--max-delta", str(args.max_delta), 
-            "--margin-ratio", str(args.margin_ratio), 
-            "--option-type", args.option_type,
-            "--top-k", "20"
-        ]
-        if args.strike: der_cmd += ["--strike", str(args.strike)]
-        if args.strike_range: der_cmd += ["--strike-range", args.strike_range]
-        f_der = executor.submit(run_command, der_cmd)
-
-        dvol_res, trades_res, bin_res, der_res = f_dvol.result(), f_trades.result(), f_bin.result(), f_der.result()
-
     preset_name = getattr(args, 'preset', None)
     opt_type = args.option_type.upper()
     if preset_name and preset_name in STRATEGY_PRESETS.get(opt_type, {}):
@@ -310,6 +311,28 @@ def main():
         args.min_dte = preset['min_dte']
         args.max_dte = preset['max_dte']
         args.margin_ratio = preset['margin_ratio']
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        f_dvol = executor.submit(_call_deribit_dvol, args.currency)
+        f_trades = executor.submit(_call_deribit_trades, args.currency)
+        
+        bin_kwargs = {
+            "currency": args.currency, "min_dte": args.min_dte,
+            "max_dte": args.max_dte, "max_delta": args.max_delta,
+            "margin_ratio": args.margin_ratio, "option_type": args.option_type
+        }
+        if args.strike: bin_kwargs["strike"] = args.strike
+        if args.strike_range: bin_kwargs["strike_range"] = args.strike_range
+        f_bin = executor.submit(_call_binance_options, **bin_kwargs)
+
+        der_kwargs = dict(currency=args.currency, max_delta=args.max_delta, min_apr=15.0,
+                         min_dte=args.min_dte, max_dte=args.max_dte, top_k=20,
+                         max_spread_pct=10.0, min_open_interest=100.0, option_type=args.option_type)
+        if args.strike: der_kwargs["strike"] = args.strike
+        if args.strike_range: der_kwargs["strike_range"] = args.strike_range
+        f_der = executor.submit(_call_deribit_recommendations, **der_kwargs)
+
+        dvol_res, trades_res, bin_res, der_res = f_dvol.result(timeout=30), f_trades.result(timeout=30), f_bin.result(timeout=60), f_der.result(timeout=60)
 
     report_data = format_report(args.currency, dvol_res, trades_res, bin_res, der_res, json_output=args.json)
 

@@ -11,15 +11,8 @@ import asyncio
 import subprocess
 import math
 
-# 统一策略预设：从 options_aggregator 导入（避免三套定义）
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-try:
-    from options_aggregator import STRATEGY_PRESETS as _OA_PRESETS
-    # 确保 main.py 使用的 STRATEGY_PRESETS 与 options_aggregator 一致
-    if 'STRATEGY_PRESETS' not in dir():
-        STRATEGY_PRESETS = _OA_PRESETS
-except ImportError:
-    pass  # 保留下方定义作为 fallback
+# 从 services.instrument 导入 instrument 解析函数
+from services.instrument import parse_instrument_name as _parse_inst_name
 
 def _norm_cdf(x):
     """标准正态分布累积分布函数近似 (Abramowitz & Stegun)"""
@@ -42,7 +35,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
@@ -61,7 +54,7 @@ class RiskFramework:
     """v6.0: BTC 风险框架 - $55k 常规底, $45k 极限底"""
     REGULAR_FLOOR = config.BTC_REGULAR_FLOOR
     EXTREME_FLOOR = config.BTC_EXTREME_FLOOR
-    
+
     @classmethod
     def get_status(cls, spot: float) -> str:
         if spot > cls.REGULAR_FLOOR * 1.1:
@@ -72,7 +65,7 @@ class RiskFramework:
             return "ADVERSE"  # 逆境
         else:
             return "PANIC"   # 极恐/止损区
-            
+
     @classmethod
     def get_score_modifier(cls, strike: float, spot: float) -> float:
         """根据行权价在风险框架中的位置给出评分修正"""
@@ -86,19 +79,19 @@ class RiskFramework:
 
 class CalculationEngine:
     """v5.6: 统一计算引擎 - 消除 main.py 和 options_aggregator.py 的公式不一致"""
-    
+
     @staticmethod
     def calc_apr(premium_usd: float, strike: float, dte: int, margin_ratio: float = 0.2) -> float:
         cv = strike * margin_ratio
         if cv <= 0 or dte <= 0: return 0.0
         return round((premium_usd / cv) * (365 / dte) * 100, 1)
-    
+
     @staticmethod
     def calc_pop(delta_val: float) -> float:
         abs_d = abs(delta_val)
         pop = max(5.0, min(95.0, round((1.0 - abs_d) * 100, 1)))
         return pop
-    
+
     @staticmethod
     def calc_breakeven_pct(spot: float, strike: float, premium_usd: float, option_type: str) -> float:
         premium_per_unit = premium_usd / spot if spot > 0 else 0
@@ -107,7 +100,7 @@ class CalculationEngine:
         else:
             safety = ((strike + premium_per_unit) - spot) / spot * 100
         return round(max(0, safety), 1)
-    
+
     @staticmethod
     def calc_iv_rank(current_iv: float, history_ivs: list) -> float:
         if not history_ivs or current_iv <= 0: return 50.0
@@ -118,23 +111,23 @@ class CalculationEngine:
         else: rank = n
         if n == 1: return 50.0
         return round((rank - 1) / (n - 1) * 100, 1)
-    
+
     @staticmethod
     def weighted_score(apr: float, pop: float, breakeven_pct: float,
-                       liquidity_score: float, iv_rank: float, 
+                       liquidity_score: float, iv_rank: float,
                        strike: float = 0, spot: float = 0) -> float:
         a = min(max(apr, 0) / 200.0, 1.0)
         p = min(max(pop, 0) / 100.0, 1.0)
         b = min(max(breakeven_pct, 0) / 20.0, 1.0)
         l = min(max(liquidity_score, 0) / 100.0, 1.0)
         ir = max(iv_rank, 0); iv = 1.0 - abs(ir - 50) / 50.0
-        
+
         score = a*0.25 + p*0.25 + b*0.20 + l*0.15 + iv*0.15
-        
+
         # 应用风险框架修正
         if spot > 0 and strike > 0:
             score *= RiskFramework.get_score_modifier(strike, spot)
-            
+
         return round(score, 4)
 
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
@@ -206,26 +199,26 @@ class RecoveryCalcParams(BaseModel):
     max_delta: float = Field(default=0.45, ge=0.1, le=0.8, description="最大Delta容忍")
 
 
+# 从 services.spot_price 导入（统一 spot price 获取）
+from services.spot_price import get_spot_price as _get_spot_price_main, get_spot_price_binance as _get_spot_price_binance, get_spot_price_deribit as _get_spot_price_deribit
+
+# 从 services.grid_engine 导入网格策略引擎
+from services.grid_engine import grid_engine
+
+# 以下函数已移至 services/spot_price.py
 def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
-    try:
-        symbol = f"{currency}USDT"
-        for host in ["api3.binance.com", "api2.binance.com", "api1.binance.com"]:
-            try:
-                response = requests.get(
-                    f"https://{host}/api/v3/ticker/price",
-                    params={"symbol": symbol},
-                    timeout=5
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return float(data.get("price", 0))
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"获取现货价格失败: {e}", file=sys.stderr)
+    return _get_spot_price_binance(currency)
+
+def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
+    return _get_spot_price_deribit(currency)
+
+def get_spot_price(currency: str = "BTC") -> float:
+    return _get_spot_price_main(currency)
+
+# DEPRECATED functions - kept for backward compatibility
+def _get_spot_from_scan(currency: str = "BTC") -> Optional[float]:
+    """从数据库读取最近的扫描价格 - 已废弃，使用 services.spot_price.get_spot_price"""
     return None
-
-
 def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
     try:
         response = requests.get(
@@ -243,7 +236,7 @@ def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
 
 def get_spot_price(currency: str = "BTC") -> float:
     sources = []
-    
+
     def _try(name, val):
         if val and isinstance(val, (int, float)) and val > 0:
             sources.append(name)
@@ -252,7 +245,7 @@ def get_spot_price(currency: str = "BTC") -> float:
 
     spot = _try("BinanceSpot", get_spot_price_binance(currency))
     if spot: return spot
-    
+
     spot = _try("DeribitIndex", get_spot_price_deribit(currency))
     if spot: return spot
 
@@ -282,8 +275,8 @@ def get_spot_price(currency: str = "BTC") -> float:
                     elif currency.lower() in d:
                         spot = _try("CoinGecko", d[currency.lower()].get("usd"))
                         if spot: return spot
-            except Exception:
-                continue
+            except Exception as e:
+                print(f"[ERROR] main.py: {e}", file=sys.stderr)
     except Exception as e:
         print(f"[WARN] Fallback oracle failed: {e}")
 
@@ -359,8 +352,9 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
                     "percentile_7d": round(sum(1 for x in closes if x <= current) / len(closes) * 100, 1) if closes else 50.0
                 }
         return {}
-    except Exception:
-        return {}
+    except Exception as e:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
+    return {}
 
 
 FLOW_LABEL_MAP = {
@@ -623,8 +617,8 @@ def save_scan_record(data: Dict[str, Any]):
     large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
 
     cursor.execute("""
-        INSERT INTO scan_records 
-        (currency, spot_price, dvol_current, dvol_z_score, dvol_signal, 
+        INSERT INTO scan_records
+        (currency, spot_price, dvol_current, dvol_z_score, dvol_signal,
          large_trades_count, large_trades_details, contracts_data, raw_output)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
@@ -643,8 +637,8 @@ def save_scan_record(data: Dict[str, Any]):
         for trade in large_trades:
             parsed = parse_trade_alert(trade, data.get('currency', 'BTC'), now_str)
             cursor.execute("""
-                INSERT INTO large_trades_history 
-                (timestamp, currency, source, title, message, direction, strike, volume, 
+                INSERT INTO large_trades_history
+                (timestamp, currency, source, title, message, direction, strike, volume,
                  option_type, flow_label, notional_usd, delta, instrument_name)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -697,11 +691,11 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
 
     try:
         mon = _get_deribit_monitor()
-        
+
         with ThreadPoolExecutor(max_workers=4) as executor:
             f_dvol = executor.submit(mon.get_dvol_signal, params.currency)
             f_trades = executor.submit(mon.get_large_trade_alerts, currency=params.currency, min_usd_value=200000)
-            
+
             def _run_binance():
                 kw = {"currency": params.currency, "min_dte": use_min_dte,
                       "max_dte": use_max_dte, "max_delta": use_delta,
@@ -709,7 +703,7 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
                 if params.strike: kw["strike"] = params.strike
                 if params.strike_range: kw["strike_range"] = params.strike_range
                 return scan_binance_options(kw)
-            
+
             def _run_deribit():
                 kw = dict(currency=params.currency, max_delta=use_delta, min_apr=15.0,
                          min_dte=use_min_dte, max_dte=use_max_dte, top_k=20,
@@ -928,15 +922,16 @@ def _quick_scan_sync(params: QuickScanParams = None):
         f_dvol = executor.submit(get_dvol_from_deribit, currency)
         f_deribit = executor.submit(_fetch_deribit_summaries, currency)
         f_trades = executor.submit(_fetch_large_trades, currency, days=7, limit=50)
-        
+
         # Parallel fetch Binance data components
         def _fetch_bin(url):
             try:
                 resp = requests.get(url, timeout=10)
                 resp.raise_for_status()
                 return resp.json()
-            except Exception: return {}
-            
+            except Exception as e:
+                print(f"[ERROR] main.py: {e}", file=sys.stderr)
+                return {}
         f_bin_mark = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/mark')
         f_bin_info = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/exchangeInfo')
         f_bin_ticker = executor.submit(_fetch_bin, 'https://eapi.binance.com/eapi/v1/ticker')
@@ -965,32 +960,33 @@ def _quick_scan_sync(params: QuickScanParams = None):
     dvol_current = dvol_data.get('current', 0) or 0
     dvol_z = dvol_data.get('z_score', 0) or 0
     dvol_signal = dvol_data.get('signal', '正常区间')
-    
+
     use_min_dte = _p.min_dte
     use_max_dte = _p.max_dte
-    
+
     dvol_pct = 50
     if abs(dvol_z) > 0:
         try:
             from scipy.stats import norm
             dvol_pct = round(norm.cdf(dvol_z) * 100, 1)
         except Exception:
+            print(f"[ERROR] main.py: {e}", file=sys.stderr)
             dvol_pct = round(50 + dvol_z * 20, 1)
             dvol_pct = max(1, min(99, dvol_pct))
 
     contracts = []
-    
+
     # Process Deribit
     if summaries:
         for s in summaries:
             meta = _parse_inst_name(s.get("instrument_name", ""))
             if not meta: continue
             if meta["dte"] < use_min_dte or meta["dte"] > use_max_dte: continue
-            
+
             req_type = _p.option_type.upper()
             req_type_short = "P" if req_type == "PUT" else "C"
             if meta["option_type"] != req_type_short: continue
-                
+
             iv = float(s.get("mark_iv") or 0) / 100.0
             prem = float(s.get("mark_price") or 0)
             oi = float(s.get("open_interest") or 0)
@@ -1004,21 +1000,21 @@ def _quick_scan_sync(params: QuickScanParams = None):
                 delta_val = abs(_estimate_delta(strike, underlying, iv, meta["dte"], meta["option_type"]))
             else:
                 delta_val = abs(float(raw_delta))
-            
+
             max_delta = _p.max_delta
             if isinstance(dvol_pct, (int, float)) and dvol_pct >= 80:
                 max_delta = max_delta * 0.7
             elif isinstance(dvol_pct, (int, float)) and dvol_pct <= 20:
                 max_delta = min(max_delta * 1.2, 0.55)
-            
+
             if delta_val > max_delta: continue
             if _p.strike and abs(strike - _p.strike) > 0.5: continue
-            
+
             prem_usd = prem * underlying
             margin_ratio = _p.margin_ratio
             cv = strike * margin_ratio
             apr = (prem_usd / cv) * (365 / meta["dte"]) * 100 if cv > 0 else 0
-            
+
             dist = abs(strike - spot) / spot * 100
 
             contracts.append({
@@ -1054,30 +1050,30 @@ def _quick_scan_sync(params: QuickScanParams = None):
         for s in r_info.get('optionSymbols', []):
             if s['underlying'] != f"{currency}USDT": continue
             if s['side'] != req_type: continue
-            
+
             dte = (s['expiryDate'] - now_ms) / 86400000
             if dte <= 0: continue
             if not (use_min_dte <= dte <= use_max_dte): continue
-            
+
             b_strike = float(s['strikePrice'])
             if _p.strike and abs(b_strike - _p.strike) > 0.5: continue
 
             mark = next((m for m in r_mark if m['symbol'] == s['symbol']), None)
             if not mark or float(mark['markPrice']) <= 0: continue
-            
+
             delta_val = abs(float(mark['delta']))
             if delta_val > max_delta: continue
-            
+
             ticker = next((t for t in r_ticker if t['symbol'] == s['symbol']), None)
             volume = float(ticker['volume']) if ticker else 0
             bid = float(ticker['bidPrice']) if ticker else 0
             ask = float(ticker['askPrice']) if ticker else 0
-            
+
             if volume < config.MIN_VOLUME_FILTER: continue
-            
+
             spread_pct = ((ask - bid) / bid) * 100 if bid > 0 and ask > 0 else 0
             if spread_pct >= config.MAX_SPREAD_PCT: continue
-            
+
             strike = float(s['strikePrice'])
             prem_usd = float(mark['markPrice'])
             cv = strike * margin_ratio
@@ -1138,7 +1134,7 @@ def _quick_scan_sync(params: QuickScanParams = None):
     all_c = sorted(contracts, key=_weighted_score, reverse=True)
     deribit_list = [c for c in all_c if c.get("platform") == "Deribit"][:15]
     binance_list = [c for c in all_c if c.get("platform") == "Binance"][:15]
-    
+
     contracts = []
     for i in range(max(len(deribit_list), len(binance_list))):
         if i < len(deribit_list): contracts.append(deribit_list[i])
@@ -1190,9 +1186,9 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT * FROM scan_records 
-        WHERE currency = ? 
-        ORDER BY timestamp DESC 
+        SELECT * FROM scan_records
+        WHERE currency = ?
+        ORDER BY timestamp DESC
         LIMIT 1
     """, (currency,))
 
@@ -1215,6 +1211,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
         _ltd = rd.get('large_trades_details', '')
         large_trades = json.loads(_ltd) if _ltd else []
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         large_trades = rd.get('large_trades_details', []) if isinstance(rd.get('large_trades_details'), list) else []
 
     dvol_trend = _dvol_raw.get('trend', '') if _dvol_raw else ''
@@ -1246,7 +1243,7 @@ async def calculate_recovery(params: RecoveryCalcParams):
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT contracts_data, spot_price FROM scan_records 
+        SELECT contracts_data, spot_price FROM scan_records
         WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
     """, (params.currency,))
     row = cursor.fetchone()
@@ -1261,6 +1258,7 @@ async def calculate_recovery(params: RecoveryCalcParams):
     try:
         contracts = json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else []
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         contracts = []
 
     spot = rd.get('spot_price', 0) or 0
@@ -1283,6 +1281,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
     try:
         contracts = json.loads(row[0])
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         contracts = []
 
     import math
@@ -1306,14 +1305,14 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         if c_type == 'C' and c_strike <= params.old_strike: continue
         if c.get('dte', 0) < params.min_dte or c.get('dte', 0) > params.max_dte: continue
         if abs(c.get('delta', 1)) > params.target_max_delta: continue
-        
+
         prem_usd = c.get('premium_usd') or c.get('premium', 0)
         if prem_usd <= 0: continue
 
         effective_prem_usd = prem_usd * (1 - SLIPPAGE_PCT)
 
         break_even_qty = math.ceil(params.close_cost_total / effective_prem_usd)
-        
+
         min_qty_for_profit = math.ceil(
             params.close_cost_total / effective_prem_usd * (1 + SAFETY_BUFFER_PCT)
         )
@@ -1330,7 +1329,7 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         if margin_req > params.reserve_capital:
             filtered_by_margin += 1
             continue
-            
+
         gross_credit = new_qty * effective_prem_usd
         net_credit = gross_credit - params.close_cost_total
 
@@ -1345,11 +1344,11 @@ async def calculate_net_credit_roll(params: RollCalcParams):
         capital_efficiency = net_credit / margin_req if margin_req > 0 else 0
         delta_penalty = max(0, (delta_val - 0.25) * 2)
         dte_weight = min(1.0, dte_val / 45.0)
-        
+
         # 应用风险框架修正
         spot = get_spot_price(params.currency)
         rf_modifier = RiskFramework.get_score_modifier(strike, spot)
-        
+
         risk_adjusted_score = capital_efficiency * (1 - delta_penalty) * (0.5 + 0.5 * dte_weight) * rf_modifier
         annualized_roi = (net_credit / margin_req * 365 / max(dte_val, 1)) if margin_req > 0 else 0
 
@@ -1439,9 +1438,8 @@ async def get_pcr_chart(currency: str = Query(default="BTC"), hours: int = Query
             pcr = put_vol / call_vol if call_vol > 0 else None
             if pcr is not None:
                 result.append({"timestamp": r[0], "pcr": round(pcr, 3)})
-        except Exception:
-            pass
-    return {"currency": currency, "data": result}
+        except Exception as e:
+            print(f"[ERROR] main.py: {e}", file=sys.stderr)
 
 @app.get("/api/export/csv")
 async def export_csv(currency: str = "BTC", hours: int = 168):
@@ -1458,60 +1456,48 @@ async def export_csv(currency: str = "BTC", hours: int = 168):
             try:
                 contracts = json.loads(row[0]) if row[0] else []
                 all_contracts.extend(contracts)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as e:
+                print(f"[ERROR] main.py: {e}", file=sys.stderr)
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    headers = ["合约","平台","类型","行权价","DTE","Delta","Gamma","Vega","IV%","APR%","POP%",
-               "权利金$","流动性","-10%亏损","盈亏平衡$","安全垫%","持仓量","价差%","IV_Rank","评分"]
-    writer.writerow(headers)
-    for c in all_contracts:
-        writer.writerow([
-            c.get('instrument_name', ''), c.get('platform', ''), c.get('option_type', ''),
-            c.get('strike', ''), c.get('dte', ''), c.get('delta', ''), c.get('gamma', ''),
-            c.get('vega', ''), c.get('iv', ''), c.get('apr', ''), c.get('pop', ''),
-            c.get('premium_usd', ''), c.get('liquidity_score', ''), c.get('loss_at_10pct', ''),
-            c.get('breakeven_usd', ''), c.get('breakeven_pct', ''), c.get('open_interest', ''),
-            c.get('spread_pct', ''), c.get('iv_rank', ''), c.get('_score', '')
-        ])
+        output = io.StringIO()
+        writer = csv.writer(output)
+        headers = ["合约","平台","类型","行权价","DTE","Delta","Gamma","Vega","IV%","APR%","POP%",
+                  "IV Rank 24h","IV Rank 7d","IV Rank 30d", "溢价(USD)","溢价率(%)","Open Interest","Volume(24h)","Last Price","Bid","Ask"]
+        writer.writerow(headers)
 
-    from fastapi.responses import Response
-    return Response(
-        content=output.getvalue(),
-        media_type="text/csv; charset=utf-8-sig",
-        headers={"Content-Disposition": f"attachment; filename=options_{currency}_{hours}h.csv"}
-    )
+        for contract in all_contracts:
+            row = [
+                contract.get("symbol", ""),
+                contract.get("platform", ""),
+                contract.get("type", ""),
+                contract.get("strike", ""),
+                contract.get("dte", ""),
+                contract.get("delta", ""),
+                contract.get("gamma", ""),
+                contract.get("vega", ""),
+                contract.get("iv_percentile", ""),
+                contract.get("apr", ""),
+                contract.get("pop", ""),
+                contract.get("iv_rank_24h", ""),
+                contract.get("iv_rank_7d", ""),
+                contract.get("iv_rank_30d", ""),
+                contract.get("premium_usd", contract.get("premium", "")),
+                contract.get("premium_percent", ""),
+                contract.get("open_interest", ""),
+                contract.get("volume_24h", ""),
+                contract.get("last_price", ""),
+                contract.get("bid", ""),
+                contract.get("ask", "")
+            ]
+            writer.writerow(row)
 
-@app.get("/api/dvol-advice")
-async def get_dvol_advice(currency: str = Query(default="BTC")):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT raw_output FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
-    row = cursor.fetchone()
-    dvol_raw = {}
-    if row and row[0]:
-        try:
-            dvol_raw = json.loads(row[0])
-        except Exception:
-            pass
-
-    _inner = dvol_raw.get("dvol_raw", dvol_raw)
-    dvol_snapshot = {
-        "current": _inner.get("current", 0),
-        "z_score": _inner.get("z_score", 0),
-        "signal": _inner.get("signal", ""),
-        "trend": dvol_raw.get("trend", _inner.get("trend", "")),
-        "trend_label": dvol_raw.get("trend_label", _inner.get("trend_label", "")),
-        "percentile_7d": dvol_raw.get("percentile_7d", _inner.get("percentile_7d", 50)),
-        "confidence": dvol_raw.get("confidence", _inner.get("confidence", "")),
-        "interpretation": dvol_raw.get("interpretation", _inner.get("interpretation", ""))
-    }
-
-    base_params = {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15}
-    adapted = adapt_params_by_dvol(base_params, dvol_raw)
+        output.seek(0)
+        return StreamingResponse(output, media_type="text/csv", headers={
+            "Content-Disposition": f"attachment; filename={currency}_options_{hours}h.csv"
+        })
+    except Exception as e:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
+        return {"error": str(e)}
 
     put_standard = dict(base_params)
     put_standard["option_type"] = "PUT"
@@ -1578,7 +1564,7 @@ async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query
 
     cursor.execute("""
         SELECT MAX(timestamp) as ts, contracts_data
-        FROM scan_records 
+        FROM scan_records
         WHERE timestamp > ? AND currency = ?
         GROUP BY strftime('%Y-%m-%d %H:00', timestamp)
         ORDER BY ts ASC
@@ -1618,9 +1604,8 @@ async def get_apr_chart(currency: str = Query(default="BTC"), hours: int = Query
                     if not isinstance(delta, (int, float)) or abs(delta) > STD_MAX_DELTA:
                         continue
                     safe_aprs.append(v)
-        except Exception:
-            pass
-
+        except Exception as e:
+            print(f"[ERROR] main.py: {e}", file=sys.stderr)
         if safe_aprs:
             safe_aprs.sort()
             n = len(safe_aprs)
@@ -1693,7 +1678,7 @@ async def get_dvol_chart(currency: str = Query(default="BTC"), hours: int = Quer
                AVG(dvol_current) as dvol,
                AVG(dvol_z_score) as z_score,
                MAX(dvol_signal) as signal
-        FROM scan_records 
+        FROM scan_records
         WHERE timestamp > ? AND currency = ? AND dvol_current IS NOT NULL
         GROUP BY ts
         ORDER BY ts ASC
@@ -1714,6 +1699,7 @@ def _fetch_deribit_summaries(currency="BTC"):
         mon = _get_deribit_monitor()
         return mon._get_book_summaries(currency)
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         return []
 
 
@@ -1722,7 +1708,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
     import requests as req_lib
     from datetime import datetime, timedelta
     spot = get_spot_price(currency)
-    
+
     # Step 1: Try DB first
     since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db_connection()
@@ -1731,7 +1717,7 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
         SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta
         FROM large_trades_history
         WHERE currency = ? AND timestamp > ?
-          AND instrument_name IS NOT NULL AND instrument_name != '' 
+          AND instrument_name IS NOT NULL AND instrument_name != ''
           AND instrument_name != '(EMPTY)' AND strike > 100
         ORDER BY notional_usd DESC LIMIT ?
     """, (currency, since, limit))
@@ -1768,36 +1754,36 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
                 "currency": currency, "kind": "option", "count": 500
             }, timeout=10).json()
             trades = payload.get("result", {}).get("trades", [])
-            
+
             for t in trades:
                 inst = t.get("instrument_name", "")
                 if not inst or inst in seen:
                     continue
-                
+
                 meta = None
                 try:
                     meta = _parse_inst_name(inst)
-                except Exception:
-                    continue
+                except Exception as e:
+                    print(f"[ERROR] main.py: {e}", file=sys.stderr)
                 if not meta:
                     continue
-                    
+
                 direction = t.get("direction", "")
                 trade_amount = float(t.get("amount", 0))
                 index_price = float(t.get("index_price", 0) or 0)
                 premium_usd = float(t.get("price", 0)) * trade_amount * (index_price or spot)
-                
+
                 if premium_usd < MIN_NOTIONAL:
                     continue
-                
+
                 # Use estimated delta (skip slow order book API call)
                 trade_iv = float(t.get("iv") or 50) / 100.0
                 delta_val = abs(_estimate_delta(meta["strike"], spot,
                     trade_iv, meta["dte"], meta["option_type"]))
-                
+
                 fl = _classify_flow_heuristic(
                     direction, meta["option_type"], delta_val, meta["strike"], spot)
-                
+
                 seen.add(inst)
                 results.append({
                     "instrument_name": inst, "direction": direction,
@@ -1817,36 +1803,12 @@ def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
     for t in results:
         t["severity"] = _severity_from_notional(t.get("notional_usd", 0) or 0)
         t["risk_level"] = _risk_emoji(abs(t.get("delta", 0) or 0))
-    
+
     results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
     return results[:limit]
 
 
-def _parse_inst_name(inst):
-    try:
-        mon = _get_deribit_monitor()
-        meta = mon._parse_instrument_name(inst)
-        ot = meta.option_type.upper()
-        ot = 'C' if ot.startswith('C') else 'P' if ot.startswith('P') else ot
-        return {"currency": meta.currency, "expiry": inst.split("-")[1],
-                "strike": float(meta.strike), "option_type": ot, "dte": meta.dte}
-    except Exception:
-        pass
-    import re
-    from datetime import datetime
-    m = re.match(r'([A-Z]+)-(\d+[A-Z]{3}\d+)-(\d+)-([PC])', inst)
-    if not m:
-        return None
-    currency, expiry_str, strike_str, opt_type = m.groups()
-    try:
-        exp_date = datetime.strptime(expiry_str, '%d%b%y')
-        dte = max(1, (exp_date - datetime.utcnow()).days)
-    except Exception:
-        dte = 30
-    return {"currency": currency, "expiry": expiry_str, "strike": float(strike_str),
-            "option_type": opt_type, "dte": dte}
-
-
+# _parse_inst_name 已移至 services/instrument.py
 # DEPRECATED: Use mark['delta'] from API instead. Kept for Deribit branch fallback only.
 def _estimate_delta(strike, spot, iv, dte, option_type='P'):
     """估算期权Delta (Deribit book_summaries不返回delta字段)"""
@@ -1861,6 +1823,7 @@ def _estimate_delta(strike, spot, iv, dte, option_type='P'):
         from scipy.stats import norm
         nd1 = norm.cdf(d1)
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         nd1 = max(0.0, min(1.0, 0.5 + 0.5 * math.tanh(d1 * 0.8)))
     if option_type.upper() in ('P', 'PUT'):
         return round(nd1 - 1, 4)
@@ -1969,15 +1932,15 @@ def _get_spot_from_scan(currency: str = "BTC"):
         row = cur.fetchone()
         if row and float(row[0]) > 0:
             return float(row[0])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
     try:
         import urllib.request
         url = f"https://api.binance.com/api/v3/ticker/price?symbol={currency}USDT"
         resp = urllib.request.urlopen(url, timeout=5)
         return float(json.loads(resp.read())["price"])
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
     return 0
 
 
@@ -2020,6 +1983,7 @@ async def _calc_max_pain_internal(currency: str):
     try:
         spot = get_spot_price(currency)
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         db_spot = _get_spot_from_scan()
         spot = db_spot if db_spot > 1000 else (strikes[len(strikes)//2] if strikes else 0)
 
@@ -2120,6 +2084,7 @@ async def sandbox_simulate(params: SandboxParams):
         base_strike = float(parts[-2]) if len(parts) >= 3 else spot * 0.95
         opt_type = parts[-1] if len(parts) >= 3 else 'P'
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         base_strike = spot * 0.95
         opt_type = 'P'
 
@@ -2219,7 +2184,7 @@ async def get_trades_history(
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
 
     query = """
-        SELECT * FROM large_trades_history 
+        SELECT * FROM large_trades_history
         WHERE timestamp > ?
     """
     params = [since_str]
@@ -2259,7 +2224,7 @@ async def get_strike_distribution(
     cursor = conn.cursor()
     since = datetime.utcnow() - timedelta(days=days)
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
-    
+
     spot = get_spot_price(currency)
 
     cursor.execute("""
@@ -2267,7 +2232,7 @@ async def get_strike_distribution(
                SUM(notional_usd) as total_notional,
                SUM(CASE WHEN direction='buy' THEN 1 ELSE 0 END) as buys,
                SUM(CASE WHEN direction='sell' THEN 1 ELSE 0 END) as sells
-        FROM large_trades_history 
+        FROM large_trades_history
         WHERE currency = ? AND timestamp > ?
               AND strike IS NOT NULL AND strike > ? AND strike < ?
         GROUP BY strike, direction
@@ -2325,7 +2290,7 @@ async def get_wind_analysis(
 
     cursor.execute("""
         SELECT direction, option_type, delta, strike, notional_usd
-        FROM large_trades_history 
+        FROM large_trades_history
         WHERE currency = ? AND timestamp > ? AND strike IS NOT NULL
               AND strike > ? AND strike < ?
         ORDER BY notional_usd DESC
@@ -2334,11 +2299,11 @@ async def get_wind_analysis(
     flow_rows = cursor.fetchall()
 
     cursor.execute("""
-        SELECT COUNT(*), 
+        SELECT COUNT(*),
                SUM(CASE WHEN direction='buy' THEN 1 ELSE 0 END),
                SUM(CASE WHEN direction='sell' THEN 1 ELSE 0 END),
                SUM(notional_usd)
-        FROM large_trades_history 
+        FROM large_trades_history
         WHERE currency = ? AND timestamp > ?
     """, (currency, since_str))
     totals = cursor.fetchone()
@@ -2502,9 +2467,70 @@ async def get_wind_analysis(
     }
 
 
-# STRATEGY_PRESETS 已移至 options_aggregator.py，L8-19 定义为唯一真值
-# main.py 通过 from options_aggregator import STRATEGY_PRESETS 使用
-# 此处保留以备 options_aggregator 导入失败时的 fallback
+
+
+@app.get("/api/grid/levels")
+async def get_grid_levels(
+    current_price: float = Query(..., description="当前价格"),
+    strategy: str = Query(default="moderate", description="策略类型: conservative, moderate, aggressive"),
+    num_levels: int = Query(default=10, description="网格层级数量")
+):
+    """获取网格价格水平"""
+    levels = grid_engine.calculate_grid_levels(current_price, strategy, num_levels)
+    return {"levels": levels, "strategy": strategy}
+
+
+@app.post("/api/grid/recommendation")
+async def get_grid_recommendation(
+    contract: Dict = Body(..., description="合约数据"),
+    spot_price: float = Body(..., description="现货价格"),
+    volatility: float = Body(..., description="波动率")
+):
+    """生成网格策略推荐"""
+    recommendation = grid_engine.generate_recommendation(contract, spot_price, volatility)
+    return recommendation
+
+
+@app.get("/api/grid/volatility-signal")
+async def get_volatility_signal(
+    volatility_history: List[float] = Query(..., description="波动率历史数据")
+):
+    """获取波动率方向信号"""
+    signal = grid_engine.get_volatility_signal(volatility_history)
+    return {"signal": signal}
+
+
+@app.post("/api/grid/scenario")
+async def simulate_scenario(
+    spot_price: float = Body(..., description="当前价格"),
+    volatility: float = Body(..., description="波动率"),
+    days: int = Body(default=30, description="模拟天数")
+):
+    """模拟情景"""
+    scenario = grid_engine.simulate_scenario(spot_price, volatility, days)
+    return scenario
+
+
+@app.post("/api/grid/heatmap")
+async def get_heatmap_data(
+    contracts: List[Dict] = Body(..., description="合约数据列表"),
+    spot_price: float = Body(..., description="现货价格")
+):
+    """计算热力图数据"""
+    heatmap = grid_engine.calculate_heatmap_data(contracts, spot_price)
+    return {"heatmap": heatmap}
+STRATEGY_PRESETS = {
+    "PUT": {
+        "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0, "label": "纯收租(高胜率)"},
+        "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0, "label": "标准平衡"},
+        "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0, "label": "折价接货"}
+    },
+    "CALL": {
+        "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0, "label": "保留上涨空间"},
+        "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0, "label": "标准备兑"},
+        "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0, "label": "强横盘预期"}
+    }
+}
 
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
@@ -2584,19 +2610,20 @@ async def get_bottom_fishing_advice(currency: str = Query(default="BTC")):
     """v6.0: 抄底建议 API - 结合风险框架、最大痛点和 GEX"""
     spot = get_spot_price(currency)
     status = RiskFramework.get_status(spot)
-    
+
     # 获取最大痛点和 GEX
     try:
         pain_data = await _calc_max_pain_internal(currency)
         nearest_mp = pain_data.get("nearest_mp")
         mm_signal = pain_data.get("mm_overview", "")
     except Exception:
+        print(f"[ERROR] main.py: {e}", file=sys.stderr)
         nearest_mp = None
         mm_signal = ""
-        
+
     advice = []
     actions = []
-    
+
     if status == "NORMAL":
         advice.append(f"当前价格 ${spot:,.0f} 处于常规区间（高于 $55k）。")
         advice.append("建议：以获取 200% APR 为目标，保持低杠杆。")
