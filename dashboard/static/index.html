@@ -113,14 +113,6 @@
             </div>
             <div class="card-glass metric-card rounded-xl p-4">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">最佳 APR</span>
-                    <i class="fas fa-percentage text-green-500 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold text-green-400" id="bestApr">--</div>
-                <div class="text-xs text-gray-400 mt-1">本周期最高</div>
-            </div>
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
                     <span class="text-gray-400 text-sm">大宗交易 (1h)</span>
                     <i class="fas fa-fish text-purple-500 text-lg"></i>
                 </div>
@@ -1050,19 +1042,8 @@
                 </div>
             </div>
 
-            <!-- 图表区域：APR+DVOL趋势独占一行 - 修复重复ID问题 -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 pt-6 border-t border-gray-700/30">
-                <div class="card-glass rounded-xl p-5 border-l-4 border-green-500">
-                    <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-green-400"><i class="fas fa-chart-line"></i> 安全APR趋势 <span class="text-[10px] text-gray-500 font-normal ml-1">Δ≤0.25 | DTE 14-35 | PUT</span></h3>
-                    <div class="relative h-64">
-                        <canvas id="aprChart"></canvas>
-                    </div>
-                    <div class="flex justify-center gap-2 mt-3">
-                        <button onclick="setChartPeriod('apr', 24)" class="apr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
-                        <button onclick="setChartPeriod('apr', 168)" class="apr-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
-                        <button onclick="setChartPeriod('apr', 720)" class="apr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
-                    </div>
-                </div>
+            <!-- 图表区域：DVOL趋势独占一行 -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-6 border-t border-gray-700/30">
                 <div class="card-glass rounded-xl p-5 border-l-4 border-blue-500">
                     <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-blue-400"><i class="fas fa-chart-area"></i> DVOL 趋势</h3>
                     <div class="relative h-64">

@@ -27,9 +27,8 @@ let _currentPreset = 'standard';
 
 let currentData = null;
 let autoRefreshInterval = null;
-let aprChart = null;
 let dvolChart = null;
-let chartPeriods = { apr: 168, dvol: 168, pcr: 168 };
+let chartPeriods = { dvol: 168, pcr: 168 };
 let currentSpotPrice = null;
 let scanStatusInterval = null;
 
@@ -157,87 +156,6 @@ async function setAutoRefresh(minutes) {
 }
 
 function initCharts() {
-    // APR图表
-    const aprEl = document.getElementById('aprChart');
-    if (!aprEl) return;
-    const aprCtx = aprEl.getContext('2d');
-    aprChart = new Chart(aprCtx, {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [{
-                label: '最佳安全APR (Δ≤0.25)',
-                data: [],
-                borderColor: '#22c55e',
-                backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                tension: 0.4,
-                fill: true,
-                borderWidth: 2,
-                pointRadius: 2,
-                pointHoverRadius: 4
-            }, {
-                label: 'P75安全APR',
-                data: [],
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                tension: 0.4,
-                fill: true,
-                borderWidth: 2,
-                pointRadius: 2,
-                pointHoverRadius: 4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    labels: {
-                        color: '#9ca3af',
-                        font: { size: 11 },
-                        usePointStyle: true,
-                        boxWidth: 6,
-                        padding: 15
-                    }
-                },
-                tooltip: {
-                    mode: 'index',
-                    intersect: false,
-                    backgroundColor: 'rgba(30, 58, 95, 0.95)',
-                    titleColor: '#fff',
-                    bodyColor: '#fff',
-                    borderColor: 'rgba(255, 255, 255, 0.1)',
-                    borderWidth: 1,
-                    callbacks: {
-                        label: function(ctx) {
-                            return ctx.dataset.label + ': ' + (ctx.parsed.y != null ? ctx.parsed.y.toFixed(1) + '%' : 'N/A');
-                        }
-                    },
-                    padding: 10
-                }
-            },
-            scales: {
-                x: {
-                    ticks: {
-                        color: '#6b7280',
-                        font: { size: 10 },
-                        maxTicksLimit: 8
-                    },
-                    grid: { color: 'rgba(75, 85, 99, 0.2)' }
-                },
-                y: {
-                    ticks: {
-                        color: '#6b7280',
-                        font: { size: 10 },
-                        callback: function(value) { return value + '%'; }
-                    },
-                    grid: { color: 'rgba(75, 85, 99, 0.2)' }
-                }
-            },
-            interaction: { intersect: false, mode: 'index' }
-        }
-    });
-
     // DVOL图表
     const dvolEl = document.getElementById('dvolChart');
     if (!dvolEl) return;
@@ -311,8 +229,7 @@ function setChartPeriod(chartType, hours) {
             btn.classList.remove('bg-orange-500', 'text-white');
         }
     });
-    if (chartType === 'apr') loadAprChartData();
-    else if (chartType === 'dvol') loadDvolChartData();
+    if (chartType === 'dvol') loadDvolChartData();
     else if (chartType === 'pcr') loadPcrChart(document.getElementById('currencySelect').value, hours);
 }
 
@@ -363,7 +280,6 @@ async function triggerScan() {
             loadTermStructure().catch(() => {});
             loadMaxPain().catch(() => {});
             loadPcrChart(currency, chartPeriods.pcr || 168).catch(() => {});
-            loadAprChartData().catch(() => {});
             loadDvolChartData().catch(() => {});
             loadRiskDashboard(currency).catch(() => {});
             await loadStats();
@@ -715,7 +631,6 @@ async function loadLatestData(showSuccess = true, skipCharts = false) {
 
         // 仅在非初始化加载时才更新图表（避免重复请求）
         if (!skipCharts) {
-            loadAprChartData();
             loadDvolChartData();
             loadPcrChart(currency, chartPeriods.pcr || 168);
             loadRiskDashboard(currency);
@@ -1040,7 +955,6 @@ function loadPageDataAsync() {
     loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
     loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
     loadPcrChart(currency, chartPeriods.pcr || 168).catch(e => console.error('[loadPageDataAsync] loadPcrChart failed:', e));
-    loadAprChartData().catch(e => console.error('[loadPageDataAsync] loadAprChartData failed:', e));
     refreshAndLoadDvol(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadDvol failed:', e));
     refreshAndLoadTrades(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadTrades failed:', e));
     loadRiskDashboard(currency).catch(e => console.error('[loadPageDataAsync] loadRiskDashboard failed:', e));
@@ -1779,15 +1693,6 @@ function updateMacroIndicators(data) {
     }
 
     document.getElementById('largeTradesCount').textContent = data.large_trades_count || 0;
-
-    const contracts = data.contracts || [];
-    const bestAprEl = document.getElementById('bestApr');
-    if (contracts.length > 0) {
-        const bestApr = Math.max(...contracts.map(c => c.apr));
-        bestAprEl.textContent = bestApr.toFixed(1) + '%';
-    } else {
-        bestAprEl.textContent = '--';
-    }
 }
 
 let _expandedRow = null;
@@ -2189,39 +2094,6 @@ function updateLastUpdateTime(timestamp) {
     if (isNaN(date.getTime())) { document.getElementById('lastUpdate').textContent = '更新于 --:--:--'; return; }
     const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
-}
-
-async function loadAprChartData() {
-    try {
-        const currency = document.getElementById('currencySelect').value;
-        const hours = chartPeriods.apr;
-        const response = await safeFetch(`${API_BASE}/api/charts/apr?currency=${currency}&hours=${hours}`);
-        const data = await response.json();
-
-        if (!data || data.length === 0) {
-            aprChart.data.labels = [];
-            aprChart.data.datasets[0].data = [];
-            aprChart.data.datasets[1].data = [];
-            aprChart.update();
-            return;
-        }
-
-        // Filter outliers: APR should be between 1 and 500%
-        const filtered = data.filter(d => {
-            const apr = d.best_safe_apr || d.avg_apr || 0;
-            return apr >= 1 && apr < 500;
-        });
-
-        aprChart.data.labels = filtered.map(d => {
-            const date = new Date(d.time || d.timestamp);
-            return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
-        });
-        aprChart.data.datasets[0].data = filtered.map(d => d.best_safe_apr || d.avg_apr || null);
-        aprChart.data.datasets[1].data = filtered.map(d => d.p75_safe_apr || (d.avg_apr ? d.avg_apr * 0.85 : null));
-        aprChart.update();
-    } catch (error) {
-        console.error('加载APR图表失败:', error);
-    }
 }
 
 async function loadDvolChartData() {

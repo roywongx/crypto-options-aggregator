@@ -79,50 +79,6 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
     return result
 
 
-@router.get("/apr")
-async def get_apr_chart(currency: str = "BTC", hours: int = 168):
-    from db.connection import execute_read
-
-    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
-    rows = execute_read("""
-        SELECT timestamp, contracts_data FROM scan_records
-        WHERE currency = ? AND timestamp >= ?
-        ORDER BY timestamp ASC
-    """, (currency, since))
-
-    result = []
-    for row in rows:
-        ts = row[0]
-        contracts_json = row[1]
-        try:
-            contracts = json.loads(contracts_json) if contracts_json else []
-            if not contracts:
-                continue
-
-            put_contracts = [c for c in contracts if c.get('option_type') in ['P', 'PUT']]
-            if not put_contracts:
-                continue
-
-            aprs = [c.get('apr', 0) for c in put_contracts if c.get('apr', 0) > 0]
-            if not aprs:
-                continue
-
-            aprs_sorted = sorted(aprs)
-            best_apr = aprs_sorted[-1] if aprs_sorted else 0
-            p75_idx = int(len(aprs_sorted) * 0.75)
-            p75_apr = aprs_sorted[p75_idx] if p75_idx < len(aprs_sorted) else (best_apr * 0.85)
-
-            result.append({
-                "time": ts,
-                "best_safe_apr": best_apr,
-                "p75_safe_apr": p75_apr
-            })
-        except Exception:
-            pass
-
-    return result
-
-
 @router.get("/dvol")
 async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
     from db.connection import execute_read
