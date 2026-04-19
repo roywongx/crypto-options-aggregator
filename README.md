@@ -3,209 +3,172 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v2.6-深度Bug修复-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v3.0-重构版-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator</h1>
 
 <p align="center">
-  <b>双平台期权扫描器 + 链上数据引擎 + 智能策略系统</b><br>
-  实时聚合 Binance + Deribit 期权数据，融合 fuckbtc.com 链上指标<br>
-  为 <b>Sell Put / Covered Call / Wheel</b> 策略交易者打造的决策平台
+  <b>双平台期权监控面板 — Binance + Deribit 实时聚合</b><br>
+  专为 <b>Sell Put / Covered Call / Wheel</b> 策略交易者打造的一站式决策平台
 </p>
 
 ---
 
-## 🌟 核心功能
+## 快速概览
 
-### 🔗 链上数据引擎
-
-基于 BTC 筑底信号研究的 7 维指标汇合系统：
-
-| 指标 | 底部信号 | 用途 |
-|------|----------|------|
-| **MVRV Ratio** | < 1.0 | 估值参考 |
-| **MVRV Z-Score** | < -1 | 极端低估 |
-| **NUPL** | < 0 | 恐惧区判断 |
-| **Mayer Multiple** | < 1.0 | 中期底部 |
-| **200WMA** | 价格接近 | 长期趋势 |
-| **200DMA** | 价格低于 | 成本基准 |
-| **Balanced Price** | 价格低于 | 链上成本 |
-
-综合评分：-70 ~ +70 分，6 级信号判定（STRONG_BOTTOM → TOP）
-
-### 💰 真实 Margin-APR
-
-```
-传统 APR = 权利金 / 合约面值  ❌
-真实 APR = 权利金 / 实际保证金  ✅
-```
-
-### 🌊 DVOL 波动率引擎
-
-自动计算 Z-Score 和历史分位数，动态调整扫描参数。
-
-### 🛡️ 动态风险框架
-
-结合 Max Pain、Gamma Flip、Put Wall，输出实时操作指令。
-
-### 🎯 智能策略引擎
-
-三种模式共享统一筛选器和评分框架：
-- **Roll 模式**：滚仓优化，确保 Net Credit > 0
-- **New 模式**：新建开仓，综合 ROI/Delta/DTE/流动性评分
-- **Grid 模式**：多档位网格，Put/Call 双卖
+| 模块 | 功能 |
+|------|------|
+| **期权扫描** | 实时扫描 Binance + Deribit 期权链，按 Margin-APR 排序 |
+| **DVOL 引擎** | Z-Score + 7 日分位数，动态参数调整 |
+| **大宗异动** | 实时追踪大额成交，机构行为分析 |
+| **大单风向标** | 多空流向统计，情绪评分 |
+| **IV 期限结构** | 波动率曲面 + Backwardation 检测 |
+| **最大痛点** | 期权到期最大利润点预测 |
+| **风险评估** | 流动性/Gamma/情绪多维风险面板 |
+| **链上指标** | MVRV / NUPL / Mayer 等 7 维底部信号 |
+| **策略引擎** | Roll / New / Grid 三种策略模式 |
 
 ---
 
-## 📦 快速开始
+## 快速开始
 
-### 前置要求
-
-- Python 3.13+
-- 网络可访问 Binance 和 Deribit API
-
-### 安装
+### 1. 安装
 
 ```bash
 git clone https://github.com/roywongx/crypto-options-aggregator.git
 cd crypto-options-aggregator
 
 # 安装依赖
-cd deribit-options-monitor && pip install -r requirements.txt
-cd ../dashboard && pip install -r requirements.txt
+pip install -r requirements.txt
+```
 
-# 启动服务
+### 2. 启动
+
+```bash
+cd dashboard
 python main.py
 ```
 
-### 访问
+### 3. 访问
 
-打开浏览器访问：http://localhost:8000
-
-### 环境变量
-
-```bash
-# 可选：设置 API Key 保护管理面板
-export DASHBOARD_API_KEY=your_secret_key
-```
+浏览器打开 → **http://localhost:8000**
 
 ---
 
-## 🏗️ 项目结构
+## 界面功能
 
-```
-crypto-options-aggregator/
-├── dashboard/                  # Web 控制面板
-│   ├── main.py                 # FastAPI 主服务
-│   ├── db/                     # SQLite 数据库管理
-│   ├── static/                 # 前端静态文件
-│   │   ├── index.html          # 主页面
-│   │   ├── app.js              # 前端逻辑
-│   │   └── style.css           # 样式
-│   ├── services/               # 业务逻辑
-│   │   ├── spot_price.py       # 现货价格服务
-│   │   ├── dvol_analyzer.py    # DVOL 分析
-│   │   └── ...
-│   ├── routers/                # API 路由
-│   ├── models/                 # 数据模型
-│   ├── config/                 # 配置模块
-│   └── utils/                  # 工具函数
-├── deribit-options-monitor/    # Deribit 期权监控
-│   └── deribit_options_monitor.py
-├── binance_options.py          # Binance 期权数据
-├── options_aggregator.py       # 数据聚合器
-└── requirements.txt            # 依赖列表
-```
+### 顶部指标卡片
 
----
+- **BTC 实时价格** — Binance/Scan 双源
+- **DVOL 值** — Deribit 波动率指数，含 Z-Score 信号
+- **大宗交易** — 最近一小时内大额成交笔数
+- **风险等级** — 基于流动性 + Gamma + 情绪综合评估
+- **距支撑位** — 当前价到常规支撑位的距离
 
-## 📊 数据源
+### 扫描控制台
 
-| 平台 | 数据类型 | API |
-|------|----------|-----|
-| **Binance** | 期权 Mark/Ticker/OI | eapi.binance.com |
-| **Deribit** | 期权摘要/大单/DVOL | www.deribit.com |
-| **fuckbtc.com** | 链上指标 (MVRV/NUPL) | api.fuckbtc.com |
+- **手动扫描** — 点击触发全量期权链分析
+- **自动刷新** — 可配置定时刷新（1/3/5 分钟）
+- **扫描状态** — 实时显示扫描进度和结果
 
----
+### 机会表格
 
-## ⚡ 性能优化
+- 按 **Margin-APR** 降序排列
+- 分页显示（30 条/页），支持"加载更多"
+- 显示合约详情、Delta、DTE、买卖价差
 
-- **全异步架构**：从 requests + ThreadPool 迁移到 httpx.AsyncClient
-- **聚合 API**：/api/dashboard-init 一次性返回 Wind/TermStructure/MaxPain，消除瀑布加载
-- O(1) 字典查找替代线性搜索
-- ThreadPoolExecutor 并行 OI 请求
-- ExchangeInfo 1 小时缓存
-- GZIP 响应压缩
-- 前端分页渲染（30条/页）
-- SQLite 读写分离 + 写入序列化（避免并发冲突）
+### DVOL 趋势图
+
+- 24H / 7天 / 30天 三种时间维度
+- 实时监控波动率变化趋势
+
+### PCR 持仓量图
+
+- Put/Call 持仓量比率
+- 市场情绪风向标
+
+### 底部面板
+
+- **大单风向标** — 多空分布 + 买卖倾向
+- **IV 期限结构** — 不同到期日的隐含波动率
+- **最大痛点** — 期权卖方利润最大化价格
+- **风险评估** — 5 维度风险评分
 
 ---
 
-## 📝 更新日志
+## 数据源
+
+| 平台 | 数据类型 |
+|------|----------|
+| **Binance eAPI** | 期权行情、持仓量、成交记录 |
+| **Deribit** | 期权摘要、大宗交易、DVOL 指数 |
+| **Binance Spot API** | BTC/ETH 实时现货价格 |
+
+---
+
+## 架构亮点
+
+- **全异步架构** — httpx.AsyncClient 消除 I/O 阻塞
+- **聚合 API** — `/api/dashboard-init` 一次请求获取多模块数据
+- **轻量刷新** — `/api/dvol/refresh` + `/api/trades/refresh` 独立实时刷新
+- **SQLite 读写分离** — `execute_read`/`execute_write` 避免并发冲突
+- **线程安全** — `threading.local()` 只读连接 + 写入锁序列化
+- **前端并行加载** — 模块独立请求，无瀑布效应
+- **智能分页** — Intersection Observer 懒加载 + 加载更多
+
+---
+
+## 更新日志
+
+### v3.0 — 重构版（当前）
+
+- 修复 binance_options 模块导入失败
+- 修复数据库连接关闭错误（全面使用 `execute_read` 替代手动连接）
+- 修复 charts.py / trades_api.py / spot_price.py / trades.py / grid.py / constants.py 数据库连接问题
+- 新增 `/api/dvol/refresh` 轻量级 DVOL 实时刷新端点
+- 新增 `/api/trades/refresh` 轻量级大宗异动实时刷新端点
+- 前端集成 DVOL / 大宗异动自动刷新
+- 删除最佳 APR 功能模块（无指导意义）
 
 ### v2.6
 
-- **深度 Bug 修复**：全面检查修复 23 个问题
-  - 修复 grid-strategy.js null 引用错误（Cannot set properties of null）
-  - 修复数据库连接关闭导致 500 错误（status.py 全部改用 execute_read）
-  - 修复 health_check 时间戳解析错误（float 改为 strptime）
-  - 修复 export CSV 端点不可达（新增 /api/export/csv 到 main.py）
-  - 添加 null 保护到 initCharts 和 dvolValue
-  - 删除 loadDerivData 死代码（/api/derivatives 返回 404）
-  - 修复 AbortError 请求冲突（triggerScan 与 loadPageDataAsync 并发）
-  - 增加 API 超时时间从 15s 到 30s
-- **前端优化**
-  - loadPageDataAsync 并行加载所有模块
-  - 移除旧的 setTimeout 瀑布加载逻辑
-  - 创建 /api/dashboard-init 聚合 API
-  - 创建 updateWindUI/updateTermStructureUI/updateMaxPainUI 函数
+- 修复 grid-strategy.js null 引用错误
+- 修复数据库连接关闭导致 500 错误
+- 修复 health_check 时间戳解析错误
+- 修复 export CSV 端点不可达
+- 添加 null 保护到 initCharts 和 dvolValue
+- 修复 AbortError 请求冲突
+- 增加 API 超时时间至 30s
+- loadPageDataAsync 并行加载所有模块
 
 ### v2.5
 
-- **聚合 API**：创建 /api/dashboard-init 端点，消除瀑布加载
-  - 后端使用 asyncio.gather 并行获取 Wind/TermStructure/MaxPain
-  - 前端使用聚合 API 替代 setTimeout 瀑布加载
-  - 页面初始化从 3-4 秒优化为单次并行请求
-- **前端优化**
-  - 移除旧的 setTimeout 瀑布加载逻辑（2s/2.5s/3s 延迟）
-  - 新增 loadDashboardInit() 调用聚合 API
-  - 新增 updateWindUI/updateTermStructureUI/updateMaxPainUI 函数
-
-### v2.4
-
-- 优化数据库 JSON 解析性能
-- 使用 top_contracts_data 避免解析全量 JSON
+- 创建 `/api/dashboard-init` 聚合 API
+- 消除前端瀑布加载逻辑
+- 后端 asyncio.gather 并行获取 Wind/TermStructure/MaxPain
 
 ### v2.3
 
-- 消除 main.py 中冗余的 Binance 抓取逻辑
-- 直接调用 binance_options.fetch_binance_options()
-- 删除 80+ 行重复代码，减少 O(N^2) 查找
+- 消除冗余 Binance 抓取逻辑
+- 直接调用 `binance_options.fetch_binance_options()`
 
 ### v2.2
 
-- SQLite 并发优化：读写分离 + 写入锁序列化
-- 消除 threading.local() 跨线程冲突风险
-- execute_read/write 封装简化数据库操作
+- SQLite 读写分离 + 写入锁序列化
 
 ### v2.1
 
 - 后端扫描性能优化（O(N)→O(1) + 并行 OI + 缓存）
-- Delta 估算精度提升（误差 < 7.5e-8）
 - 前端渐进式加载 + 表格分页 + GZIP 压缩
-- 代码质量修复（统一日志 + 数据库连接优化）
 
 ### v2.0
 
-- 统一策略推荐引擎（Roll/New/Grid）
-- 链上数据引擎 v2.0（7 维指标汇合）
-- 共享计算模块
-- 前端面板整合
+- 统一策略推荐引擎
+- 链上数据引擎 v2.0
 
 ---
 
-## 📄 License
+## License
 
-MIT License
+[MIT License](LICENSE)
