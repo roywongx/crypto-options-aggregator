@@ -2223,6 +2223,92 @@ function addDemoAlerts() {
     showAlert('系统就绪，点击"立即扫描"开始监控', 'info');
 }
 
+// ============================================================
+// AI Copilot Chat Widget
+// ============================================================
+let copilotOpen = false;
+
+function toggleCopilotChat() {
+    const chat = document.getElementById('copilotChat');
+    copilotOpen = !copilotOpen;
+    if (chat) {
+        chat.classList.toggle('hidden', !copilotOpen);
+    }
+    if (copilotOpen) {
+        const input = document.getElementById('copilotInput');
+        if (input) input.focus();
+    }
+}
+
+function addCopilotMessage(content, isUser = false) {
+    const container = document.getElementById('copilotMessages');
+    if (!container) return;
+    
+    const div = document.createElement('div');
+    div.className = 'flex items-start gap-2 ' + (isUser ? 'flex-row-reverse' : '');
+    
+    const icon = isUser ? 
+        '<i class="fas fa-user text-green-400 mt-1 text-xs"></i>' :
+        '<i class="fas fa-robot text-blue-400 mt-1 text-xs"></i>';
+    
+    const bubbleClass = isUser ?
+        'bg-blue-600/30 rounded-lg p-2 text-xs text-gray-200 max-w-[85%]' :
+        'bg-gray-800/50 rounded-lg p-2 text-xs text-gray-300 max-w-[85%]';
+    
+    div.innerHTML = `${icon}<div class="${bubbleClass}">${content}</div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+async function sendCopilotMessage(event) {
+    event.preventDefault();
+    const input = document.getElementById('copilotInput');
+    if (!input) return;
+    
+    const message = input.value.trim();
+    if (!message) return;
+    
+    input.value = '';
+    addCopilotMessage(message, true);
+    
+    // 显示加载中
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'flex items-start gap-2';
+    loadingDiv.innerHTML = '<i class="fas fa-robot text-blue-400 mt-1 text-xs"></i><div class="bg-gray-800/50 rounded-lg p-2 text-xs text-gray-500 max-w-[85%]">思考中...</div>';
+    document.getElementById('copilotMessages').appendChild(loadingDiv);
+    
+    try {
+        const currency = document.getElementById('currencySelect')?.value || 'BTC';
+        const response = await fetch(`${API_BASE}/api/copilot/chat?message=${encodeURIComponent(message)}&currency=${currency}`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        // 移除加载中
+        loadingDiv.remove();
+        
+        if (data.response) {
+            addCopilotMessage(data.response.replace(/\n/g, '<br>'));
+        } else {
+            addCopilotMessage('抱歉，AI 服务暂时不可用。请确保已配置 API Key。');
+        }
+    } catch (e) {
+        loadingDiv.remove();
+        addCopilotMessage('请求失败，请检查网络连接。');
+    }
+}
+
+// 回车键发送
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && copilotOpen) {
+        const input = document.getElementById('copilotInput');
+        if (document.activeElement === input) {
+            e.preventDefault();
+            sendCopilotMessage(new Event('submit'));
+        }
+    }
+});
+
 setTimeout(addDemoAlerts, 1000);
 
 // 点击模态框外部关闭
