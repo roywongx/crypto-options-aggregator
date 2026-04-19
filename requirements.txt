@@ -13,5 +13,8 @@ scipy>=1.11.0,<2.0.0
 # Macro data sources
 yfinance>=0.2.0,<1.0.0
 
+# AI routing (optional)
+litellm>=1.0.0,<2.0.0
+
 # QuantLib (optional, C++ backend required)
 # QuantLib>=1.32

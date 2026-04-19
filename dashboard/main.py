@@ -868,6 +868,28 @@ async def get_macro():
     return get_all_macro_data()
 
 
+@app.post("/api/ai/analyze-trades")
+async def ai_analyze_trades(currency: str = "BTC", days: int = 3):
+    """AI 分析大宗交易"""
+    from services.ai_router import analyze_large_trades
+    from services.trades import fetch_large_trades
+    
+    trades = fetch_large_trades(currency, days=days, limit=30)
+    if not trades:
+        return {"error": "无大宗交易数据"}
+    
+    summary = f"最近{days}天共 {len(trades)} 笔大宗交易:\n"
+    buy_puts = sum(1 for t in trades if t.get('direction') == 'buy' and t.get('option_type') == 'PUT')
+    sell_calls = sum(1 for t in trades if t.get('direction') == 'sell' and t.get('option_type') == 'CALL')
+    summary += f"- 买入 Put: {buy_puts} 笔\n- 卖出 Call: {sell_calls} 笔\n"
+    
+    total_notional = sum(float(t.get('notional_usd', 0)) for t in trades)
+    summary += f"- 总名义价值: ${total_notional:,.0f}\n"
+    
+    result = analyze_large_trades(summary, currency)
+    return {"analysis": result, "trade_count": len(trades), "currency": currency}
+
+
 async def quick_scan(params: QuickScanParams = None):
     """异步快速扫描：使用 httpx.AsyncClient 实现全异步网络请求"""
     from datetime import datetime
