@@ -185,7 +185,9 @@ class MCPToolRegistry:
         try:
             from services.unified_risk_assessor import UnifiedRiskAssessor
             assessor = UnifiedRiskAssessor()
-            assessment = assessor.assess_currency(currency)
+            from services.spot_price import get_spot_price
+            spot = get_spot_price(currency)
+            assessment = assessor.assess_comprehensive_risk(spot, currency)
             result["assessment"] = assessment
         except Exception as e:
             result["error"] = str(e)

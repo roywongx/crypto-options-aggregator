@@ -148,7 +148,7 @@ def calculate_grid_levels(
     candidates.sort(key=lambda x: calc_grid_score(x.apr, x.distance_pct, x.oi, x.volume, x.dte), reverse=True)
 
     # 去重：同一 strike 只保留分数最高的一个
-    selected_by_strike = {}
+    selected_by_strike: Dict[float, GridLevel] = {}
     for c in candidates:
         if c.strike not in selected_by_strike:
             selected_by_strike[c.strike] = c

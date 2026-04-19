@@ -23,6 +23,8 @@ def _get_deribit_monitor():
     """获取 Deribit monitor 单例"""
     global _deribit_monitor_instance
     if _deribit_monitor_instance is None:
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'deribit-options-monitor'))
         from deribit_options_monitor import DeribitOptionsMonitor
         _deribit_monitor_instance = DeribitOptionsMonitor()
     return _deribit_monitor_instance

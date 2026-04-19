@@ -234,7 +234,7 @@ class BinanceExchange(BaseExchange):
         import sys
         import os
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'crypto-options-aggregator-link'))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
         from binance_options import fetch_binance_options
         
         results = await asyncio.to_thread(
@@ -248,8 +248,7 @@ class BinanceExchange(BaseExchange):
             min_vol=min_volume,
             max_spread=max_spread_pct,
             margin_ratio=0.2,
-            option_type=option_type.value,
-            return_results=True
+            option_type=option_type.value
         )
 
         if isinstance(results, dict) and "error" in results:

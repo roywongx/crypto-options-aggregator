@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'crypto-options-aggregator-link'))
+
 
 
 
@@ -862,7 +862,7 @@ async def refresh_large_trades(currency: str = Query(default="BTC")):
 
 
 @app.get("/api/macro-data")
-async def get_macro():
+async def get_macro_data():
     """获取宏观数据: 恐惧贪婪指数、资金费率、宏观数据、无风险利率"""
     from services.macro_data import get_all_macro_data
     return get_all_macro_data()
@@ -1111,8 +1111,7 @@ async def quick_scan(params: QuickScanParams = None):
                 min_vol=config.MIN_VOLUME_FILTER,
                 max_spread=config.MAX_SPREAD_PCT,
                 margin_ratio=_p.margin_ratio,
-                option_type=_p.option_type,
-                return_results=True
+                option_type=_p.option_type
             )
             if not isinstance(binance_contracts, list):
                 binance_contracts = []
@@ -1155,8 +1154,7 @@ async def quick_scan(params: QuickScanParams = None):
             min_vol=config.MIN_VOLUME_FILTER,
             max_spread=config.MAX_SPREAD_PCT,
             margin_ratio=_p.margin_ratio,
-            option_type=_p.option_type,
-            return_results=True
+            option_type=_p.option_type
         )
         if not isinstance(binance_contracts, list):
             binance_contracts = []
