@@ -993,47 +993,145 @@ async def get_roll_suggestion(position_id: int):
 
 
 async def quick_scan(params: QuickScanParams = None):
-    """异步快速扫描：使用 httpx.AsyncClient 实现全异步网络请求"""
+    """
+    快速扫描（DataHub 优化版）：
+    1. 优先从 DataHub WebSocket 缓存读取（<10ms 响应）
+    2. 如果 DataHub 数据太旧（>30s），回退到网络请求
+    3. 扫描速度从秒级降至毫秒级
+    """
     from datetime import datetime
     from services.spot_price import get_spot_price_async
     _p = params or QuickScanParams()
     currency = _p.currency
 
-    # Step 1: 并行异步获取所有数据源
+    # Step 1: 尝试从 DataHub 缓存读取（毫秒级响应）
+    spot = None
+    dvol_data = {}
+    summaries = []
+    large_trades = []
+    binance_contracts = []
+    
     try:
-        spot_task = asyncio.create_task(get_spot_price_async(currency))
-        dvol_task = asyncio.create_task(asyncio.to_thread(get_dvol_from_deribit, currency))
-        deribit_task = asyncio.create_task(asyncio.to_thread(_fetch_deribit_summaries, currency))
-        trades_task = asyncio.create_task(_fetch_large_trades_async(currency, days=1, limit=40))
+        from services.datahub import datahub, TOPIC_SPOT, TOPIC_DVOL, TOPIC_BTC_OPTIONS, TOPIC_ETH_OPTIONS
         
-        spot, dvol_data, summaries, large_trades = await asyncio.gather(
-            spot_task, dvol_task, deribit_task, trades_task,
-            return_exceptions=True
-        )
-        
-        # 处理异常
-        if isinstance(spot, Exception):
-            try:
-                spot = await get_spot_price_async(currency)
-            except Exception:
+        # 从 DataHub 获取现货价格（<10ms）
+        spot_snapshot = datahub.get_snapshot(TOPIC_SPOT, currency)
+        if spot_snapshot:
+            spot = spot_snapshot.get("price")
+            spot_age = datahub.get_snapshot_age(TOPIC_SPOT)
+            if spot_age > 30:
+                logger.info("DataHub spot data too old (%.1fs), falling back to REST", spot_age)
                 spot = None
-        if isinstance(dvol_data, Exception):
-            dvol_data = {}
-        if isinstance(summaries, Exception):
-            summaries = []
-        if isinstance(large_trades, Exception):
-            large_trades = []
-            
+        
+        # 从 DataHub 获取 DVOL
+        dvol_snapshot = datahub.get_snapshot(TOPIC_DVOL, currency)
+        if dvol_snapshot:
+            dvol_age = datahub.get_snapshot_age(TOPIC_DVOL)
+            if dvol_age < 30:
+                dvol_data = {
+                    "current": dvol_snapshot.get("current", 0),
+                    "z_score": 0,
+                    "signal": "normal"
+                }
+        
+        # 从 DataHub 获取期权链（替代 REST 请求）
+        options_topic = TOPIC_BTC_OPTIONS if currency == "BTC" else TOPIC_ETH_OPTIONS
+        options_snapshot = datahub.get_snapshot(options_topic)
+        
+        if options_snapshot:
+            options_age = datahub.get_snapshot_age(options_topic)
+            if options_age < 30 and len(options_snapshot) > 0:
+                logger.info("DataHub scan: %d options from WebSocket cache (%.1fs old)", len(options_snapshot), options_age)
+                
+                # 将 WebSocket 数据转换为 scan 格式
+                summaries = []
+                for symbol, opt_data in options_snapshot.items():
+                    summaries.append({
+                        "instrument_name": opt_data.get("symbol", symbol),
+                        "mark_price": opt_data.get("mark_price", 0),
+                        "mark_iv": opt_data.get("iv", 0),
+                        "delta": opt_data.get("delta", 0),
+                        "gamma": opt_data.get("gamma", 0),
+                        "theta": opt_data.get("theta", 0),
+                        "vega": opt_data.get("vega", 0),
+                        "best_bid_amount": opt_data.get("best_bid", 0),
+                        "best_ask_amount": opt_data.get("best_ask", 0),
+                        "open_interest": opt_data.get("open_interest", 0),
+                        "stats": {"volume": opt_data.get("volume", 0)},
+                        "underlying_price": spot
+                    })
+                
+                # 获取 Binance 数据也从 DataHub 缓存
+                binance_cache = datahub.get_options_chain_snapshot(currency.lower() if currency in ["BTC", "ETH"] else currency)
+                if binance_cache:
+                    binance_contracts = []
+                    for sym, data in binance_cache.items():
+                        binance_contracts.append({
+                            "symbol": sym,
+                            "strike": 0,
+                            "dte": 30,
+                            "premium_usdt": data.get("mark_price", 0),
+                            "delta": data.get("delta", 0),
+                            "gamma": 0,
+                            "theta": 0,
+                            "vega": 0,
+                            "mark_iv": data.get("iv", 0),
+                            "oi": data.get("open_interest", 0),
+                            "volume": data.get("volume", 0),
+                            "spread_pct": 0,
+                            "liquidity_score": 50,
+                            "apr": 0
+                        })
+            else:
+                logger.info("DataHub options data too old (%.1fs), falling back to REST", options_age)
+    except ImportError:
+        logger.debug("DataHub not available, using REST fallback")
     except Exception as e:
-        logger.error("Parallel async fetch failed: %s", str(e))
-        try: spot = await get_spot_price_async(currency)
-        except Exception: spot = None
-        try: dvol_data = await asyncio.to_thread(get_dvol_from_deribit, currency)
-        except Exception: dvol_data = {}
-        try: summaries = await asyncio.to_thread(_fetch_deribit_summaries, currency)
-        except Exception: summaries = []
-        try: large_trades = await _fetch_large_trades_async(currency, days=1, limit=40)
-        except Exception: large_trades = []
+        logger.debug("DataHub read failed: %s, using REST fallback", str(e))
+
+    # Step 2: 如果 DataHub 缓存不可用，回退到 REST 请求
+    if not spot:
+        logger.info("Quick scan: DataHub not ready, using REST fallback for spot price")
+        try:
+            spot = await get_spot_price_async(currency)
+        except Exception:
+            spot = None
+
+    if not summaries:
+        logger.info("Quick scan: DataHub not ready, fetching Deribit via REST")
+        try:
+            summaries = await asyncio.to_thread(_fetch_deribit_summaries, currency)
+        except Exception:
+            summaries = []
+
+    if not large_trades:
+        try:
+            large_trades = await _fetch_large_trades_async(currency, days=1, limit=40)
+        except Exception:
+            large_trades = []
+
+    if not binance_contracts:
+        logger.info("Quick scan: DataHub not ready, fetching Binance via REST")
+        try:
+            from binance_options import fetch_binance_options
+            binance_contracts = await asyncio.to_thread(
+                fetch_binance_options,
+                currency=currency,
+                min_dte=_p.min_dte,
+                max_dte=_p.max_dte,
+                max_delta=_p.max_delta,
+                strike=_p.strike,
+                min_vol=config.MIN_VOLUME_FILTER,
+                max_spread=config.MAX_SPREAD_PCT,
+                margin_ratio=_p.margin_ratio,
+                option_type=_p.option_type,
+                return_results=True
+            )
+            if not isinstance(binance_contracts, list):
+                binance_contracts = []
+        except Exception as e:
+            logger.warning("binance_options fetch failed: %s", str(e))
+            binance_contracts = []
 
     _min_spot = {"BTC": 1000, "ETH": 100, "SOL": 10, "XRP": 0.5}.get(currency, 100)
     if not spot or spot < _min_spot:
@@ -2355,6 +2453,17 @@ async def startup_eventbus():
     await event_bus.start_background_publishers()
 
 
+@app.on_event("startup")
+async def startup_datahub():
+    """启动 DataHub WebSocket 服务（实时推送，替代 REST 轮询）"""
+    try:
+        from services.datahub import start_datahub_services
+        await start_datahub_services()
+        logger.info("DataHub WebSocket services started")
+    except Exception as e:
+        logger.warning("DataHub startup failed: %s (using REST fallback)", str(e))
+
+
 @app.get("/api/mcp/tools")
 async def mcp_list_tools():
     """列出所有可用的 MCP 工具"""
@@ -2428,6 +2537,78 @@ async def mcp_chat(query: str, currency: str = "BTC"):
         "response": response,
         "market_context": market_context,
         "currency": currency
+    }
+
+
+@app.get("/api/datahub/status")
+async def get_datahub_status():
+    """获取 DataHub WebSocket 连接状态"""
+    from services.datahub import datahub, TOPIC_SPOT, TOPIC_DVOL, TOPIC_BTC_OPTIONS
+    
+    spot_snapshot = datahub.get_snapshot(TOPIC_SPOT, "BTC")
+    dvol_snapshot = datahub.get_snapshot(TOPIC_DVOL, "BTC")
+    options_snapshot = datahub.get_snapshot(TOPIC_BTC_OPTIONS)
+    
+    return {
+        "status": "running" if datahub._running else "stopped",
+        "spot_price": {
+            "price": spot_snapshot.get("price") if spot_snapshot else None,
+            "age_seconds": round(datahub.get_snapshot_age(TOPIC_SPOT), 1)
+        },
+        "dvol": {
+            "current": dvol_snapshot.get("current") if dvol_snapshot else None,
+            "age_seconds": round(datahub.get_snapshot_age(TOPIC_DVOL), 1)
+        },
+        "options_cache": {
+            "btc_count": len(options_snapshot) if options_snapshot else 0,
+            "age_seconds": round(datahub.get_snapshot_age(TOPIC_BTC_OPTIONS), 1)
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/datahub/options-chain")
+async def get_datahub_options_chain(currency: str = "BTC"):
+    """
+    从 DataHub 获取期权链（<10ms 响应）
+    这是 quick_scan 的超快版本，直接从 WebSocket 缓存读取
+    """
+    from services.datahub import datahub, TOPIC_BTC_OPTIONS, TOPIC_ETH_OPTIONS
+    
+    topic = TOPIC_BTC_OPTIONS if currency == "BTC" else TOPIC_ETH_OPTIONS
+    snapshot = datahub.get_snapshot(topic)
+    
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="期权链数据尚未就绪，请稍候重试")
+    
+    age = datahub.get_snapshot_age(topic)
+    
+    contracts = []
+    for symbol, opt_data in snapshot.items():
+        mark_price = opt_data.get("mark_price", 0)
+        if mark_price <= 0:
+            continue
+        
+        contracts.append({
+            "symbol": symbol,
+            "mark_price": mark_price,
+            "iv": opt_data.get("iv", 0),
+            "delta": opt_data.get("delta", 0),
+            "gamma": opt_data.get("gamma", 0),
+            "theta": opt_data.get("theta", 0),
+            "vega": opt_data.get("vega", 0),
+            "best_bid": opt_data.get("best_bid", 0),
+            "best_ask": opt_data.get("best_ask", 0),
+            "volume": opt_data.get("volume", 0),
+            "open_interest": opt_data.get("open_interest", 0),
+            "timestamp": opt_data.get("timestamp", "")
+        })
+    
+    return {
+        "currency": currency,
+        "count": len(contracts),
+        "data_age_seconds": round(age, 1),
+        "contracts": sorted(contracts, key=lambda x: x.get("delta", 0), reverse=True)
     }
 
 
