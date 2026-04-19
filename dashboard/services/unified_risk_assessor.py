@@ -107,24 +107,17 @@ class UnifiedRiskAssessor:
         score = 40
 
         try:
-            import requests
-            resp = requests.get("https://api.alternative.me/fng/?limit=1", timeout=5)
-            if resp.status_code == 200:
-                fng_data = resp.json().get("data", [{}])[0]
-                fng_value = int(fng_data.get("value", 50))
-                fng_label = fng_data.get("value_classification", "Neutral")
-                factors.append(f"恐惧贪婪指数: {fng_value} ({fng_label})")
+            from services.macro_data import get_fear_greed_index, get_fear_greed_risk_multiplier
+            fg_data = get_fear_greed_index()
+            fng_value = fg_data.get("value", 50)
+            fng_label = fg_data.get("classification", "Neutral")
+            factors.append(f"恐惧贪婪指数: {fng_value} ({fng_label})")
 
-                if fng_value <= 20:
-                    score = 85
-                elif fng_value <= 35:
-                    score = 65
-                elif fng_value <= 50:
-                    score = 45
-                elif fng_value <= 65:
-                    score = 30
-                else:
-                    score = 15
+            multiplier = get_fear_greed_risk_multiplier(fng_value)
+            score = int(score * multiplier)
+
+            if fng_value is not None and fng_value <= 20:
+                score = min(score, 70)
         except Exception:
             factors.append("恐惧贪婪指数: 获取失败")
 

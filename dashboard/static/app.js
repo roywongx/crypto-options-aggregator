@@ -951,6 +951,7 @@ function updateMaxPainUI(data) {
 function loadPageDataAsync() {
     const currency = document.getElementById('currencySelect')?.value || 'BTC';
     loadLatestData(false, true).catch(e => console.error('[loadPageDataAsync] loadLatestData failed:', e));
+    loadMacroData().catch(e => console.error('[loadPageDataAsync] loadMacroData failed:', e));
     loadWindAnalysis().catch(e => console.error('[loadPageDataAsync] loadWindAnalysis failed:', e));
     loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
     loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
@@ -1205,6 +1206,9 @@ function updateRiskDashboardUI(data) {
     if (riskLevelCard) {
         riskLevelCard.textContent = data.risk_level || '综合风险';
     }
+    
+    // 更新宏观数据
+    loadMacroData().catch(() => {});
     
     // 更新链上核心指标（v8.1新增）
     updateOnchainMetrics(data.onchain_metrics);
@@ -2078,6 +2082,44 @@ function _classifySeverity(notional) {
     if (notional >= 500000) return 'medium';
     if (notional >= 100000) return 'low';
     return 'info';
+}
+
+async function loadMacroData() {
+    try {
+        const res = await safeFetch(`${API_BASE}/api/macro-data`);
+        const data = await res.json();
+        
+        const fgEl = document.getElementById('fearGreedValue');
+        const fgLabel = document.getElementById('fearGreedLabel');
+        if (fgEl && data.fear_greed) {
+            const val = data.fear_greed.value;
+            const label = data.fear_greed.classification;
+            if (val !== null) {
+                fgEl.textContent = val;
+                fgEl.className = 'text-2xl font-bold ' + (
+                    val <= 20 ? 'text-red-400' : val <= 40 ? 'text-orange-400' : 
+                    val <= 60 ? 'text-yellow-400' : val <= 80 ? 'text-green-400' : 'text-emerald-400'
+                );
+                fgLabel.textContent = label;
+            }
+        }
+        
+        const frEl = document.getElementById('fundingRateValue');
+        const frLabel = document.getElementById('fundingRateLabel');
+        if (frEl && data.funding_rate) {
+            const rate = data.funding_rate.current_rate;
+            const sentiment = data.funding_rate.sentiment;
+            if (rate !== null) {
+                frEl.textContent = rate.toFixed(4) + '%';
+                frEl.className = 'text-2xl font-bold ' + (
+                    rate < -0.1 ? 'text-red-400' : rate > 0.1 ? 'text-emerald-400' : 'text-gray-300'
+                );
+                frLabel.textContent = sentiment;
+            }
+        }
+    } catch (e) {
+        console.error('加载宏观数据失败:', e);
+    }
 }
 
 function updateLastUpdateTime(timestamp) {

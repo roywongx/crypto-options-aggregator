@@ -861,6 +861,13 @@ async def refresh_large_trades(currency: str = Query(default="BTC")):
     }
 
 
+@app.get("/api/macro-data")
+async def get_macro():
+    """获取宏观数据: 恐惧贪婪指数、资金费率、宏观数据、无风险利率"""
+    from services.macro_data import get_all_macro_data
+    return get_all_macro_data()
+
+
 async def quick_scan(params: QuickScanParams = None):
     """异步快速扫描：使用 httpx.AsyncClient 实现全异步网络请求"""
     from datetime import datetime
