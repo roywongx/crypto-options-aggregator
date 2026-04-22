@@ -67,7 +67,7 @@ def simulate_loss(item, drop_pct, spot_price):
         gamma = float(item.get('gamma', 0))
         dPrice = (delta * dSpot) + (0.5 * gamma * (dSpot ** 2))
         return round(dPrice, 2)
-    except:
+    except Exception:
         return 0
 
 def validate_contract(item):

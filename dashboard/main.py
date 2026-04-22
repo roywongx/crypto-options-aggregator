@@ -26,9 +26,14 @@ from fastapi.security import APIKeyHeader
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+# 配置日志 — 使用 StreamHandler 避免 I/O closed file 错误
+# 当 uvicorn 重定向 stdout 时，basicConfig 的默认 handler 可能写入已关闭的文件
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -2437,12 +2442,16 @@ async def startup_services():
     from services.event_bus import event_bus
     await event_bus.start_background_publishers()
     
+    # DataHub WebSocket 服务 — 当前使用 REST 回退路径
+    # Deribit 不支持全场期权 WebSocket 订阅，所以实际走的是 REST
+    # 保留架构以便未来扩展（Redis 缓存、Node.js 微服务等）
     try:
         from services.datahub import start_datahub_services
         await start_datahub_services()
         logger.info("DataHub WebSocket services started")
     except Exception as e:
-        logger.warning("DataHub startup failed: %s (using REST fallback)", str(e))
+        logger.warning("DataHub startup failed: %s — 使用 REST 备用路径（功能完全正常）", str(e))
+        logger.debug("DataHub 详细错误: %s", str(e), exc_info=True)
 
 
 @app.get("/api/mcp/tools")
