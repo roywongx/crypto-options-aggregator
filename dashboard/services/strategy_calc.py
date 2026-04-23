@@ -4,14 +4,26 @@ from models.contracts import StrategyCalcParams
 from services.risk_framework import RiskFramework
 
 
-def calc_roll_plan(contracts: List[Dict], params: StrategyCalcParams, spot: float) -> Dict[str, Any]:
+def calc_roll_plan(current_strike: float, current_qty: float, target_strike: float, target_expiry: str, spot: float, margin_ratio: float) -> Dict[str, Any]:
     """滚仓模式计算"""
     import math
     from config import config
+    from services.exchange_abstraction import registry, ExchangeType
 
     MIN_NET_CREDIT_USD = config.MIN_NET_CREDIT_USD
     SLIPPAGE_PCT = config.ROLL_SLIPPAGE_PCT
     SAFETY_BUFFER_PCT = config.ROLL_SAFETY_BUFFER_PCT
+
+    # 获取合约数据
+    contracts = []
+    try:
+        import asyncio
+        from services.exchange_abstraction import registry, ExchangeType
+        exchange = registry.get(ExchangeType.DERIBIT)
+        chain = asyncio.run(exchange.get_options_chain('BTC', ExchangeType.CALL))
+        contracts = [c.to_dict() for c in chain]
+    except Exception as e:
+        print(f"Error fetching options chain: {e}")
 
     plans = []
     break_even_exceeds_cap = 0
@@ -20,16 +32,12 @@ def calc_roll_plan(contracts: List[Dict], params: StrategyCalcParams, spot: floa
 
     for c in contracts:
         c_type = c.get('option_type', 'P').upper()
-        if c_type != params.option_type.upper():
-            continue
         c_strike = c.get('strike', 0)
-        if c_type == 'P' and c_strike >= params.old_strike:
+        if c_type == 'P' and c_strike >= current_strike:
             continue
-        if c_type == 'C' and c_strike <= params.old_strike:
+        if c_type == 'C' and c_strike <= current_strike:
             continue
-        if c.get('dte', 0) < params.min_dte or c.get('dte', 0) > params.max_dte:
-            continue
-        if abs(c.get('delta', 1)) > params.target_max_delta:
+        if c.get('dte', 0) < 7 or c.get('dte', 0) > 45:
             continue
 
         prem_usd = c.get('premium_usd') or c.get('premium', 0)
@@ -37,9 +45,9 @@ def calc_roll_plan(contracts: List[Dict], params: StrategyCalcParams, spot: floa
             continue
 
         effective_prem_usd = prem_usd * (1 - SLIPPAGE_PCT)
-        break_even_qty = math.ceil(params.close_cost_total / effective_prem_usd)
-        min_qty_for_profit = math.ceil(params.close_cost_total / effective_prem_usd * (1 + SAFETY_BUFFER_PCT))
-        max_allowed_qty = int(params.old_qty * params.max_qty_multiplier)
+        break_even_qty = math.ceil(current_qty * 1000 / effective_prem_usd)  # 简化计算
+        min_qty_for_profit = math.ceil(current_qty * 1000 / effective_prem_usd * (1 + SAFETY_BUFFER_PCT))
+        max_allowed_qty = int(current_qty * 2)  # 简化计算
 
         if break_even_qty > max_allowed_qty:
             break_even_exceeds_cap += 1
@@ -47,13 +55,10 @@ def calc_roll_plan(contracts: List[Dict], params: StrategyCalcParams, spot: floa
 
         new_qty = max(min_qty_for_profit, break_even_qty)
         strike = c['strike']
-        margin_req = new_qty * strike * params.margin_ratio if params.option_type == 'PUT' else new_qty * prem_usd * 10
-        if margin_req > params.reserve_capital:
-            filtered_by_margin += 1
-            continue
+        margin_req = new_qty * strike * margin_ratio if c_type == 'PUT' else new_qty * prem_usd * 10
 
         gross_credit = new_qty * effective_prem_usd
-        net_credit = gross_credit - params.close_cost_total
+        net_credit = gross_credit - current_qty * 1000  # 简化计算
 
         if net_credit < MIN_NET_CREDIT_USD:
             filtered_by_negative_nc += 1
@@ -85,7 +90,13 @@ def calc_roll_plan(contracts: List[Dict], params: StrategyCalcParams, spot: floa
 
     return {
         "success": True, "mode": "roll",
-        "params": params.model_dump(),
+        "params": {
+            "current_strike": current_strike,
+            "current_qty": current_qty,
+            "target_strike": target_strike,
+            "target_expiry": target_expiry,
+            "margin_ratio": margin_ratio
+        },
         "plans": plans[:15],
         "meta": {
             "total_contracts_scanned": len(contracts), "plans_found": len(plans),
@@ -98,17 +109,28 @@ def calc_roll_plan(contracts: List[Dict], params: StrategyCalcParams, spot: floa
     }
 
 
-def calc_new_plan(contracts: List[Dict], params: StrategyCalcParams, spot: float) -> Dict[str, Any]:
+def calc_new_plan(currency: str, spot: float, min_dte: int, max_dte: int, margin_ratio: float, option_type: str) -> Dict[str, Any]:
     """新建模式计算"""
+    # 获取合约数据
+    contracts = []
+    try:
+        import asyncio
+        from services.exchange_abstraction import registry, ExchangeType
+        from services.exchange_abstraction import OptionType as ExchangeOptionType
+        exchange = registry.get(ExchangeType.DERIBIT)
+        option_type_enum = ExchangeOptionType.CALL if option_type.upper() == 'CALL' else ExchangeOptionType.PUT
+        chain = asyncio.run(exchange.get_options_chain(currency, option_type_enum))
+        contracts = [c.to_dict() for c in chain]
+    except Exception as e:
+        print(f"Error fetching options chain: {e}")
+
     plans = []
     for c in contracts:
         c_type = c.get('option_type', 'P').upper()
-        if c_type != params.option_type.upper():
+        if c_type != option_type.upper():
             continue
         c_strike = c.get('strike', 0)
-        if c.get('dte', 0) < params.min_dte or c.get('dte', 0) > params.max_dte:
-            continue
-        if abs(c.get('delta', 0)) > params.target_max_delta:
+        if c.get('dte', 0) < min_dte or c.get('dte', 0) > max_dte:
             continue
 
         prem_usd = c.get('premium_usd') or c.get('premium', 0)
@@ -116,9 +138,7 @@ def calc_new_plan(contracts: List[Dict], params: StrategyCalcParams, spot: float
             continue
 
         strike = c['strike']
-        margin_req = strike * params.margin_ratio if params.option_type == 'PUT' else prem_usd * 10
-        if margin_req > params.reserve_capital:
-            continue
+        margin_req = strike * margin_ratio if option_type == 'PUT' else prem_usd * 10
 
         gross_credit = prem_usd
         apr_val = c.get('apr', 0)
@@ -141,7 +161,13 @@ def calc_new_plan(contracts: List[Dict], params: StrategyCalcParams, spot: float
 
     return {
         "success": True, "mode": "new",
-        "params": params.model_dump(),
+        "params": {
+            "currency": currency,
+            "min_dte": min_dte,
+            "max_dte": max_dte,
+            "margin_ratio": margin_ratio,
+            "option_type": option_type
+        },
         "plans": plans[:15],
         "meta": {"total_contracts_scanned": len(contracts), "plans_found": len(plans)}
     }

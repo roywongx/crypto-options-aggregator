@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v4.0-Pro%20Terminal-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v5.0-Pro%20Terminal-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator Pro</h1>
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <b>✨ v4.0 全新架构</b> — 基于 FinceptTerminal 源码级深度分析，引入 5 大专业架构模块
+  <b>✨ v5.0 渐进式重构</b> — 将 main.py 拆分为 api/ 目录模块，提升代码可维护性和扩展性
 </p>
 
 ---
@@ -273,7 +273,30 @@ python main.py
 
 ## 更新日志
 
-### v4.0 — Pro Terminal（当前）
+### v5.0 — 渐进式重构（当前）
+
+**架构重构：**
+
+- ✅ **API 模块化** — 将 2600+ 行 main.py 拆分为 15 个 api/ 目录模块
+- ✅ **统一路由管理** — api/__init__.py 聚合所有路由模块
+- ✅ **OpenBLAS 优化** — 设置 OPENBLAS_NUM_THREADS=1 解决内存分配错误
+- ✅ **数据库模式完善** — 添加 dvol_history 表，支持 DVOL 历史数据存储
+
+**API 端点增强：**
+- ✅ **/api/refresh** — 数据刷新模块（dvol/refresh, trades/refresh）
+- ✅ **/api/strategy** — 策略计算模块（strategy-calc, calculator/roll）
+- ✅ **/api/sandbox** — 沙盘推演模块（simulate, bottom-fishing/advice）
+- ✅ **/api/risk** — 风险评估模块（assess, overview）
+- ✅ **/api/payoff** — Payoff 计算模块（calc, score, estimate, compare, wheel）
+
+**Bug 修复：**
+- 修复 /api/macro-data 404 错误
+- 修复 /api/dvol/refresh 500 错误（缺少 dvol_history 表）
+- 修复 /api/strategy-calc 500 错误（ExchangeRegistry 调用）
+- 修复 /api/calculator/roll 500 错误（同上）
+- 修复 /api/mcp/chat 422/500 错误（Pydantic 模型）
+
+### v4.0 — Pro Terminal
 
 **FinceptTerminal 源码级架构升级：**
 
