@@ -1,6 +1,44 @@
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# 数据库文件
 data/*.db
 *.db
 *.db-wal
 *.db-shm
+
+# 日志文件
+*.log
+
+# 临时文件
+tmp_*
+_write_*.py
+test_*.py
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# 环境
+.env
+.venv/
+venv/
+env/
+
+# 操作系统
+.DS_Store
+Thumbs.db
