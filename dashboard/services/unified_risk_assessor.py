@@ -4,6 +4,8 @@
 """
 from typing import Dict, Any
 from services.risk_framework import RiskFramework
+import concurrent.futures
+import time
 
 
 class UnifiedRiskAssessor:
@@ -11,10 +13,17 @@ class UnifiedRiskAssessor:
         self.risk_framework = RiskFramework()
 
     def assess_comprehensive_risk(self, spot: float, currency: str = "BTC") -> Dict[str, Any]:
-        price_risk = self._assess_price_risk(spot)
-        volatility_risk = self._assess_volatility_risk(currency)
-        sentiment_risk = self._assess_sentiment_risk(spot, currency)
-        liquidity_risk = self._assess_liquidity_risk(currency)
+        # 并行执行独立的评估任务
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            future_price = executor.submit(self._assess_price_risk, spot)
+            future_volatility = executor.submit(self._assess_volatility_risk, currency)
+            future_sentiment = executor.submit(self._assess_sentiment_risk, spot, currency)
+            future_liquidity = executor.submit(self._assess_liquidity_risk, currency)
+
+            price_risk = future_price.result()
+            volatility_risk = future_volatility.result()
+            sentiment_risk = future_sentiment.result()
+            liquidity_risk = future_liquidity.result()
 
         composite_score = (
             price_risk["score"] * 0.30 +

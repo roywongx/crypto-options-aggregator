@@ -11,6 +11,8 @@ class StrategyCalcRequest(BaseModel):
     currency: str = Field(default="BTC")
     current_strike: float = Field(default=0)
     current_qty: float = Field(default=1)
+    old_strike: Optional[float] = Field(default=None)  # 前端兼容
+    old_qty: Optional[float] = Field(default=None)  # 前端兼容
     target_strike: Optional[float] = Field(default=None)
     target_expiry: Optional[str] = Field(default=None)
     margin_ratio: float = Field(default=0.2)
@@ -26,22 +28,34 @@ async def strategy_calc(params: StrategyCalcRequest):
     from services.spot_price import get_spot_price
     from services.risk_framework import RiskFramework
 
-    spot = get_spot_price(params.currency)
+    try:
+        spot = get_spot_price(params.currency)
+    except Exception:
+        spot = 0
+    
+    if spot <= 0:
+        raise HTTPException(status_code=503, detail="无法获取现货价格，请稍后重试")
+    
     mode = params.mode.lower()
 
     if mode == "roll":
-        if not params.target_strike or not params.target_expiry:
-            raise HTTPException(status_code=400, detail="滚仓模式需要提供 target_strike 和 target_expiry")
-        result = calc_roll_plan(
-            current_strike=params.current_strike,
-            current_qty=params.current_qty,
-            target_strike=params.target_strike,
-            target_expiry=params.target_expiry,
+        # 兼容前端参数名 old_strike / old_qty
+        current_strike = params.old_strike if params.old_strike is not None else params.current_strike
+        current_qty = params.old_qty if params.old_qty is not None else params.current_qty
+        # target_strike 和 target_expiry 可选，不提供时系统会自动寻找最佳方案
+        target_strike = params.target_strike or current_strike
+        target_expiry = params.target_expiry or ""
+        result = await calc_roll_plan(
+            current_strike=current_strike,
+            current_qty=current_qty,
+            target_strike=target_strike,
+            target_expiry=target_expiry,
             spot=spot,
-            margin_ratio=params.margin_ratio
+            margin_ratio=params.margin_ratio,
+            option_type=params.option_type
         )
     elif mode == "new":
-        result = calc_new_plan(
+        result = await calc_new_plan(
             currency=params.currency,
             spot=spot,
             min_dte=params.min_dte,

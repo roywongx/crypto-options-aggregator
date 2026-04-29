@@ -13,6 +13,14 @@ from services.risk_framework import RiskFramework
 router = APIRouter(prefix="/api", tags=["scan"])
 
 
+def _get_spot_safe(currency: str) -> float:
+    """安全获取现货价格，失败时返回0"""
+    try:
+        return get_spot_price(currency)
+    except Exception:
+        return 0
+
+
 class ScanParams(BaseModel):
     currency: str = Field(default="BTC", description="交易对")
     option_type: str = Field(default="PUT", description="期权类型")
@@ -74,7 +82,7 @@ async def get_latest(currency: str = Query(default="BTC")):
         return {
             "success": False,
             "currency": currency,
-            "spot_price": get_spot_price(currency),
+            "spot_price": _get_spot_safe(currency),
             "contracts": [],
             "large_trades_details": [],
             "large_trades_count": 0,
@@ -118,7 +126,7 @@ async def get_latest(currency: str = Query(default="BTC")):
     return {
         "success": True,
         "currency": currency,
-        "spot_price": row[1] or get_spot_price(currency),
+        "spot_price": row[1] or _get_spot_safe(currency),
         "dvol_current": row[2] or 0,
         "dvol_z_score": row[3] or 0,
         "dvol_signal": row[4] or '',

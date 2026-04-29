@@ -24,12 +24,12 @@ class RiskFramework:
 
     @classmethod
     def _get_floors(cls) -> dict:
-        """获取支撑位，带缓存"""
+        """获取支撑位，带缓存（缓存时间延长至4小时）"""
         now = datetime.now()
         
-        # 缓存1小时
+        # 缓存4小时
         if (cls._cached_floors and cls._cache_timestamp and 
-            (now - cls._cache_timestamp).total_seconds() < 3600):
+            (now - cls._cache_timestamp).total_seconds() < 14400):
             return cls._cached_floors
         
         # 重新计算

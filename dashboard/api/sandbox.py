@@ -27,7 +27,11 @@ async def sandbox_simulate(params: SandboxParams):
     from services.martingale_sandbox import MartingaleSandboxEngine
     from services.spot_price import get_spot_price
 
-    spot = get_spot_price(params.currency)
+    try:
+        spot = get_spot_price(params.currency)
+    except Exception:
+        spot = 0
+    
     if spot < 1000:
         spot = params.crash_price * 1.5
 
@@ -81,7 +85,7 @@ async def sandbox_simulate(params: SandboxParams):
         "crash_scenario": {
             "from_price": round(spot, 0),
             "to_price": params.crash_price,
-            "drop_pct": round((params.crash_price - spot) / spot * 100, 1),
+            "drop_pct": round((params.crash_price - spot) / max(spot, 1) * 100, 1),
         },
         "position": {
             "strike": strike,

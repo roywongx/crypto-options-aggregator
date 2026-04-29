@@ -75,15 +75,47 @@ class OptionContract:
         self.spread_pct = spread_pct
         self.raw_data = raw_data or {}
 
+    @property
+    def dte(self) -> int:
+        """计算到期天数"""
+        from datetime import datetime
+        try:
+            # 尝试解析 Deribit 格式: 15MAY26
+            exp_date = datetime.strptime(self.expiry, '%d%b%y')
+            return max(1, (exp_date - datetime.utcnow()).days)
+        except Exception:
+            try:
+                # 尝试解析标准格式: 2025-06-27
+                exp_date = datetime.strptime(self.expiry, '%Y-%m-%d')
+                return max(1, (exp_date - datetime.utcnow()).days)
+            except Exception:
+                return 30
+
+    @property
+    def premium_usd(self) -> float:
+        """权利金 (USD) - 使用 mark_price 作为近似"""
+        return self.mark_price
+
+    @property
+    def apr(self) -> float:
+        """年化收益率估算"""
+        if self.dte <= 0 or self.premium_usd <= 0:
+            return 0
+        return (self.premium_usd / max(self.strike, 1)) * (365 / self.dte) * 100
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "symbol": self.symbol,
             "exchange": self.exchange.value,
+            "platform": self.exchange.value,
             "currency": self.currency,
             "option_type": self.option_type.value,
             "strike": self.strike,
             "expiry": self.expiry,
+            "dte": self.dte,
             "mark_price": self.mark_price,
+            "premium_usd": self.premium_usd,
+            "premium": self.premium_usd,
             "bid": self.bid,
             "ask": self.ask,
             "volume": self.volume,
@@ -93,6 +125,7 @@ class OptionContract:
             "theta": self.theta,
             "vega": self.vega,
             "iv": self.iv,
+            "apr": self.apr,
             "liquidity_score": self.liquidity_score,
             "spread_pct": self.spread_pct
         }
@@ -370,7 +403,7 @@ class DeribitExchange(BaseExchange):
         import sys
         import os
         
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'deribit-options-monitor'))
 
         def _fetch():
             from deribit_options_monitor import DeribitOptionsMonitor
@@ -384,15 +417,42 @@ class DeribitExchange(BaseExchange):
 
         contracts = []
         for r in results:
-            dte = r.get("dte", 0)
+            inst_name = r.get("instrument_name", "")
+            
+            # Parse instrument name to get metadata
+            from services.instrument import _parse_inst_name
+            meta = _parse_inst_name(inst_name)
+            if not meta:
+                continue
+            
+            # Check option type filter
+            if option_type == OptionType.CALL and meta.option_type != 'C':
+                continue
+            if option_type == OptionType.PUT and meta.option_type != 'P':
+                continue
+            
+            # Check DTE filter
+            dte = meta.dte
             if not (min_dte <= dte <= max_dte):
                 continue
 
+            # Get delta from API response or calculate
             delta = abs(r.get("delta", 0))
+            if delta == 0:
+                # Calculate approximate delta if not provided
+                from services.dvol_analyzer import calc_delta_bs
+                iv = r.get("mark_iv", 50)
+                delta = abs(calc_delta_bs(meta.strike, r.get("underlying_price", 0), iv, dte, meta.option_type))
             if delta > max_delta:
                 continue
 
-            spread_pct = r.get("spread_pct", 0)
+            # Calculate spread percentage
+            bid = r.get("bid_price", 0)
+            ask = r.get("ask_price", 0)
+            mark = r.get("mark_price", 0)
+            spread_pct = 0
+            if mark > 0 and bid > 0 and ask > 0:
+                spread_pct = ((ask - bid) / mark) * 100
             if spread_pct > max_spread_pct:
                 continue
 
@@ -401,23 +461,23 @@ class DeribitExchange(BaseExchange):
                 continue
 
             contracts.append(OptionContract(
-                symbol=r["instrument_name"],
+                symbol=inst_name,
                 exchange=ExchangeType.DERIBIT,
                 currency=currency,
                 option_type=option_type,
-                strike=r["strike"],
-                expiry=r.get("expiration", ""),
-                mark_price=r.get("mark_price", 0),
-                bid=r.get("bid_price", 0),
-                ask=r.get("ask_price", 0),
+                strike=meta.strike,
+                expiry=meta.expiry,
+                mark_price=mark,
+                bid=bid,
+                ask=ask,
                 volume=volume,
                 open_interest=r.get("open_interest", 0),
-                delta=r.get("delta", 0),
+                delta=delta,
                 gamma=r.get("gamma", 0),
                 theta=r.get("theta", 0),
                 vega=r.get("vega", 0),
-                iv=r.get("iv", 0),
-                liquidity_score=r.get("liquidity_score", 0),
+                iv=r.get("mark_iv", 0),
+                liquidity_score=100 - spread_pct if spread_pct <= 100 else 0,
                 spread_pct=spread_pct,
                 raw_data=r
             ))

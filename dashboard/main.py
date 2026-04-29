@@ -445,13 +445,19 @@ async def quick_scan(params: QuickScanParams = None):
         try:
             spot = await get_spot_price_async(currency)
         except Exception:
-            spot = None
+            spot = 0
+    
+    # 确保 spot 是有效的数字
+    if spot is None or spot <= 0:
+        logger.error("Quick scan: Failed to get valid spot price, aborting scan")
+        return {"error": "无法获取现货价格", "currency": currency}
 
     if not summaries:
         logger.info("Quick scan: DataHub not ready, fetching Deribit via REST")
         try:
-            summaries = await asyncio.to_thread(_fetch_deribit_summaries, currency)
-        except Exception:
+            summaries = await asyncio.to_thread(fetch_deribit_summaries, currency)
+        except Exception as e:
+            logger.error("Quick scan: Failed to fetch Deribit summaries: %s", str(e))
             summaries = []
 
     if not large_trades:

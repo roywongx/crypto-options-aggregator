@@ -8,6 +8,11 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# 缓存机制
+_dvol_cache = {}
+_dvol_cache_time = None
+_dvol_cache_ttl = 300  # 5分钟缓存
+
 def _norm_cdf_approx(x: float) -> float:
     """Abramowitz & Stegun 公式 7.1.26，最大误差 < 7.5e-8
     
@@ -39,6 +44,8 @@ def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type
     
     优先使用 scipy.stats.norm.cdf，回退到 Abramowitz & Stegun 近似（精度 7.5e-8）
     """
+    if spot is None or strike is None or dte is None or iv is None:
+        return 0.3
     if strike <= 0 or spot <= 0 or dte <= 0 or iv <= 0:
         return 0.3
     t = dte / 365.0
@@ -56,7 +63,16 @@ def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type
     return round(nd1, 4)
 
 def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
-    """从 Deribit 获取 DVOL 数据"""
+    """从 Deribit 获取 DVOL 数据（带5分钟缓存）"""
+    global _dvol_cache, _dvol_cache_time
+    
+    # 检查缓存
+    now = datetime.now()
+    if (_dvol_cache_time and 
+        (now - _dvol_cache_time).total_seconds() < _dvol_cache_ttl and
+        _dvol_cache.get("currency") == currency):
+        return _dvol_cache.get("data", {})
+    
     try:
         from main import _get_deribit_monitor
         mon = _get_deribit_monitor()
@@ -64,7 +80,7 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
         if not result:
             return {}
         trend_arrow = "↑" if result.get("trend") == "上涨" else ("↓" if result.get("trend") == "下跌" else "→")
-        return {
+        data = {
             "current": result.get("current_dvol", 0),
             "z_score": result.get("z_score_7d", 0),
             "signal": result.get("signal", "正常区间"),
@@ -75,6 +91,10 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
             "data_points": result.get("history_points", 0),
             "percentile_7d": result.get("iv_percentile_7d", 50.0),
         }
+        # 更新缓存
+        _dvol_cache = {"currency": currency, "data": data}
+        _dvol_cache_time = now
+        return data
     except Exception as e:
         logger.warning(f"获取DVOL失败(高级版): {e}, 回退简单版")
         return _get_dvol_simple_fallback(currency)

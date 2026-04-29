@@ -12,16 +12,33 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# 缓存机制
+_fg_cache = {}
+_fg_cache_time = None
+_fg_cache_ttl = 300  # 5分钟缓存
+
+_funding_cache = {}
+_funding_cache_time = None
+_funding_cache_ttl = 300  # 5分钟缓存
+
 # ============================================================
 # 1. Fear & Greed Index (恐慌贪婪指数)
 # ============================================================
 
 def get_fear_greed_index() -> Dict[str, Any]:
     """
-    获取 Crypto Fear & Greed Index
+    获取 Crypto Fear & Greed Index（带5分钟缓存）
     API: https://api.alternative.me/fng/
     返回: value (0-100), classification
     """
+    global _fg_cache, _fg_cache_time
+    
+    # 检查缓存
+    now = datetime.now()
+    if (_fg_cache_time and 
+        (now - _fg_cache_time).total_seconds() < _fg_cache_ttl):
+        return _fg_cache
+    
     try:
         resp = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
         data = resp.json()
@@ -40,12 +57,16 @@ def get_fear_greed_index() -> Dict[str, Any]:
             else:
                 classification = "极度贪婪"
             
-            return {
+            result = {
                 "value": value,
                 "classification": classification,
                 "timestamp": item.get("timestamp"),
                 "source": "alternative.me"
             }
+            # 更新缓存
+            _fg_cache = result
+            _fg_cache_time = now
+            return result
     except Exception as e:
         logger.warning("Fear & Greed Index 获取失败: %s", str(e))
     
@@ -125,10 +146,19 @@ def get_macro_data() -> Dict[str, Any]:
 
 def get_funding_rate(currency: str = "BTC") -> Dict[str, Any]:
     """
-    获取永续合约资金费率
+    获取永续合约资金费率（带5分钟缓存）
     数据源: Binance Futures (公开 API)
     返回: 当前资金费率, 历史均值
     """
+    global _funding_cache, _funding_cache_time
+    
+    # 检查缓存
+    now = datetime.now()
+    if (_funding_cache_time and 
+        (now - _funding_cache_time).total_seconds() < _funding_cache_ttl and
+        _funding_cache.get("currency") == currency):
+        return _funding_cache.get("data", {})
+    
     result = {
         "current_rate": None,
         "avg_rate_8h": None,
@@ -160,6 +190,10 @@ def get_funding_rate(currency: str = "BTC") -> Dict[str, Any]:
             result["sentiment"] = "看多"
         else:
             result["sentiment"] = "中性"
+        
+        # 更新缓存
+        _funding_cache = {"currency": currency, "data": result}
+        _funding_cache_time = now
             
     except Exception as e:
         logger.warning("资金费率获取失败: %s", str(e))

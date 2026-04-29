@@ -273,10 +273,25 @@ python main.py
 
 ## 更新日志
 
-### v5.0 — 渐进式重构（当前）
+### v5.1 — Bug 修复与稳定性提升（当前）
+
+**核心修复：**
+- ✅ **策略计算修复** — 修复 `/api/strategy-calc` 和 `/api/calculator/roll` 返回空计划的问题
+  - 将同步函数改为异步函数，解决 `asyncio.run()` 事件循环冲突
+  - 修复 `OptionContract.to_dict()` 缺少 `dte`、`premium_usd`、`apr` 字段的问题
+  - 添加 `old_strike`/`old_qty` 参数兼容前端调用
+- ✅ **现货价格安全获取** — 所有 API 端点添加 `get_spot_price` 异常保护，防止服务崩溃
+- ✅ **除以零防护** — 修复 `sandbox.py` 和 `dvol_analyzer.py` 中的潜在除以零错误
+- ✅ **Risk Overview 数据完善** — 添加 Put Wall、Gamma Flip、Max Pain 数据返回
+
+**代码质量：**
+- ✅ **TypeScript 编译修复** — 修复 backend 目录下 15 个 TS 编译错误
+- ✅ **异常处理增强** — 统一使用 try/except 包装外部 API 调用
+- ✅ **参数校验** — 添加 `spot <= 0` 有效性检查，返回友好错误提示
+
+### v5.0 — 渐进式重构
 
 **架构重构：**
-
 - ✅ **API 模块化** — 将 2600+ 行 main.py 拆分为 15 个 api/ 目录模块
 - ✅ **统一路由管理** — api/__init__.py 聚合所有路由模块
 - ✅ **OpenBLAS 优化** — 设置 OPENBLAS_NUM_THREADS=1 解决内存分配错误
