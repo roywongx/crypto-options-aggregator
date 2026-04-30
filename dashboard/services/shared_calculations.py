@@ -78,7 +78,8 @@ def black_scholes_price(option_type: str, strike: float, spot: float,
     # Theta (每天)
     theta_term = -(spot * norm_pdf(d1) * sigma) / (2 * math.sqrt(T)) / 365
     if option_type.upper() in ("P", "PUT"):
-        theta = theta_term - risk_free_rate * strike * math.exp(-risk_free_rate * T) * norm_cdf(-d2) / 365
+        # Put Theta: theta_term + r*K*exp(-rT)*N(-d2)/365
+        theta = theta_term + risk_free_rate * strike * math.exp(-risk_free_rate * T) * norm_cdf(-d2) / 365
     else:
         theta = theta_term - risk_free_rate * strike * math.exp(-risk_free_rate * T) * norm_cdf(d2) / 365
     

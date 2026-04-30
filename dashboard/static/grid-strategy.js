@@ -12,24 +12,28 @@ let gridData = null;
 let gridChart = null;
 let gridPresets = {};
 let currentGridPreset = 'sell_put_grid';
+let _gridStrategyInitialized = false;
 
 async function initGridStrategy() {
+    if (_gridStrategyInitialized) return;
+    _gridStrategyInitialized = true;
+
     await loadGridPresets();
-    
+
     const gridCurrency = document.getElementById('gridCurrency');
     const gridPutCount = document.getElementById('gridPutCount');
     const gridCallCount = document.getElementById('gridCallCount');
     const gridMinDte = document.getElementById('gridMinDte');
     const gridMaxDte = document.getElementById('gridMaxDte');
     const gridMinApr = document.getElementById('gridMinApr');
-    
+
     if (gridCurrency) gridCurrency.addEventListener('change', loadGridStrategy);
     if (gridPutCount) gridPutCount.addEventListener('change', loadGridStrategy);
     if (gridCallCount) gridCallCount.addEventListener('change', loadGridStrategy);
     if (gridMinDte) gridMinDte.addEventListener('change', loadGridStrategy);
     if (gridMaxDte) gridMaxDte.addEventListener('change', loadGridStrategy);
     if (gridMinApr) gridMinApr.addEventListener('change', loadGridStrategy);
-    
+
     applyGridPreset('sell_put_grid');
     await loadGridStrategy();
 }
@@ -68,7 +72,7 @@ function applyGridPreset(presetId) {
             'bg-orange-500/15', 'text-orange-300', 'ring-orange-500/30');
     });
     
-    const activeBtn = document.querySelector(`#gridPresetButtons button[data-preset="${presetId}"]`);
+    const activeBtn = document.querySelector(`#gridPresetButtons button[data-preset="${CSS.escape(presetId)}"]`);
     if (activeBtn) {
         const colorMap = {
             'sell_put_grid': 'purple',
@@ -229,16 +233,14 @@ function renderGridChart(data) {
     }
     
     const allStrikes = [...new Set([...putStrikes, ...callStrikes])].sort((a, b) => a - b);
-    
-    const putData = allStrikes.map(strike => {
-        const idx = putStrikes.indexOf(strike);
-        return idx >= 0 ? putAprs[idx] : 0;
-    });
-    
-    const callData = allStrikes.map(strike => {
-        const idx = callStrikes.indexOf(strike);
-        return idx >= 0 ? callAprs[idx] : 0;
-    });
+
+    const putMap = new Map();
+    putStrikes.forEach((s, i) => putMap.set(s, putAprs[i]));
+    const callMap = new Map();
+    callStrikes.forEach((s, i) => callMap.set(s, callAprs[i]));
+
+    const putData = allStrikes.map(strike => putMap.get(strike) || 0);
+    const callData = allStrikes.map(strike => callMap.get(strike) || 0);
     
     gridChart = new Chart(ctx, {
         type: 'bar',

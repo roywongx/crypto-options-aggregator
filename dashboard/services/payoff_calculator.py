@@ -401,7 +401,7 @@ class PayoffCalculator:
         计算 Wheel 策略胜率（Put 不被行权的概率）
         """
         breakeven = put_strike - put_premium
-        if breakeven <= 0 or spot <= 0:
+        if breakeven <= 0 or spot <= 0 or put_dte <= 0 or iv <= 0:
             return 0.5
         
         z = (breakeven - spot) / (spot * iv / 100 * math.sqrt(put_dte / 365))

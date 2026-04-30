@@ -1,5 +1,6 @@
 """策略计算 API"""
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
@@ -29,7 +30,7 @@ async def strategy_calc(params: StrategyCalcRequest):
     from services.risk_framework import RiskFramework
 
     try:
-        spot = get_spot_price(params.currency)
+        spot = await run_in_threadpool(get_spot_price, params.currency)
     except Exception:
         spot = 0
     

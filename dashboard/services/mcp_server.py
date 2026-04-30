@@ -6,6 +6,7 @@ MCP Server - 模型上下文协议服务器
 - 实现 AI 自主获取本地数据并给出交易建议
 """
 import logging
+import inspect
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -90,7 +91,9 @@ class MCPToolRegistry:
         
         try:
             handler = self._tools[name]["handler"]
-            result = await handler(params) if hasattr(handler, '__await__') else handler(params)
+            result = handler(params)
+            if inspect.isawaitable(result):
+                result = await result
             return {"success": True, "data": result}
         except Exception as e:
             logger.error("MCP tool '%s' execution error: %s", name, str(e))

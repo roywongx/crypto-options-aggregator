@@ -1,5 +1,6 @@
 """宏观数据 API"""
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api", tags=["macro"])
 
@@ -14,18 +15,18 @@ async def get_macro(currency: str = "BTC"):
     from db.connection import execute_read
     import json
 
-    result = get_all_macro_data()
+    result = await run_in_threadpool(get_all_macro_data)
 
     # 添加现货价格
     try:
-        spot = get_spot_price(currency)
+        spot = await run_in_threadpool(get_spot_price, currency)
         result["spot_price"] = spot
     except Exception:
         result["spot_price"] = None
 
     # 添加 DVOL 数据
     try:
-        dvol = get_dvol_from_deribit(currency)
+        dvol = await run_in_threadpool(get_dvol_from_deribit, currency)
         if isinstance(dvol, dict):
             result["dvol_current"] = dvol.get("current", 0)
             result["dvol_z_score"] = dvol.get("z_score", 0)
@@ -41,7 +42,7 @@ async def get_macro(currency: str = "BTC"):
 
     # 添加合约数量
     try:
-        rows = execute_read("""
+        rows = await run_in_threadpool(execute_read, """
             SELECT contracts_data FROM scan_records
             WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
         """, (currency,))

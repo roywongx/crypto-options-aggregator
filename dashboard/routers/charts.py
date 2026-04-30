@@ -55,20 +55,22 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
             trades = json.loads(ltd) if ltd else []
             if not trades:
                 continue
-            
-            valid_trades = [t for t in trades if (t.get('volume') or 0) < 10000]
+
+            # 过滤有效交易：volume > 0 且不超过极端值
+            valid_trades = [t for t in trades if 0 < (t.get('volume') or 0) < 1000000]
             if not valid_trades:
                 continue
-                
+
             puts = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'P')[0].upper() == 'P')
             calls = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'C')[0].upper() == 'C')
             if puts == 0 and calls == 0:
                 continue
             pcr_val = puts / calls if calls > 0 else 0
-            
-            if pcr_val > 50:
+
+            # 过滤极端异常值（PCR 正常范围 0.1 ~ 10）
+            if pcr_val > 50 or pcr_val < 0.01:
                 continue
-                
+
             result.append({"time": ts, "pcr": round(pcr_val, 3), "puts": puts, "calls": calls})
         except Exception:
             pass
@@ -82,6 +84,7 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
 @router.get("/dvol")
 async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
     from db.connection import execute_read
+    from services.dvol_analyzer import get_dvol_from_deribit
 
     since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
     rows = execute_read("""
@@ -98,142 +101,14 @@ async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
             continue
         result.append({"time": ts, "dvol": dvol})
 
-    return result
-
-
-@router.get("/vol-surface")
-async def get_vol_surface(currency: str = "BTC"):
-    from services.trades import fetch_deribit_summaries
-    from services.instrument import _parse_inst_name
-
-    summaries = fetch_deribit_summaries(currency)
-    if not summaries:
-        return {"error": "无法获取Deribit数据", "surface": [], "term_structure": [], "backwardation": False}
-
-    by_expiry = {}
-    for s in summaries:
-        meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta:
-            continue
-        exp = meta.expiry
-        if exp not in by_expiry:
-            by_expiry[exp] = {"dte": meta.dte, "contracts": []}
-        by_expiry[exp]["contracts"].append({
-            "strike": meta.strike,
-            "option_type": meta.option_type,
-            "iv": (float(s.get("mark_iv", 0)) or 0) / 100.0,
-            "delta": float(s.get("delta", 0)) or 0,
-            "open_interest": float(s.get("open_interest", 0)) or 0,
-            "bid_iv": (float(s.get("bid_iv", 0)) or 0) / 100.0,
-            "ask_iv": (float(s.get("ask_iv", 0)) or 0) / 100.0,
-        })
-
-    expiry_data = []
-    for exp, data in by_expiry.items():
-        contracts = data["contracts"]
-        if not contracts:
-            continue
-
-        puts = [c for c in contracts if c["option_type"] == "P"]
-        calls = [c for c in contracts if c["option_type"] == "C"]
-
-        atm_iv = None
-        all_cont = puts + calls
-        if all_cont:
-            valid_atm = [c for c in all_cont if 0 < c["iv"] < 2.0 and abs(c["delta"]) <= 0.55]
-            if valid_atm:
-                valid_atm.sort(key=lambda c: abs(c["delta"]))
-                top3 = valid_atm[:min(3, len(valid_atm))]
-                atm_iv = sum(c["iv"] for c in top3) / len(top3)
-
-        surface_row = {"dte": data["dte"], "expiry": exp, "atm": round(atm_iv * 100, 2) if atm_iv else None}
-
-        delta_levels = [(-0.4, "-40delta", "P"), (-0.2, "-20delta", "P"), (0.2, "+20delta", "C"), (0.4, "+40delta", "C")]
-        for delta_target, label, opt_type in delta_levels:
-            pool = puts if opt_type == "P" else calls
-            candidates = [c for c in pool if 0 < c["iv"] < 2.0 and abs(c["delta"]) > 0.01 and abs(c["delta"] - abs(delta_target)) < 0.15]
-            if candidates:
-                candidates.sort(key=lambda c: abs(c["delta"] - abs(delta_target)))
-                surface_row[label] = round(candidates[0]["iv"] * 100, 2)
-            else:
-                surface_row[label] = None
-
-        expiry_data.append(surface_row)
-
-    expiry_data.sort(key=lambda x: x["dte"])
-
-    term_structure = []
-    for ed in expiry_data:
-        atm = ed.get("atm")
-        if atm and 5 < atm < 200:
-            term_structure.append({"dte": ed["dte"], "avg_iv": atm, "expiry": ed["expiry"]})
-
-    if len(term_structure) >= 3:
-        ivs = [t["avg_iv"] for t in term_structure]
-        median_iv = sorted(ivs)[len(ivs) // 2]
-        for t in term_structure:
-            if t["avg_iv"] > median_iv * 2.0:
-                t["avg_iv"] = None
-        term_structure = [t for t in term_structure if t["avg_iv"] is not None]
-
-    if len(term_structure) >= 3:
-        dtes = [t["dte"] for t in term_structure]
-        ivs = [t["avg_iv"] for t in term_structure]
-        for i in range(1, len(ivs) - 1):
-            if ivs[i] is not None and ivs[i-1] is not None and ivs[i+1] is not None:
-                expected = (ivs[i-1] + ivs[i+1]) / 2
-                if abs(ivs[i] - expected) > expected * 0.5:
-                    term_structure[i]["avg_iv"] = round(expected, 2)
-
-    backwardation = False
-    if len(term_structure) >= 2:
-        front_iv = term_structure[0]["avg_iv"]
-        back_iv = term_structure[-1]["avg_iv"]
-        if front_iv and back_iv and front_iv > back_iv:
-            backwardation = True
-
-    return {
-        "surface": expiry_data,
-        "term_structure": term_structure,
-        "backwardation": backwardation,
-        "analysis": _get_iv_term_analysis(term_structure)
-    }
-
-def _get_iv_term_analysis(term_structure: list) -> dict:
-    if not term_structure or len(term_structure) < 2:
-        return {"error": "数据不足"}
-    
-    try:
-        from services.iv_term_structure import IVTermStructureAnalyzer
-        from services.spot_price import get_spot_price
-        
-        currency = "BTC"
-        spot = get_spot_price(currency) or 0
-        
-        hist_vol = None
+    # 如果数据库中没有有效 DVOL 数据，尝试从 Deribit API 获取历史数据
+    if not result:
         try:
-            import requests
-            klines_resp = requests.get(
-                "https://api.binance.com/api/v3/klines",
-                params={"symbol": "BTCUSDT", "interval": "1d", "limit": 30},
-                timeout=5
-            )
-            klines = klines_resp.json()
-            if len(klines) >= 10:
-                import math
-                closes = [float(k[4]) for k in klines]
-                returns = [math.log(closes[i]/closes[i-1]) for i in range(1, len(closes))]
-                mean_ret = sum(returns) / len(returns)
-                variance = sum((r - mean_ret)**2 for r in returns) / (len(returns) - 1)
-                daily_vol = math.sqrt(variance)
-                hist_vol = daily_vol * math.sqrt(365) * 100
+            dvol_data = get_dvol_from_deribit(currency)
+            if dvol_data and dvol_data.get("current"):
+                now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                result.append({"time": now, "dvol": dvol_data["current"]})
         except Exception:
-            hist_vol = None
-        
-        return IVTermStructureAnalyzer.analyze_term_structure(
-            term_data=term_structure,
-            spot=spot,
-            hist_vol=hist_vol
-        )
-    except Exception as e:
-        return {"error": str(e)}
+            pass
+
+    return result

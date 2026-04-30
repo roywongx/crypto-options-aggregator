@@ -45,6 +45,7 @@ class Config:
 
     DB_PATH_ENV = os.getenv("DASHBOARD_DB_PATH", "")
     API_KEY = os.getenv("DASHBOARD_API_KEY", "")
+    SCAN_INTERVAL_SECONDS = 300  # 后台扫描间隔
 
     # v6.3: Strategy Presets
     STRATEGY_PRESETS = {

@@ -1,24 +1,28 @@
 """Payoff 计算 API"""
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api", tags=["payoff"])
 
 
+class PayoffCalcRequest(BaseModel):
+    legs: list
+    spot: float = Field(gt=0)
+    pct_range: float = Field(default=0.3, ge=0.1, le=1.0)
+    steps: int = Field(default=100, ge=1, le=1000)
+
+
 @router.post("/payoff/calc")
-async def calc_payoff(data: dict):
+async def calc_payoff(data: PayoffCalcRequest):
     """计算策略Payoff图"""
     from services.payoff_calculator import PayoffCalculator
 
     calc = PayoffCalculator()
-    legs = data.get("legs", [])
-    spot = data.get("spot", 0)
-    pct_range = data.get("pct_range", 0.3)
-    steps = data.get("steps", 100)
 
-    if not legs or not spot:
-        return {"error": "缺少legs或spot参数"}
+    if not data.legs or not data.spot:
+        raise HTTPException(status_code=400, detail="缺少legs或spot参数")
 
-    return calc.calc_payoff(legs, spot, pct_range, steps)
+    return calc.calc_payoff(data.legs, data.spot, data.pct_range, data.steps)
 
 
 @router.post("/payoff/score")

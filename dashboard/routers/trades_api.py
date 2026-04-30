@@ -6,7 +6,7 @@ router = APIRouter(prefix="/api/trades", tags=["trades"])
 
 @router.get("/history")
 async def get_trades_history(
-    days: int = Query(default=7),
+    days: int = Query(default=7, ge=1, le=90),
     direction: str = Query(default=""),
     source: str = Query(default="")
 ):
@@ -37,7 +37,7 @@ async def get_trades_history(
 @router.get("/strike-distribution")
 async def get_strike_distribution(
     currency: str = Query(default="BTC"),
-    days: int = Query(default=7)
+    days: int = Query(default=7, ge=1, le=90)
 ):
     from db.connection import execute_read
 
@@ -55,7 +55,10 @@ async def get_strike_distribution(
 
 
 @router.get("/wind-analysis")
-async def get_wind_analysis(currency: str = Query(default="BTC"), days: int = Query(default=30)):
+async def get_wind_analysis(
+    currency: str = Query(default="BTC"),
+    days: int = Query(default=30, ge=1, le=90)
+):
     from services.trades import fetch_deribit_summaries
     from services.risk_framework import RiskFramework
     from db.connection import execute_read

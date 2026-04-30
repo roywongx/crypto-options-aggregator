@@ -1,5 +1,6 @@
 """风险评估 API"""
 from fastapi import APIRouter, Query
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api", tags=["risk"])
 
@@ -280,10 +281,10 @@ def get_risk_overview_sync(currency: str = "BTC"):
 @router.get("/risk/assess")
 async def get_risk_assessment(currency: str = Query(default="BTC")):
     """风险评估"""
-    return get_risk_overview_sync(currency)
+    return await run_in_threadpool(get_risk_overview_sync, currency)
 
 
 @router.get("/risk/overview")
 async def get_risk_overview(currency: str = Query(default="BTC")):
     """统一风险中枢 - 合并风险评估与抄底建议"""
-    return get_risk_overview_sync(currency)
+    return await run_in_threadpool(get_risk_overview_sync, currency)

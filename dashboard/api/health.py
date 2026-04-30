@@ -1,10 +1,13 @@
 """健康检查 API"""
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from db.connection import get_db_connection
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import config
 
 router = APIRouter(prefix="/api", tags=["health"])
@@ -36,7 +39,8 @@ async def health_check():
         row = cursor.fetchone()
         if row and row[0]:
             try:
-                last_scan_dt = datetime.strptime(str(row[0]), '%Y-%m-%d %H:%M:%S')
+                # 使用 timezone-aware UTC 解析，避免时区偏差
+                last_scan_dt = datetime.strptime(str(row[0]), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
                 age = time.time() - last_scan_dt.timestamp()
             except (ValueError, TypeError):
                 try:

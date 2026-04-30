@@ -185,7 +185,7 @@ def get_vol_direction_signal(
         try:
             iv = float(c.get("iv", c.get("iv_percentile", 50)))
             dte = int(c.get("dte", 0))
-            c_type = c.get("type", "").upper()
+            c_type = c.get("type", c.get("option_type", "")).upper()
 
             if c_type == "P":
                 put_ivs.append(iv)

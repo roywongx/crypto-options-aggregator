@@ -42,14 +42,40 @@ const API_BASE = '';
 const API_TIMEOUT_MS = 30000;
 const FETCH_MAX_RETRIES = 1;
 
+function getApiKey() {
+    try {
+        return localStorage.getItem('dashboard_api_key') || '';
+    } catch (_) {
+        return '';
+    }
+}
+
 async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
     try {
-        const opts = {...options, signal: controller.signal};
+        const apiKey = getApiKey();
+        const headers = apiKey ? {'X-API-Key': apiKey} : {};
+        const opts = {
+            ...options,
+            signal: controller.signal,
+            headers: {
+                ...headers,
+                ...(options.headers || {})
+            }
+        };
         const res = await fetch(url, opts);
         clearTimeout(timer);
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        if (!res.ok) {
+            let detail = '';
+            try {
+                const errData = await res.clone().json();
+                detail = errData.detail || errData.message || errData.error || '';
+            } catch (_) {
+                try { detail = await res.clone().text(); } catch (_) {}
+            }
+            throw new Error(`HTTP ${res.status}: ${res.statusText}${detail ? ' - ' + detail : ''}`);
+        }
         return res;
     } catch (e) {
         clearTimeout(timer);
@@ -110,6 +136,98 @@ function setupEventListeners() {
             if (e.key === 'Enter') calculateRecovery();
         });
     }
+
+    const scanBtn = document.getElementById('scanBtn');
+    if (scanBtn) scanBtn.addEventListener('click', triggerScan);
+
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    if (exportCsvBtn) exportCsvBtn.addEventListener('click', exportCSV);
+
+    const payoffModeSingle = document.getElementById('payoffModeSingle');
+    if (payoffModeSingle) payoffModeSingle.addEventListener('click', () => setPayoffMode('single'));
+    const payoffModeWheel = document.getElementById('payoffModeWheel');
+    if (payoffModeWheel) payoffModeWheel.addEventListener('click', () => setPayoffMode('wheel'));
+    const payoffModeCompare = document.getElementById('payoffModeCompare');
+    if (payoffModeCompare) payoffModeCompare.addEventListener('click', () => setPayoffMode('compare'));
+
+    const estimatePremiumBtn = document.getElementById('estimatePremiumBtn');
+    if (estimatePremiumBtn) estimatePremiumBtn.addEventListener('click', estimatePremium);
+
+    const calcPayoffBtn = document.getElementById('calcPayoffBtn');
+    if (calcPayoffBtn) calcPayoffBtn.addEventListener('click', calcPayoff);
+
+    const toggleAdvancedBtn = document.getElementById('toggleAdvancedBtn');
+    if (toggleAdvancedBtn) toggleAdvancedBtn.addEventListener('click', toggleAdvancedParams);
+
+    const calcWheelBtn = document.getElementById('calcWheelBtn');
+    if (calcWheelBtn) calcWheelBtn.addEventListener('click', calcWheelROI);
+
+    const modeRollBtn = document.getElementById('modeRollBtn');
+    if (modeRollBtn) modeRollBtn.addEventListener('click', () => setCalcMode('roll'));
+    const modeNewBtn = document.getElementById('modeNewBtn');
+    if (modeNewBtn) modeNewBtn.addEventListener('click', () => setCalcMode('new'));
+    const modeGridBtn = document.getElementById('modeGridBtn');
+    if (modeGridBtn) modeGridBtn.addEventListener('click', () => setCalcMode('grid'));
+
+    const scSubmitBtn = document.getElementById('scSubmitBtn');
+    if (scSubmitBtn) scSubmitBtn.addEventListener('click', submitStrategyCalc);
+
+    const presetCon = document.getElementById('presetCon');
+    if (presetCon) presetCon.addEventListener('click', () => applyPreset('conservative'));
+    const presetStd = document.getElementById('presetStd');
+    if (presetStd) presetStd.addEventListener('click', () => applyPreset('standard'));
+    const presetAgg = document.getElementById('presetAgg');
+    if (presetAgg) presetAgg.addEventListener('click', () => applyPreset('aggressive'));
+
+    const viewSellPut = document.getElementById('viewSellPut');
+    if (viewSellPut) viewSellPut.addEventListener('click', () => switchView('sellput'));
+    const viewCoveredCall = document.getElementById('viewCoveredCall');
+    if (viewCoveredCall) viewCoveredCall.addEventListener('click', () => switchView('coveredcall'));
+    const viewWheel = document.getElementById('viewWheel');
+    if (viewWheel) viewWheel.addEventListener('click', () => switchView('wheel'));
+    const viewAll = document.getElementById('viewAll');
+    if (viewAll) viewAll.addEventListener('click', () => switchView('all'));
+
+    const tableHeaders = document.getElementById('tableHeaders');
+    if (tableHeaders) {
+        tableHeaders.querySelectorAll('th[data-sort]').forEach(th => {
+            th.addEventListener('click', () => sortContracts(th.dataset.sort));
+        });
+    }
+
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) loadMoreBtn.addEventListener('click', loadMoreContracts);
+
+    document.querySelectorAll('.dvol-period-btn').forEach(btn => {
+        btn.addEventListener('click', () => setChartPeriod('dvol', parseInt(btn.dataset.period)));
+    });
+    document.querySelectorAll('.pcr-period-btn').forEach(btn => {
+        btn.addEventListener('click', () => setChartPeriod('pcr', parseInt(btn.dataset.period)));
+    });
+
+    const runSandboxBtn = document.getElementById('runSandboxBtn');
+    if (runSandboxBtn) runSandboxBtn.addEventListener('click', runSandbox);
+
+    const closeRollModalBtn = document.getElementById('closeRollModalBtn');
+    if (closeRollModalBtn) closeRollModalBtn.addEventListener('click', closeRollModal);
+
+    const copilotToggle = document.getElementById('copilotToggle');
+    if (copilotToggle) copilotToggle.addEventListener('click', toggleCopilotChat);
+    const closeCopilotBtn = document.getElementById('closeCopilotBtn');
+    if (closeCopilotBtn) closeCopilotBtn.addEventListener('click', toggleCopilotChat);
+
+    const copilotForm = document.getElementById('copilotForm');
+    if (copilotForm) {
+        copilotForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            sendCopilotMessage(e);
+        });
+    }
+
+    const tradesCurrency = document.getElementById('tradesCurrency');
+    if (tradesCurrency) tradesCurrency.addEventListener('change', loadWindAnalysis);
+    const tradesDays = document.getElementById('tradesDays');
+    if (tradesDays) tradesDays.addEventListener('change', loadWindAnalysis);
 }
 
 function updateParamDisplay() {
@@ -133,24 +251,34 @@ function updateParamDisplay() {
     if (labelEl) labelEl.textContent = `${currency}/USDT`;
 }
 
+let _refreshInFlight = false;
+
 async function setAutoRefresh(minutes) {
     if (autoRefreshInterval) {
         clearInterval(autoRefreshInterval);
         autoRefreshInterval = null;
     }
-    
+
     if (minutes > 0) {
         autoRefreshInterval = setInterval(async () => {
+            if (_refreshInFlight) return;
             if (navigator.onLine) {
-                const currency = document.getElementById('currencySelect')?.value || 'BTC';
-                await loadLatestData();
-                refreshAndLoadDvol(currency).catch(e => console.warn('Auto DVOL refresh failed:', e));
-                refreshAndLoadTrades(currency).catch(e => console.warn('Auto trades refresh failed:', e));
+                _refreshInFlight = true;
+                try {
+                    const currency = document.getElementById('currencySelect')?.value || 'BTC';
+                    await loadLatestData();
+                    await refreshAndLoadDvol(currency);
+                    await refreshAndLoadTrades(currency);
+                } catch (e) {
+                    console.warn('Auto refresh failed:', e);
+                } finally {
+                    _refreshInFlight = false;
+                }
             } else {
                 showAlert('网络断开，跳过自动刷新', 'warning');
             }
         }, minutes * 60 * 1000);
-        
+
         showAlert(`已设置 ${minutes} 分钟自动刷新`, 'info');
     }
 }
@@ -781,8 +909,10 @@ function updateTermStructureUI(data) {
     const structLabel = document.getElementById('tsStructureLabel');
     const slopeLabel = document.getElementById('tsSlopeLabel');
     if (structLabel && slopeLabel && tsData.length >= 2) {
-        const frontIv = tsData[0].avg_iv;
-        const backIv = tsData[tsData.length - 1].avg_iv;
+        const sortedTs = [...tsData].filter(t => t.avg_iv !== null && t.avg_iv > 0).sort((a, b) => a.dte - b.dte);
+        if (sortedTs.length < 2) return;
+        const frontIv = sortedTs[0].avg_iv;
+        const backIv = sortedTs[sortedTs.length - 1].avg_iv;
         if (frontIv && backIv) {
             if (frontIv > backIv) {
                 structLabel.textContent = 'Backwardation';
@@ -1728,8 +1858,10 @@ function renderTablePage() {
     const loadedCountEl = document.getElementById('loadedCount');
     const totalCountEl = document.getElementById('totalCount');
 
+    const prevCount = _displayedCount || 0;
     _displayedCount = Math.min(window.contractPage * TABLE_PAGE_SIZE, _allContracts.length);
-    const displayContracts = _allContracts.slice(0, _displayedCount);
+    const isAppend = prevCount > 0 && _displayedCount > prevCount && tbody.children.length > 0;
+    const displayContracts = _allContracts.slice(isAppend ? prevCount : 0, _displayedCount);
 
     if (loadedCountEl) loadedCountEl.textContent = _displayedCount;
     if (totalCountEl) totalCountEl.textContent = _allContracts.length;
@@ -1742,20 +1874,21 @@ function renderTablePage() {
     }
 
     let highRiskContracts = [];
-    tbody.innerHTML = displayContracts.map((contract, idx) => {
+    const rowsHtml = displayContracts.map((contract, idx) => {
         const platformColor = contract.platform === 'Deribit' ? 'text-blue-400' : 'text-yellow-400';
         const liqColor = contract.liquidity_score >= 70 ? 'text-green-400' : contract.liquidity_score >= 40 ? 'text-yellow-400' : 'text-red-400';
-        const deltaAbs = Math.abs(contract.delta);
+        const deltaAbs = Math.abs(Number(contract.delta) || 0);
 
-        const symbol = contract.symbol || contract.instrument_name || 'N/A';
+        const symbol = safeHTML(contract.symbol || contract.instrument_name || 'N/A');
         contract.symbol = symbol;
 
         let riskBadge = '';
         let riskClass = '';
 
         let distancePct = null;
-        if (currentSpotPrice && contract.strike) {
-            distancePct = Math.abs(contract.strike - currentSpotPrice) / currentSpotPrice * 100;
+        const strikeVal = Number(contract.strike);
+        if (currentSpotPrice && strikeVal > 0 && Number.isFinite(strikeVal)) {
+            distancePct = Math.abs(strikeVal - currentSpotPrice) / currentSpotPrice * 100;
         }
 
         const isHighDelta = deltaAbs > 0.45;
@@ -1779,50 +1912,61 @@ function renderTablePage() {
         }
 
         const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
-        const lossVal = Math.abs(contract.loss_at_10pct || 0);
-        const breakeven = contract.breakeven || 0;
-        const oi = contract.open_interest || 0;
-        const spreadPct = contract.spread_pct || 0;
-        const gamma = contract.gamma || 0;
-        const vega = contract.vega || 0;
-        const theta = contract.theta || 0;
-        const iv = contract.mark_iv || contract.iv || 0;
-        const pop = contract.pop || null;
-        const bePct = contract.breakeven_pct || null;
-        const ivRank = contract.iv_rank || null;
-        const marginReq = contract.margin_required || 0;
-        const capEff = contract.capital_efficiency || 0;
-        const supportDist = contract.support_distance_pct;
+        const lossVal = Math.abs(Number(contract.loss_at_10pct) || 0);
+        const breakeven = Number(contract.breakeven) || 0;
+        const oi = Number(contract.open_interest) || 0;
+        const spreadPct = Number(contract.spread_pct) || 0;
+        const gamma = Number(contract.gamma) || 0;
+        const vega = Number(contract.vega) || 0;
+        const theta = Number(contract.theta) || 0;
+        const iv = Number(contract.mark_iv) || Number(contract.iv) || 0;
+        const pop = Number(contract.pop) || null;
+        const bePct = Number(contract.breakeven_pct) || null;
+        const ivRank = Number(contract.iv_rank) || null;
+        const marginReq = Number(contract.margin_required) || 0;
+        const capEff = Number(contract.capital_efficiency) || 0;
+        const supportDist = contract.support_distance_pct !== undefined ? Number(contract.support_distance_pct) : null;
         const isPut = contract.option_type === 'P' || contract.option_type === 'PUT';
+        const dte = Number(contract.dte) || 0;
+        const apr = Number(contract.apr) || 0;
+        const premium = Number(contract.premium) || Number(contract.premium_usd) || 0;
+        const liquidityScore = Number(contract.liquidity_score) || 0;
+        const score = contract._score;
 
         return `<tr class="hover:bg-white/[0.02] transition ${riskClass}">
-            <td class="py-2 px-3 text-center"><span class="${platformColor} text-xs font-semibold">${contract.platform}</span></td>
-            <td class="py-2 px-2 text-center"><span class="${isPut ? 'text-green-400' : 'text-blue-400'} text-xs font-bold">${contract.option_type || 'PUT'}</span></td>
-            <td class="py-2 px-2 text-center font-mono text-xs tabular-nums">${symbol.split('-')[1] || ''}</td>
-            <td class="py-2 px-2 text-center text-xs tabular-nums">${(contract.dte || 0).toFixed(0)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums">$${Math.round(contract.strike).toLocaleString()}</td>
+            <td class="py-2 px-3 text-center"><span class="${platformColor} text-xs font-semibold">${safeHTML(contract.platform)}</span></td>
+            <td class="py-2 px-2 text-center"><span class="${isPut ? 'text-green-400' : 'text-blue-400'} text-xs font-bold">${safeHTML(contract.option_type || 'PUT')}</span></td>
+            <td class="py-2 px-2 text-center font-mono text-xs tabular-nums">${safeHTML(symbol.split('-')[1] || '')}</td>
+            <td class="py-2 px-2 text-center text-xs tabular-nums">${dte.toFixed(0)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums">$${Math.round(strikeVal).toLocaleString()}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${theta > 5 ? 'text-emerald-400' : theta > 0 ? 'text-green-300' : 'text-gray-500'}" title="每日时间价值衰减">${theta > 0 ? '+' : ''}${theta.toFixed(2)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-orange-400' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-yellow-400' : 'text-gray-300'}">${vega.toFixed(1)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${iv ? (iv >= 80 ? 'text-red-400' : iv >= 50 ? 'text-yellow-400' : 'text-emerald-400') : 'text-gray-300'}">${iv ? iv.toFixed(1) + '%' : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${(contract.apr || 0).toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${apr.toFixed(1)}%</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (isPut ? (pop >= 70 ? 'text-emerald-400' : pop >= 50 ? 'text-yellow-300' : 'text-orange-400') : (pop <= 30 ? 'text-emerald-400' : pop <= 50 ? 'text-yellow-300' : 'text-red-400')) : 'text-gray-500'}" title="${isPut ? '到期不被行权概率' : '被行权概率(卖飞风险)'}">${pop ? (isPut ? pop.toFixed(0) + '%' : (100 - pop).toFixed(0) + '%飞') : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${(contract.premium || contract.premium_usd || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${premium.toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-400" title="开仓保证金需求">$${marginReq.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${capEff >= 15 ? 'text-emerald-400' : capEff >= 8 ? 'text-green-300' : 'text-gray-400'}" title="权利金/保证金">${capEff.toFixed(1)}%</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${supportDist !== null && supportDist !== undefined ? (supportDist >= 10 ? 'text-emerald-400' : supportDist >= 5 ? 'text-yellow-300' : 'text-red-400') : 'text-gray-600'}" title="PUT行权价到支撑位距离">${supportDist !== null && supportDist !== undefined ? supportDist.toFixed(1) + '%' : (isPut ? '-' : 'N/A')}</td>
-            <td class="py-2 px-2 text-center"><span class="${liqColor} text-xs font-medium">${contract.liquidity_score}</span></td>
+            <td class="py-2 px-2 text-center"><span class="${liqColor} text-xs font-medium">${liquidityScore}</span></td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-red-400/80">$${lossVal.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-blue-300/80">$${breakeven.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${bePct ? (bePct >= 10 ? 'text-emerald-400' : bePct >= 5 ? 'text-yellow-300' : 'text-orange-400') : 'text-gray-500'}">${bePct ? bePct.toFixed(1) + '%' : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-400">${oi.toLocaleString()}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${spreadColor}">${spreadPct.toFixed(2)}%</td>
             <td class="py-2 px-2 text-center font-mono text-xs tabular-nums ${ivRank ? (ivRank >= 70 ? 'text-red-400' : ivRank <= 30 ? 'text-emerald-400' : 'text-gray-400') : 'text-gray-500'}">${ivRank ? String(ivRank).split('.')[0] : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${contract._score !== undefined ? (contract._score >= 0.7 ? "text-emerald-400 font-bold" : contract._score >= 0.5 ? "text-green-300" : contract._score >= 0.3 ? "text-yellow-300" : "text-gray-500") : "text-gray-500"}" title="加权评分: APR(25%)+POP(25%)+安全垫(20%)+流动性(15%)+IV中性(15%)">${contract._score !== undefined ? contract._score.toFixed(3) : "-"}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${score !== undefined ? (score >= 0.7 ? "text-emerald-400 font-bold" : score >= 0.5 ? "text-green-300" : score >= 0.3 ? "text-yellow-300" : "text-gray-500") : "text-gray-500"}" title="加权评分: APR(25%)+POP(25%)+安全垫(20%)+流动性(15%)+IV中性(15%)">${score !== undefined ? score.toFixed(3) : "-"}</td>
             <td class="py-2 px-3 text-center">${riskBadge}</td>
         </tr>`;
     }).join('');
+
+    if (isAppend) {
+        tbody.insertAdjacentHTML('beforeend', rowsHtml);
+    } else {
+        tbody.innerHTML = rowsHtml;
+    }
 
     if (highRiskContracts.length > 0 && 'Notification' in window && Notification.permission === 'granted') {
         new Notification('期权风险预警', {
@@ -1990,7 +2134,7 @@ function updateLargeTrades(trades, count) {
     };
 
     container.innerHTML = trades.map(trade => {
-        const inst = trade.instrument_name || trade.symbol || '';
+        const inst = safeHTML(trade.instrument_name || trade.symbol || '');
         const dir = (trade.direction || '').toLowerCase();
         const flow = trade.flow_label || '';
         const volume = trade.volume || 0;
@@ -2023,7 +2167,7 @@ function updateLargeTrades(trades, count) {
             : '';
 
         const strikeStr = strike ? '$' + strike.toLocaleString() : '';
-        const dteMatch = inst.match(/(\d{1,2}[A-Z]{3}\d{2})/);
+        const dteMatch = String(trade.instrument_name || trade.symbol || '').match(/(\d{1,2}[A-Z]{3}\d{2})/);
         const dteStr = dteMatch ? dteMatch[1] : '';
 
         const notionalStr = notional >= 1000000
@@ -2040,8 +2184,8 @@ function updateLargeTrades(trades, count) {
             ? '$' + Math.round(premium).toLocaleString()
             : '';
 
-        const flowCN = flowNames[flow] || flow || '';
-        const flowHint = flowHints[flow] || '';
+        const flowCN = safeHTML(flowNames[flow] || flow || '');
+        const flowHint = safeHTML(flowHints[flow] || '');
 
         const blockTag = isBlock
             ? '<span class="bg-amber-500/30 text-amber-300 text-[9px] px-1 py-0.5 rounded font-bold">大宗</span>'
@@ -2055,7 +2199,7 @@ function updateLargeTrades(trades, count) {
         return `<div class="${sevStyle.bg} border-l-3 ${sevStyle.border} rounded-lg px-3 py-2 text-xs hover:bg-white/5 transition cursor-default">
             <div class="flex items-center gap-1.5">
                 <span class="${dirColor} font-bold text-sm">${dirIcon}</span>
-                <span class="font-mono text-white font-medium truncate" style="max-width:130px" title="${safeHTML(inst)}">${inst || '--'}</span>
+                <span class="font-mono text-white font-medium truncate" style="max-width:130px" title="${inst}">${inst || '--'}</span>
                 ${optTag}${blockTag}
                 <span class="text-gray-500">${strikeStr}</span>
                 <span class="text-yellow-300 font-bold ml-auto">${notionalStr}</span>
@@ -2122,17 +2266,23 @@ async function loadMacroData() {
     }
 }
 
-function updateLastUpdateTime(timestamp) {
-    let date;
-    if (timestamp && timestamp.includes('T')) {
-        date = new Date(timestamp);
-    } else if (timestamp) {
-        const parts=timestamp.split(/[- :]/);
-        const [year, month, day, hour, minute, second] = parts.map(Number);
-        date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-    } else {
-        date = new Date();
+function parseUTC(ts) {
+    if (!ts) return new Date(NaN);
+    const s = String(ts).trim();
+    if (s.includes('T') || s.includes('Z')) {
+        const iso = s.endsWith('Z') ? s : s + 'Z';
+        return new Date(iso);
     }
+    const parts = s.split(/[- :]/);
+    if (parts.length >= 5) {
+        const [year, month, day, hour, minute, second = 0] = parts.map(Number);
+        return new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    }
+    return new Date(s);
+}
+
+function updateLastUpdateTime(timestamp) {
+    const date = timestamp ? parseUTC(timestamp) : new Date();
     if (isNaN(date.getTime())) { document.getElementById('lastUpdate').textContent = '更新于 --:--:--'; return; }
     const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
@@ -2156,8 +2306,8 @@ async function loadDvolChartData() {
         const filtered = data.filter(d => d.dvol && d.dvol > 0);
 
         dvolChart.data.labels = filtered.map(d => {
-            const date = new Date(d.time || d.timestamp);
-            return hours <= 24 ? `${date.getHours()}:${String(date.getMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getMonth()+1}/${date.getDate()} ${date.getHours()}:00` : `${date.getMonth()+1}/${date.getDate()}`;
+            const date = parseUTC(d.time || d.timestamp);
+            return hours <= 24 ? `${date.getUTCHours()}:${String(date.getUTCMinutes()).padStart(2,'0')}` : hours <= 168 ? `${date.getUTCMonth()+1}/${date.getUTCDate()} ${date.getUTCHours()}:00` : `${date.getUTCMonth()+1}/${date.getUTCDate()}`;
         });
         dvolChart.data.datasets[0].data = filtered.map(d => d.dvol);
         dvolChart.update();
@@ -2243,19 +2393,31 @@ function toggleCopilotChat() {
 function addCopilotMessage(content, isUser = false) {
     const container = document.getElementById('copilotMessages');
     if (!container) return;
-    
+
     const div = document.createElement('div');
     div.className = 'flex items-start gap-2 ' + (isUser ? 'flex-row-reverse' : '');
-    
-    const icon = isUser ? 
-        '<i class="fas fa-user text-green-400 mt-1 text-xs"></i>' :
-        '<i class="fas fa-robot text-blue-400 mt-1 text-xs"></i>';
-    
-    const bubbleClass = isUser ?
-        'bg-blue-600/30 rounded-lg p-2 text-xs text-gray-200 max-w-[85%]' :
-        'bg-gray-800/50 rounded-lg p-2 text-xs text-gray-300 max-w-[85%]';
-    
-    div.innerHTML = `${icon}<div class="${bubbleClass}">${content}</div>`;
+
+    const icon = document.createElement('i');
+    icon.className = isUser
+        ? 'fas fa-user text-green-400 mt-1 text-xs'
+        : 'fas fa-robot text-blue-400 mt-1 text-xs';
+
+    const bubble = document.createElement('div');
+    bubble.className = isUser
+        ? 'bg-blue-600/30 rounded-lg p-2 text-xs text-gray-200 max-w-[85%]'
+        : 'bg-gray-800/50 rounded-lg p-2 text-xs text-gray-300 max-w-[85%]';
+
+    // 安全处理：将内容按换行拆分，使用 textContent 避免 XSS
+    const lines = String(content).split('\n');
+    lines.forEach((line, index) => {
+        if (index > 0) {
+            bubble.appendChild(document.createElement('br'));
+        }
+        bubble.appendChild(document.createTextNode(line));
+    });
+
+    div.appendChild(icon);
+    div.appendChild(bubble);
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
 }
@@ -2288,7 +2450,7 @@ async function sendCopilotMessage(event) {
         loadingDiv.remove();
         
         if (data.response) {
-            addCopilotMessage(data.response.replace(/\n/g, '<br>'));
+            addCopilotMessage(data.response);
         } else {
             addCopilotMessage('抱歉，AI 服务暂时不可用。请确保已配置 API Key。');
         }
@@ -3042,6 +3204,11 @@ async function loadWindAnalysis() {
         const chartEl = document.getElementById('strikeFlowsChart');
         const dist = data.distribution || [];
         if (chartEl) {
+            // 销毁旧 Chart 实例防止内存泄漏
+            if (window._strikeChart) {
+                window._strikeChart.destroy();
+                window._strikeChart = null;
+            }
             chartEl.innerHTML = '';
             const canvas = document.createElement('canvas');
             canvas.id = 'strikeChartCanvas';
@@ -3164,14 +3331,37 @@ async function loadTermStructure(retryCount = 0) {
 
         const ctx = document.getElementById('termStructureChart');
         if (!ctx) return;
+        // 恢复 canvas 显示并隐藏错误 overlay
+        ctx.style.display = '';
+        const tsErr = document.getElementById('termStructureError');
+        if (tsErr) tsErr.style.display = 'none';
+
         const validTs = tsData.filter(t => t.avg_iv !== null && t.avg_iv > 0);
         if (validTs.length < 2) {
-            ctx.parentElement.innerHTML = '<div class="text-gray-500 text-center py-8 text-sm">数据不足 (' + validTs.length + ' 个到期月份)</div>';
+            ctx.style.display = 'none';
+            let errDiv = document.getElementById('termStructureError');
+            if (!errDiv) {
+                errDiv = document.createElement('div');
+                errDiv.id = 'termStructureError';
+                errDiv.className = 'text-gray-500 text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
+                ctx.parentElement.appendChild(errDiv);
+            }
+            errDiv.textContent = '数据不足 (' + validTs.length + ' 个到期月份)';
+            errDiv.style.display = '';
             return;
         }
 
         if (typeof Chart === 'undefined') {
-            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">⚠️ Chart.js 未加载</div>';
+            ctx.style.display = 'none';
+            let errDiv = document.getElementById('termStructureError');
+            if (!errDiv) {
+                errDiv = document.createElement('div');
+                errDiv.id = 'termStructureError';
+                errDiv.className = 'text-yellow-500 text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
+                ctx.parentElement.appendChild(errDiv);
+            }
+            errDiv.textContent = '⚠️ Chart.js 未加载';
+            errDiv.style.display = '';
             return;
         }
 
@@ -3300,13 +3490,30 @@ async function loadTermStructure(retryCount = 0) {
             const recsEl = document.getElementById('ivRecommendations');
             if (recsEl && analysis.recommendations && analysis.recommendations.length > 0) {
                 const typeColors = {'warning': 'border-red-500/30 bg-red-500/5', 'opportunity': 'border-green-500/30 bg-green-500/5', 'info': 'border-blue-500/30 bg-blue-500/5'};
-                recsEl.innerHTML = analysis.recommendations.map(r =>
-                    '<div class="p-2.5 rounded border ' + (typeColors[r.type] || 'border-gray-700/30 bg-gray-800/30') + '">' +
-                    '<div class="text-xs font-bold mb-1">' + r.title + '</div>' +
-                    '<div class="text-[11px] text-gray-400 leading-relaxed">' + r.body + '</div>' +
-                    '<div class="text-[11px] text-cyan-300 mt-1 font-medium">→ ' + r.action + '</div>' +
-                    '</div>'
-                ).join('');
+                const fragment = document.createDocumentFragment();
+                analysis.recommendations.forEach(r => {
+                    const div = document.createElement('div');
+                    div.className = 'p-2.5 rounded border ' + (typeColors[r.type] || 'border-gray-700/30 bg-gray-800/30');
+
+                    const title = document.createElement('div');
+                    title.className = 'text-xs font-bold mb-1';
+                    title.textContent = r.title || '';
+                    div.appendChild(title);
+
+                    const body = document.createElement('div');
+                    body.className = 'text-[11px] text-gray-400 leading-relaxed';
+                    body.textContent = r.body || '';
+                    div.appendChild(body);
+
+                    const action = document.createElement('div');
+                    action.className = 'text-[11px] text-cyan-300 mt-1 font-medium';
+                    action.textContent = '→ ' + (r.action || '');
+                    div.appendChild(action);
+
+                    fragment.appendChild(div);
+                });
+                recsEl.innerHTML = '';
+                recsEl.appendChild(fragment);
             }
         }
     } catch(e) {
@@ -3322,11 +3529,20 @@ async function loadTermStructure(retryCount = 0) {
 function showTermStructureError(message) {
     const el = document.getElementById('termStructureChart');
     if (el && el.parentElement) {
-        el.parentElement.innerHTML = '<div class="text-gray-500 text-center py-8 text-xs">' +
-            '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
+        // 保留 canvas，使用 overlay 显示错误
+        el.style.display = 'none';
+        let errDiv = document.getElementById('termStructureError');
+        if (!errDiv) {
+            errDiv = document.createElement('div');
+            errDiv.id = 'termStructureError';
+            errDiv.className = 'text-gray-500 text-center py-8 text-xs absolute inset-0 bg-gray-900/90 z-10';
+            el.parentElement.appendChild(errDiv);
+        }
+        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
             '数据加载失败: ' + safeHTML(message) + '<br>' +
             '<button onclick="loadTermStructure()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
-            '<i class="fas fa-redo mr-1"></i>重试</button></div>';
+            '<i class="fas fa-redo mr-1"></i>重试</button>';
+        errDiv.style.display = '';
     }
 }
 
@@ -3418,10 +3634,25 @@ async function loadMaxPain(retryCount = 0) {
         }
 
         const ctx = document.getElementById('painGexChart');
-        if (!ctx || !exp.pain_curve || !exp.pain_curve.length) return;
+        const hasPainData = (exp.pain_curve && exp.pain_curve.length) || (exp.pain_chart && exp.pain_chart.length);
+        if (!ctx || !hasPainData) return;
+
+        // 恢复 canvas 显示并隐藏错误 overlay
+        ctx.style.display = '';
+        const mpErr = document.getElementById('maxPainError');
+        if (mpErr) mpErr.style.display = 'none';
 
         if (typeof Chart === 'undefined') {
-            ctx.parentElement.innerHTML = '<div class="text-yellow-500 text-center py-8 text-sm">⚠️ Chart.js 未加载</div>';
+            ctx.style.display = 'none';
+            let errDiv = document.getElementById('maxPainError');
+            if (!errDiv) {
+                errDiv = document.createElement('div');
+                errDiv.id = 'maxPainError';
+                errDiv.className = 'text-yellow-500 text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
+                ctx.parentElement.appendChild(errDiv);
+            }
+            errDiv.textContent = '⚠️ Chart.js 未加载';
+            errDiv.style.display = '';
             return;
         }
 
@@ -3566,12 +3797,20 @@ async function loadMaxPain(retryCount = 0) {
 function showMaxPainError(message) {
     const container = document.getElementById('painGexChart');
     if (container && container.parentElement) {
-        const mpSection = container.closest('.grid') || container.parentElement;
-        mpSection.innerHTML = '<div class="col-span-2 text-gray-500 text-center py-8">' +
-            '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
+        // 保留 canvas，使用 overlay 显示错误
+        container.style.display = 'none';
+        let errDiv = document.getElementById('maxPainError');
+        if (!errDiv) {
+            errDiv = document.createElement('div');
+            errDiv.id = 'maxPainError';
+            errDiv.className = 'text-gray-500 text-center py-8 absolute inset-0 bg-gray-900/90 z-10';
+            container.parentElement.appendChild(errDiv);
+        }
+        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
             '最大痛点数据加载失败: ' + safeHTML(message) + '<br>' +
             '<button onclick="loadMaxPain()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
-            '<i class="fas fa-redo mr-1"></i>重试</button></div>';
+            '<i class="fas fa-redo mr-1"></i>重试</button>';
+        errDiv.style.display = '';
     }
 }
 
@@ -3622,7 +3861,7 @@ async function runSandbox() {
         html += '<span class="text-sm font-bold">🛡️ 安全评估</span>';
         html += '<span class="text-xs font-mono bg-black/20 px-2 py-1 rounded">资金覆盖率 ' + (safety.reserve_sufficiency || 0) + '%</span>';
         html += '</div>';
-        html += '<div class="text-sm">' + safety.message + '</div>';
+        html += '<div class="text-sm">' + safeHTML(safety.message) + '</div>';
         html += '</div>';
 
         // ===== 崩盘情景 + 损失分析 =====
@@ -3658,7 +3897,7 @@ async function runSandbox() {
             html += '<div class="p-3 rounded-lg border ' + planBorder + ' ' + planBg + ' mb-3">';
             html += '<div class="text-sm font-bold mb-2">🎯 最佳恢复方案</div>';
             html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">';
-            html += '<div><span class="text-gray-500 block">恢复合约</span><span class="font-mono">' + (best.symbol || '-') + '</span></div>';
+            html += '<div><span class="text-gray-500 block">恢复合约</span><span class="font-mono">' + safeHTML(best.symbol || '-') + '</span></div>';
             html += '<div><span class="text-gray-500 block">行权价 / DTE</span><span class="font-mono">$' + best.strike + ' / ' + best.dte + 'D</span></div>';
             html += '<div><span class="text-gray-500 block">APR / Delta</span><span class="font-mono">' + best.apr + '% / ' + best.delta + '</span></div>';
             html += '<div><span class="text-gray-500 block">OI</span><span class="font-mono">' + best.oi + '</span></div>';
@@ -3721,7 +3960,7 @@ async function runSandbox() {
 
         resultDiv.innerHTML = html;
     } catch(e) {
-        resultDiv.innerHTML = '<div class="text-red-400 text-sm p-3">❌ 错误: ' + e.message + '</div>';
+        resultDiv.innerHTML = '<div class="text-red-400 text-sm p-3">❌ 错误: ' + safeHTML(e.message) + '</div>';
     }
 }
 
@@ -3741,8 +3980,30 @@ async function loadPcrChart(currency = 'BTC', hours = 168) {
         const res = await safeFetch(`${API_BASE}/api/charts/pcr?currency=${currency}&hours=${hours}`);
         const data = await res.json();
         const ctx = document.getElementById('pcrChart');
-        if (!ctx || !data || data.length === 0) return;
-        if (window._pcrChart) window._pcrChart.destroy();
+        if (!ctx) return;
+        if (window._pcrChart) {
+            window._pcrChart.destroy();
+            window._pcrChart = null;
+        }
+        if (!data || data.length === 0) {
+            const container = ctx.parentElement;
+            if (container) {
+                let errDiv = document.getElementById('pcrChartError');
+                if (!errDiv) {
+                    errDiv = document.createElement('div');
+                    errDiv.id = 'pcrChartError';
+                    errDiv.className = 'text-gray-500 text-center py-8 text-xs';
+                    container.appendChild(errDiv);
+                }
+                errDiv.textContent = '暂无 PCR 数据';
+                errDiv.style.display = '';
+            }
+            ctx.style.display = 'none';
+            return;
+        }
+        ctx.style.display = '';
+        const pcrErr = document.getElementById('pcrChartError');
+        if (pcrErr) pcrErr.style.display = 'none';
         window._pcrChart = new Chart(ctx, {
             type: 'line',
             data: {

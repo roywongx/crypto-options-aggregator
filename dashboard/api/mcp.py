@@ -1,6 +1,7 @@
 """MCP Server API"""
 from typing import Dict, Any
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
@@ -82,7 +83,9 @@ async def mcp_chat(request: MCPChatRequest):
         {"role": "user", "content": request.query}
     ]
 
-    response = ai_chat(messages, preset="chinese", temperature=0.5, max_tokens=500)
+    response = await run_in_threadpool(
+        ai_chat, messages, preset="chinese", temperature=0.5, max_tokens=500
+    )
 
     return {
         "response": response,

@@ -72,12 +72,12 @@
                         <span class="w-2 h-2 bg-green-500 rounded-full pulse-dot"></span>
                         <span id="lastUpdate" class="text-gray-300">等待数据...</span>
                     </div>
-                    <button id="scanBtn" onclick="triggerScan()" class="btn-primary px-5 py-2.5 rounded-xl font-medium flex items-center gap-2">
+                    <button id="scanBtn" class="btn-primary px-5 py-2.5 rounded-xl font-medium flex items-center gap-2">
                         <i class="fas fa-search"></i>
                         <i class="fas fa-sync-alt" id="scanIcon" style="display:none"></i>
                         <span>立即扫描</span>
                     </button>
-                    <button onclick="exportCSV()" class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-colors" title="导出CSV">
+                    <button id="exportCsvBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-colors" title="导出CSV">
                         <i class="fas fa-download"></i>
                         <span class="hidden sm:inline">导出</span>
                     </button>
@@ -567,9 +567,9 @@
                     <h3 class="font-semibold text-lg">Payoff 可视化 & Wheel ROI</h3>
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="setPayoffMode('single')" id="payoffModeSingle" class="px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400">单策略</button>
-                    <button onclick="setPayoffMode('wheel')" id="payoffModeWheel" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">Wheel 策略</button>
-                    <button onclick="setPayoffMode('compare')" id="payoffModeCompare" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">对比模式</button>
+                    <button id="payoffModeSingle" class="px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400">单策略</button>
+                    <button id="payoffModeWheel" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">Wheel 策略</button>
+                    <button id="payoffModeCompare" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">对比模式</button>
                 </div>
             </div>
 
@@ -604,7 +604,7 @@
                         <label class="block text-gray-400 text-xs mb-1">权利金 ($)</label>
                         <div class="flex gap-2">
                             <input type="number" id="payoffPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            <button onclick="estimatePremium()" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-lg text-sm font-medium" title="智能估算权利金">
+                            <button id="estimatePremiumBtn" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-lg text-sm font-medium" title="智能估算权利金">
                                 <i class="fas fa-magic"></i>
                             </button>
                         </div>
@@ -625,10 +625,10 @@
                     </div>
                 </div>
                 <div class="flex gap-2 mb-4">
-                    <button onclick="calcPayoff()" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                    <button id="calcPayoffBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
                         <i class="fas fa-calculator mr-1"></i>计算 Payoff
                     </button>
-                    <button onclick="toggleAdvancedParams()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                    <button id="toggleAdvancedBtn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
                         <i class="fas fa-cog mr-1"></i>高级参数
                     </button>
                 </div>
@@ -715,7 +715,7 @@
                         </div>
                     </div>
                 </div>
-                <button onclick="calcWheelROI()" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
+                <button id="calcWheelBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
                     <i class="fas fa-sync-alt mr-1"></i>计算 Wheel ROI
                 </button>
             </div>
@@ -784,13 +784,13 @@
             <p class="text-xs text-gray-500 mb-4 ml-6">三种模式共享统一筛选器、评分框架和指标计算（胜率/BS定价/Theta衰减/Greeks）</p>
 
             <div class="flex gap-2 mb-4">
-                <button onclick="setCalcMode('roll')" id="modeRollBtn" class="px-4 py-2 rounded-lg font-medium text-sm transition-all bg-orange-500/20 border border-orange-500/50 text-orange-400">
+                <button id="modeRollBtn" class="px-4 py-2 rounded-lg font-medium text-sm transition-all bg-orange-500/20 border border-orange-500/50 text-orange-400">
                     <i class="fas fa-sync-alt mr-1"></i>滚仓模式
                 </button>
-                <button onclick="setCalcMode('new')" id="modeNewBtn" class="px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">
+                <button id="modeNewBtn" class="px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">
                     <i class="fas fa-plus mr-1"></i>新建模式
                 </button>
-                <button onclick="setCalcMode('grid')" id="modeGridBtn" class="px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">
+                <button id="modeGridBtn" class="px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">
                     <i class="fas fa-th mr-1"></i>网格模式
                 </button>
             </div>
@@ -891,7 +891,7 @@
                                 <input type="number" id="scMaxDte" value="90" class="input-dark w-full p-1 rounded-lg text-xs text-center">
                             </div>
                         </div>
-                        <button onclick="submitStrategyCalc()" id="scSubmitBtn" class="w-full btn-primary text-white py-2.5 rounded-xl font-bold flex justify-center items-center gap-2 mt-2">
+                        <button id="scSubmitBtn" class="w-full btn-primary text-white py-2.5 rounded-xl font-bold flex justify-center items-center gap-2 mt-2">
                             <i class="fas fa-magic"></i> 计算方案
                         </button>
                     </div>
@@ -946,9 +946,9 @@
                 <div>
                     <label class="block text-gray-400 text-xs mb-1.5">风险偏好</label>
                     <div class="flex gap-1">
-                        <button type="button" onclick="applyPreset('conservative')" id="presetCon" class="flex-1 px-2 py-2 text-xs rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition font-medium">保守</button>
-                        <button type="button" onclick="applyPreset('standard')" id="presetStd" class="flex-1 px-2 py-2 text-xs rounded-lg border border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 transition font-medium ring-1 ring-blue-500/30">标准</button>
-                        <button type="button" onclick="applyPreset('aggressive')" id="presetAgg" class="flex-1 px-2 py-2 text-xs rounded-lg border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 transition font-medium">进取</button>
+                        <button type="button" id="presetCon" class="flex-1 px-2 py-2 text-xs rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition font-medium">保守</button>
+                        <button type="button" id="presetStd" class="flex-1 px-2 py-2 text-xs rounded-lg border border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 transition font-medium ring-1 ring-blue-500/30">标准</button>
+                        <button type="button" id="presetAgg" class="flex-1 px-2 py-2 text-xs rounded-lg border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 transition font-medium">进取</button>
                     </div>
                 </div>
                 <div>
@@ -991,10 +991,10 @@
                         <i class="fas fa-list-ol text-orange-500"></i>
                         实时机会列表
                         <div class="flex items-center gap-1 ml-3">
-                            <button onclick="switchView('sellput')" id="viewSellPut" class="px-2.5 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30 transition hover:bg-green-500/30">Sell Put</button>
-                            <button onclick="switchView('coveredcall')" id="viewCoveredCall" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-blue-500/20 hover:text-blue-400 hover:border-blue-500/30">Covered Call</button>
-                            <button onclick="switchView('wheel')" id="viewWheel" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-purple-500/20 hover:text-purple-400 hover:border-purple-500/30">Wheel</button>
-                            <button onclick="switchView('all')" id="viewAll" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-orange-500/20 hover:text-orange-400 hover:border-orange-500/30">全部</button>
+                            <button id="viewSellPut" class="px-2.5 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30 transition hover:bg-green-500/30">Sell Put</button>
+                            <button id="viewCoveredCall" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-blue-500/20 hover:text-blue-400 hover:border-blue-500/30">Covered Call</button>
+                            <button id="viewWheel" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-purple-500/20 hover:text-purple-400 hover:border-purple-500/30">Wheel</button>
+                            <button id="viewAll" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-orange-500/20 hover:text-orange-400 hover:border-orange-500/30">全部</button>
                         </div>
                     </h2>
                     <div class="flex items-center gap-3">
@@ -1011,31 +1011,31 @@
                         <table class="w-full table-compact" id="contractsTable">
                             <thead>
                                 <tr class="bg-gradient-to-r from-gray-800/80 to-gray-800/40 text-gray-400 text-xs" id="tableHeaders">
-                                    <th style="width:4.5%" class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('platform')" data-sort="platform">平台</th>
-                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('option_type')" data-sort="option_type">类型</th>
-                                    <th style="width:6.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('expiry')" data-sort="expiry">到期日</th>
-                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('dte')" data-sort="dte">到期天数</th>
-                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('strike')" data-sort="strike">行权价</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('delta')" data-sort="delta">Delta</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('theta')" data-sort="theta" title="Theta - 每日时间价值衰减，正值=每天赚多少">Theta</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('gamma')" data-sort="gamma">Gamma</th>
-                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('vega')" data-sort="vega">Vega</th>
-                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('mark_iv')" data-sort="mark_iv">隐含波动率</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('apr')" data-sort="apr">年化收益</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('pop')" data-sort="pop" title="盈利概率 - PUT: 到期不被行权概率; CALL: 被行权概率(卖飞风险)">POP</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('premium')" data-sort="premium">权利金$</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('margin_required')" data-sort="margin_required" title="保证金需求 - 开仓所需最低保证金">保证金$</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('capital_efficiency')" data-sort="capital_efficiency" title="资金效率 - 权利金/保证金，越高越好">资金效率</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('support_distance_pct')" data-sort="support_distance_pct" title="支撑距离 - PUT行权价到常规支撑位的距离，>10%安全，<5%危险">支撑距离</th>
-                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('liquidity_score')" data-sort="liquidity_score">流动性</th>
-                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('loss_at_10pct')" data-sort="loss_at_10pct">-10%亏损$</th>
-                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('breakeven')" data-sort="breakeven">盈亏平衡$</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('breakeven_pct')" data-sort="breakeven_pct" title="安全垫距离 - 现价到盈亏平衡点的百分比缓冲">安全垫%</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('open_interest')" data-sort="open_interest">持仓量</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('spread_pct')" data-sort="spread_pct">买卖价差</th>
-                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-blue-300 transition select-none" onclick="sortContracts('iv_rank')" data-sort="iv_rank" title="IV Rank - 当前IV在历史分位中的位置，50%为中性">IV Rank</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" onclick="sortContracts('_score')" data-sort="_score" title="加权评分 - 综合APR+POP+安全垫+流动性+IV">评分</th>
-                                    <th style="width:5.0%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" onclick="sortContracts('risk')" data-sort="risk">风险等级</th>
+                                    <th style="width:4.5%" class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="platform">平台</th>
+                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="option_type">类型</th>
+                                    <th style="width:6.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="expiry">到期日</th>
+                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="dte">到期天数</th>
+                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="strike">行权价</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="delta">Delta</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="theta" title="Theta - 每日时间价值衰减，正值=每天赚多少">Theta</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="gamma">Gamma</th>
+                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="vega">Vega</th>
+                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="mark_iv">隐含波动率</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="apr">年化收益</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="pop" title="盈利概率 - PUT: 到期不被行权概率; CALL: 被行权概率(卖飞风险)">POP</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="premium">权利金$</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="margin_required" title="保证金需求 - 开仓所需最低保证金">保证金$</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="capital_efficiency" title="资金效率 - 权利金/保证金，越高越好">资金效率</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="support_distance_pct" title="支撑距离 - PUT行权价到常规支撑位的距离，>10%安全，<5%危险">支撑距离</th>
+                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="liquidity_score">流动性</th>
+                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="loss_at_10pct">-10%亏损$</th>
+                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="breakeven">盈亏平衡$</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="breakeven_pct" title="安全垫距离 - 现价到盈亏平衡点的百分比缓冲">安全垫%</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="open_interest">持仓量</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="spread_pct">买卖价差</th>
+                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-blue-300 transition select-none" data-sort="iv_rank" title="IV Rank - 当前IV在历史分位中的位置，50%为中性">IV Rank</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="_score" title="加权评分 - 综合APR+POP+安全垫+流动性+IV">评分</th>
+                                    <th style="width:5.0%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="risk">风险等级</th>
                                 </tr>
                             </thead>
                             <tbody id="opportunitiesTable" class="divide-y divide-gray-800/40">
@@ -1051,7 +1051,7 @@
                         </table>
                     </div>
                     <div id="loadMoreContainer" class="hidden p-4 text-center">
-                        <button onclick="loadMoreContracts()" class="btn-primary px-6 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2">
+                        <button id="loadMoreBtn" class="btn-primary px-6 py-2 rounded-xl text-sm font-medium inline-flex items-center gap-2">
                             <i class="fas fa-chevron-down"></i> 加载更多 (已显示 <span id="loadedCount">0</span>/<span id="totalCount">0</span>)
                         </button>
                     </div>
@@ -1066,9 +1066,9 @@
                         <canvas id="dvolChart"></canvas>
                     </div>
                     <div class="flex justify-center gap-2 mt-3">
-                        <button onclick="setChartPeriod('dvol', 24)" class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
-                        <button onclick="setChartPeriod('dvol', 168)" class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
-                        <button onclick="setChartPeriod('dvol', 720)" class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
+                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
+                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
+                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
                     </div>
                 </div>
                 <div class="card-glass rounded-xl p-5 border-l-4 border-purple-500">
@@ -1077,9 +1077,9 @@
                         <canvas id="pcrChart"></canvas>
                     </div>
                     <div class="flex justify-center gap-2 mt-3">
-                        <button onclick="setChartPeriod('pcr', 24)" class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
-                        <button onclick="setChartPeriod('pcr', 168)" class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
-                        <button onclick="setChartPeriod('pcr', 720)" class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
+                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
+                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
+                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
                     </div>
                     <p class="text-xs text-gray-500 mt-2">PCR &gt; 1 市场偏空(卖Put多), PCR &lt; 1 市场偏多(卖Call多)</p>
                 </div>
@@ -1134,12 +1134,12 @@
                         <span id="tradesStatsCount" class="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full hidden"></span>
                     </h2>
                     <div class="mb-3 flex flex-wrap gap-2">
-                        <select id="tradesCurrency" onchange="loadWindAnalysis()" class="input-dark rounded px-2 py-1 text-xs">
+                        <select id="tradesCurrency" class="input-dark rounded px-2 py-1 text-xs">
                             <option value="BTC">BTC</option>
                             <option value="ETH">ETH</option>
                             <option value="SOL">SOL</option>
                         </select>
-                        <select id="tradesDays" onchange="loadWindAnalysis()" class="input-dark rounded px-2 py-1 text-xs">
+                        <select id="tradesDays" class="input-dark rounded px-2 py-1 text-xs">
                             <option value="7">近7天</option>
                             <option value="30" selected>近30天</option>
                             <option value="90">近90天</option>
@@ -1437,7 +1437,7 @@
                                 <input id="sbMinAPR" type="number" value="5" step="1" min="1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div class="flex items-end">
-                                <button onclick="runSandbox()" class="bg-purple-600 hover:bg-purple-500 rounded px-4 py-1.5 text-xs font-medium w-full">▶ 开始推演</button>
+                                <button id="runSandboxBtn" class="bg-purple-600 hover:bg-purple-500 rounded px-4 py-1.5 text-xs font-medium w-full">▶ 开始推演</button>
                             </div>
                         </div>
                     </div>
@@ -1487,7 +1487,7 @@
                     <i class="fas fa-exclamation-triangle"></i>
                     滚仓修复建议
                 </h3>
-                <button onclick="closeRollModal()" class="text-gray-400 hover:text-white">
+                <button id="closeRollModalBtn" class="text-gray-400 hover:text-white">
                     <i class="fas fa-times text-xl"></i>
                 </button>
             </div>
@@ -1500,7 +1500,7 @@
     
     <!-- AI Copilot Chat Widget -->
     <div id="copilotWidget" class="fixed bottom-5 right-5 z-50">
-        <button id="copilotToggle" onclick="toggleCopilotChat()" class="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:shadow-blue-500/50 transition-all">
+        <button id="copilotToggle" class="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg hover:shadow-blue-500/50 transition-all">
             <i class="fas fa-robot text-xl"></i>
         </button>
     </div>
@@ -1511,7 +1511,7 @@
                 <i class="fas fa-robot text-blue-400"></i>
                 <span class="text-sm font-semibold">AI 交易助手</span>
             </div>
-            <button onclick="toggleCopilotChat()" class="text-gray-400 hover:text-white transition">
+            <button id="closeCopilotBtn" class="text-gray-400 hover:text-white transition">
                 <i class="fas fa-times"></i>
             </button>
         </div>
@@ -1524,7 +1524,7 @@
             </div>
         </div>
         <div class="p-3 border-t border-gray-700/50">
-            <form onsubmit="sendCopilotMessage(event)" class="flex gap-2">
+            <form id="copilotForm" class="flex gap-2">
                 <input type="text" id="copilotInput" placeholder="例如：现在适合卖 Put 吗？" class="flex-1 bg-gray-800/50 border border-gray-700/30 rounded-lg px-3 py-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500">
                 <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition">
                     <i class="fas fa-paper-plane"></i>

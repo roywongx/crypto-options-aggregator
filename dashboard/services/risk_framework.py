@@ -1,6 +1,9 @@
 # Services - Risk Framework
+import logging
 from config import config
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class RiskFramework:
     """v7.0: 动态风险框架 - 支持动态支撑位"""

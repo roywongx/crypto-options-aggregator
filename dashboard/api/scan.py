@@ -47,8 +47,8 @@ class QuickScanParams(BaseModel):
 async def scan_options(params: ScanParams):
     """执行期权扫描"""
     from fastapi.concurrency import run_in_threadpool
-    from main import run_options_scan
-    
+    from services.scan_engine import run_options_scan
+
     result = await run_in_threadpool(run_options_scan, params)
     if not result.get('success'):
         raise HTTPException(status_code=500, detail=result.get('error', '扫描失败'))
@@ -58,7 +58,7 @@ async def scan_options(params: ScanParams):
 @router.post("/quick-scan")
 async def quick_scan_endpoint(params: QuickScanParams = None):
     """快速扫描端点"""
-    from main import quick_scan
+    from services.scan_engine import quick_scan
     return await quick_scan(params)
 
 

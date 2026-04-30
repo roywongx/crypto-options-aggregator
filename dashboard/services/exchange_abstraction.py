@@ -7,6 +7,7 @@ Exchange Abstraction Layer - 多交易所抽象层
 """
 import logging
 import asyncio
+import httpx
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 from enum import Enum
@@ -53,7 +54,8 @@ class OptionContract:
         iv: float = 0,
         liquidity_score: float = 0,
         spread_pct: float = 0,
-        raw_data: Dict = None
+        raw_data: Dict = None,
+        underlying_price: float = 0
     ):
         self.symbol = symbol
         self.exchange = exchange
@@ -74,6 +76,7 @@ class OptionContract:
         self.liquidity_score = liquidity_score
         self.spread_pct = spread_pct
         self.raw_data = raw_data or {}
+        self.underlying_price = underlying_price
 
     @property
     def dte(self) -> int:
@@ -93,7 +96,9 @@ class OptionContract:
 
     @property
     def premium_usd(self) -> float:
-        """权利金 (USD) - 使用 mark_price 作为近似"""
+        """权利金 (USD) - Deribit mark_price 是币本位，需要乘以现货价格"""
+        if self.exchange == ExchangeType.DERIBIT and self.underlying_price > 0:
+            return self.mark_price * self.underlying_price
         return self.mark_price
 
     @property
@@ -460,6 +465,7 @@ class DeribitExchange(BaseExchange):
             if volume < min_volume:
                 continue
 
+            underlying_price = r.get("underlying_price", 0)
             contracts.append(OptionContract(
                 symbol=inst_name,
                 exchange=ExchangeType.DERIBIT,
@@ -479,7 +485,8 @@ class DeribitExchange(BaseExchange):
                 iv=r.get("mark_iv", 0),
                 liquidity_score=100 - spread_pct if spread_pct <= 100 else 0,
                 spread_pct=spread_pct,
-                raw_data=r
+                raw_data=r,
+                underlying_price=underlying_price
             ))
         return contracts
 

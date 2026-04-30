@@ -1,5 +1,6 @@
 """AI Co-Pilot API"""
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 
@@ -17,13 +18,13 @@ async def copilot_chat(message: str, currency: str = "BTC"):
     context_parts = []
 
     try:
-        fg = get_fear_greed_index()
+        fg = await run_in_threadpool(get_fear_greed_index)
         context_parts.append(f"恐惧贪婪指数: {fg.get('value', 'N/A')} ({fg.get('classification', '')})")
     except Exception:
         pass
 
     try:
-        fr = get_funding_rate(currency)
+        fr = await run_in_threadpool(get_funding_rate, currency)
         rate = fr.get('current_rate')
         if rate is not None:
             context_parts.append(f"{currency}资金费率: {rate:.4f}%")
@@ -31,7 +32,7 @@ async def copilot_chat(message: str, currency: str = "BTC"):
         pass
 
     try:
-        dvol = get_dvol_from_deribit(currency)
+        dvol = await run_in_threadpool(get_dvol_from_deribit, currency)
         context_parts.append(f"DVOL: {dvol.get('current', 0):.1f} (信号: {dvol.get('signal', '')})")
     except Exception:
         pass
@@ -51,6 +52,6 @@ async def copilot_chat(message: str, currency: str = "BTC"):
         {"role": "user", "content": message}
     ]
 
-    response = ai_chat(messages, preset="chinese", temperature=0.5, max_tokens=500)
+    response = await run_in_threadpool(ai_chat, messages, preset="chinese", temperature=0.5, max_tokens=500)
 
     return {"response": response, "context": context_parts, "currency": currency}

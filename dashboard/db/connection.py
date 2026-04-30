@@ -93,6 +93,37 @@ def close_db_connection():
         finally:
             _read_local.conn = None
 
+def execute_transaction(stmts: list) -> Any:
+    """在同一连接同一事务中执行多条 SQL 语句
+
+    Args:
+        stmts: [(query, params), ...] 的列表
+
+    Returns:
+        最后一条语句的 lastrowid
+
+    Raises:
+        事务失败时回滚并抛出原始异常
+    """
+    with _write_lock:
+        conn = get_db_connection(read_only=False)
+        cursor = conn.cursor()
+        try:
+            lastrowid = None
+            for query, params in stmts:
+                cursor.execute(query, params)
+                lastrowid = cursor.lastrowid
+            conn.commit()
+            return lastrowid
+        except sqlite3.OperationalError as e:
+            conn.rollback()
+            logger.warning("transaction failed: %s", str(e))
+            raise
+        finally:
+            cursor.close()
+            conn.close()
+
+
 def execute_with_retry(func: Callable, max_retries: int = 3, base_delay: float = 0.05) -> Any:
     """带重试的数据库操作包装器，处理 database is locked 错误
     

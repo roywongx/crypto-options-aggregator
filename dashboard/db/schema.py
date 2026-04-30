@@ -53,8 +53,12 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_trades_currency ON large_trades_history(currency)",
     "CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON large_trades_history(timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_trades_strike ON large_trades_history(strike)",
+    "CREATE INDEX IF NOT EXISTS idx_trades_currency_timestamp ON large_trades_history(currency, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_trades_currency_timestamp_notional ON large_trades_history(currency, timestamp DESC, notional_usd DESC)",
     "CREATE INDEX IF NOT EXISTS idx_dvol_currency ON dvol_history(currency)",
     "CREATE INDEX IF NOT EXISTS idx_dvol_timestamp ON dvol_history(timestamp)",
+    "CREATE INDEX IF NOT EXISTS idx_scan_currency_timestamp ON scan_records(currency, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_scan_timestamp ON scan_records(timestamp DESC)",
 ]
 
 SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'top_contracts_data', 'raw_output']

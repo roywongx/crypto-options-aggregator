@@ -12,7 +12,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from db.connection import execute_read, execute_write
+from db.connection import execute_read, execute_write, execute_transaction
 from services.spot_price import get_spot_price
 from services.quant_engine import bs_put_price, bs_call_price, bs_delta
 
@@ -119,41 +119,44 @@ def paper_open_position(
         account = _get_account()
         if not account:
             return {"error": "账户未初始化"}
-        
+
         premium_total = premium * qty
         margin_required = strike * qty * margin_ratio
-        
+
+        # 计算已占用保证金（open positions）
+        locked_margin = _get_locked_margin()
+        available_cash = account["current_cash"] - locked_margin
+
         # 检查保证金
-        if account["current_cash"] < margin_required:
+        if available_cash < margin_required:
             return {
                 "error": "保证金不足",
                 "required": margin_required,
-                "available": account["current_cash"]
+                "available": available_cash,
+                "locked_margin": locked_margin
             }
-        
+
         # 扣除现金 (收到权利金)
         new_cash = account["current_cash"] + premium_total
-        
-        # 写入持仓
-        execute_write("""
-            INSERT INTO paper_positions 
-            (currency, option_type, strike, expiry, qty, entry_premium, entry_premium_total, entry_price, margin_ratio)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (currency, option_type, strike, expiry, qty, premium, premium_total, None, margin_ratio))
-        
-        # 写入交易记录
-        execute_write("""
-            INSERT INTO paper_trades
-            (currency, action, option_type, strike, expiry, qty, premium, premium_total, price, pnl, notes)
-            VALUES (?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, 0, ?)
-        """, (currency, option_type, strike, expiry, qty, premium, premium_total, None, notes))
-        
-        # 更新账户
-        execute_write(
-            "UPDATE paper_account SET current_cash = ? WHERE id = 1",
-            (new_cash,)
-        )
-        
+
+        # 同一事务提交：持仓 + 交易记录 + 账户更新
+        execute_transaction([
+            ("""
+                INSERT INTO paper_positions
+                (currency, option_type, strike, expiry, qty, entry_premium, entry_premium_total, entry_price, margin_ratio)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (currency, option_type, strike, expiry, qty, premium, premium_total, None, margin_ratio)),
+            ("""
+                INSERT INTO paper_trades
+                (currency, action, option_type, strike, expiry, qty, premium, premium_total, price, pnl, notes)
+                VALUES (?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            """, (currency, option_type, strike, expiry, qty, premium, premium_total, None, notes)),
+            (
+                "UPDATE paper_account SET current_cash = ? WHERE id = 1",
+                (new_cash,)
+            )
+        ])
+
         return {
             "success": True,
             "action": "OPEN",
@@ -164,10 +167,11 @@ def paper_open_position(
             "premium": premium,
             "premium_received": premium_total,
             "margin_required": margin_required,
+            "locked_margin": locked_margin + margin_required,
             "new_cash": new_cash,
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         }
-        
+
     except Exception as e:
         logger.error("开仓失败: %s", str(e))
         return {"error": str(e)}
@@ -197,43 +201,42 @@ def paper_close_position(
         )
         if not rows:
             return {"error": "持仓不存在或已平仓"}
-        
+
         pos = {
-            "id": rows[0][0], "currency": rows[0][1], "option_type": rows[0][2],
-            "strike": rows[0][3], "expiry": rows[0][4], "qty": rows[0][5],
-            "entry_premium": rows[0][6], "entry_premium_total": rows[0][7],
-            "margin_ratio": rows[0][9]
+            "id": rows[0][0], "timestamp": rows[0][1], "currency": rows[0][2],
+            "option_type": rows[0][3], "strike": rows[0][4], "expiry": rows[0][5],
+            "qty": rows[0][6], "entry_premium": rows[0][7],
+            "entry_premium_total": rows[0][8], "entry_price": rows[0][9],
+            "margin_ratio": rows[0][10], "status": rows[0][11]
         }
-        
+
         close_premium_total = close_premium * pos["qty"]
-        
+
         # 计算 PnL (卖方: 开仓收权利金 - 平仓付权利金)
         pnl = pos["entry_premium_total"] - close_premium_total
-        
+
         # 释放保证金 + 退回/扣除平仓成本
         account = _get_account()
         new_cash = account["current_cash"] - close_premium_total
-        
-        # 更新持仓状态
-        execute_write(
-            "UPDATE paper_positions SET status = 'closed' WHERE id = ?",
-            (position_id,)
-        )
-        
-        # 写入交易记录
-        execute_write("""
-            INSERT INTO paper_trades
-            (currency, action, option_type, strike, expiry, qty, premium, premium_total, pnl, notes)
-            VALUES (?, 'CLOSE', ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (pos["currency"], pos["option_type"], pos["strike"], pos["expiry"],
-              pos["qty"], close_premium, close_premium_total, pnl, notes))
-        
-        # 更新账户
-        execute_write(
-            "UPDATE paper_account SET current_cash = ? WHERE id = 1",
-            (new_cash,)
-        )
-        
+
+        # 同一事务提交：更新持仓 + 交易记录 + 账户更新
+        execute_transaction([
+            (
+                "UPDATE paper_positions SET status = 'closed' WHERE id = ?",
+                (position_id,)
+            ),
+            ("""
+                INSERT INTO paper_trades
+                (currency, action, option_type, strike, expiry, qty, premium, premium_total, pnl, notes)
+                VALUES (?, 'CLOSE', ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (pos["currency"], pos["option_type"], pos["strike"], pos["expiry"],
+                  pos["qty"], close_premium, close_premium_total, pnl, notes)),
+            (
+                "UPDATE paper_account SET current_cash = ? WHERE id = 1",
+                (new_cash,)
+            )
+        ])
+
         return {
             "success": True,
             "action": "CLOSE",
@@ -242,7 +245,7 @@ def paper_close_position(
             "new_cash": new_cash,
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         }
-        
+
     except Exception as e:
         logger.error("平仓失败: %s", str(e))
         return {"error": str(e)}
@@ -348,21 +351,29 @@ def get_roll_suggestion(position_id: int) -> Dict[str, Any]:
         if not rows:
             return {"error": "持仓不存在或已平仓"}
         
-        pos = rows
-        spot = get_spot_price(pos[1]) or 0
+        pos = rows[0]
+        # 使用字段名映射，避免索引错位
+        pos_map = {
+            "id": pos[0], "timestamp": pos[1], "currency": pos[2],
+            "option_type": pos[3], "strike": pos[4], "expiry": pos[5],
+            "qty": pos[6], "entry_premium": pos[7],
+            "entry_premium_total": pos[8], "entry_price": pos[9],
+            "margin_ratio": pos[10], "status": pos[11]
+        }
+        spot = get_spot_price(pos_map["currency"]) or 0
         
         # 计算当前持仓的希腊字母 (简化)
-        dte = _get_dte(pos[4])  # 估算 DTE
-        current_premium = _estimate_current_premium(pos, spot)
+        dte = _get_dte(pos_map["expiry"])  # 估算 DTE
+        current_premium = _estimate_current_premium(pos_map, spot)
         
         # 建议: 滚到更低 Delta (更安全) 或更高 APR
-        suggested_strike = pos[3] * 0.95  # 建议降低 5% 行权价
+        suggested_strike = pos_map["strike"] * 0.95  # 建议降低 5% 行权价
         
         return {
             "position": {
-                "id": pos[0],
-                "strike": pos[3],
-                "entry_premium": pos[6],
+                "id": pos_map["id"],
+                "strike": pos_map["strike"],
+                "entry_premium": pos_map["entry_premium"],
                 "current_premium": round(current_premium, 2)
             },
             "suggestion": {
@@ -409,6 +420,20 @@ def _get_open_positions(currency: str = "BTC") -> List[Dict[str, Any]]:
         }
         for r in rows
     ]
+
+
+def _get_locked_margin() -> float:
+    """计算当前所有 open 持仓占用的保证金"""
+    rows = execute_read(
+        "SELECT strike, qty, margin_ratio FROM paper_positions WHERE status = 'open'"
+    )
+    total = 0.0
+    for r in rows:
+        strike = r[0] or 0
+        qty = r[1] or 0
+        margin_ratio = r[2] or 0
+        total += strike * qty * margin_ratio
+    return total
 
 
 def _estimate_current_premium(pos: Dict, spot: float) -> float:
