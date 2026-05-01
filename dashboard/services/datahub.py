@@ -120,7 +120,7 @@ class DeribitWSConnector:
         while self._hub._running:
             try:
                 await self._connect()
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
                 logger.error("Deribit WS error: %s, reconnecting in %ds", str(e), self._reconnect_delay)
                 await asyncio.sleep(self._reconnect_delay)
                 self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
@@ -156,7 +156,7 @@ class DeribitWSConnector:
                 data = json.loads(message)
                 if "params" in data and "channel" in data["params"]:
                     await self._handle_message(data["params"])
-            except Exception as e:
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.debug("Deribit message parse error: %s", str(e))
     
     async def _handle_message(self, params: Dict):
@@ -238,7 +238,7 @@ class BinanceWSConnector:
         while self._hub._running:
             try:
                 await self._connect()
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
                 logger.error("Binance WS error: %s, reconnecting in %ds", str(e), self._reconnect_delay)
                 await asyncio.sleep(self._reconnect_delay)
                 self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
@@ -263,7 +263,7 @@ class BinanceWSConnector:
                 data = json.loads(message)
                 if "data" in data:
                     await self._handle_message(data["data"])
-            except Exception as e:
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.debug("Binance message parse error: %s", str(e))
     
     async def _handle_message(self, data: Dict):
@@ -305,7 +305,7 @@ class DvolCalculator:
             try:
                 await self._calculate_and_publish()
                 await asyncio.sleep(10)
-            except Exception as e:
+            except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
                 logger.error("DVOL calc error: %s", str(e))
                 await asyncio.sleep(30)
     

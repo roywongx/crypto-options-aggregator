@@ -136,7 +136,7 @@ def get_macro_data() -> Dict[str, Any]:
         
     except ImportError:
         logger.warning("yfinance 未安装，跳过宏观数据获取")
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning("宏观数据获取失败: %s", str(e))
     
     return result
@@ -234,7 +234,7 @@ def get_risk_free_rate() -> Dict[str, Any]:
             
     except ImportError:
         logger.warning("fredapi 未安装，使用默认无风险利率")
-    except Exception as e:
+    except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
         logger.warning("FRED 无风险利率获取失败: %s", str(e))
     
     return result

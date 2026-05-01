@@ -95,7 +95,7 @@ class MCPToolRegistry:
             if inspect.isawaitable(result):
                 result = await result
             return {"success": True, "data": result}
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("MCP tool '%s' execution error: %s", name, str(e))
             return {"error": str(e)}
     
@@ -108,21 +108,21 @@ class MCPToolRegistry:
             from services.dvol_analyzer import get_dvol_from_deribit
             dvol = get_dvol_from_deribit(currency)
             result["dvol"] = dvol
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             result["dvol_error"] = str(e)
         
         try:
             from services.macro_data import get_fear_greed_index
             fg = get_fear_greed_index()
             result["fear_greed"] = fg
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             result["fear_greed_error"] = str(e)
         
         try:
             from services.macro_data import get_funding_rate
             fr = get_funding_rate(currency)
             result["funding_rate"] = fr
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             result["funding_rate_error"] = str(e)
         
         result["currency"] = currency
@@ -192,7 +192,7 @@ class MCPToolRegistry:
             spot = get_spot_price(currency)
             assessment = assessor.assess_comprehensive_risk(spot, currency)
             result["assessment"] = assessment
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             result["error"] = str(e)
         
         result["currency"] = currency

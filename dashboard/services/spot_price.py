@@ -72,7 +72,7 @@ def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
             except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
                 logger.debug("Binance spot price host %s failed: %s", host, e)
                 continue
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning("获取现货价格失败: %s", e)
     return None
 
@@ -246,7 +246,7 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
                 except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
                     logger.debug("Fallback oracle %s failed: %s", url_base, e)
                     continue
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.warning("Fallback oracle failed: %s", e)
 
     raise RuntimeError(

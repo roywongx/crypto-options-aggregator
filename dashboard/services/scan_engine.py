@@ -199,7 +199,7 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
 
         return parsed
 
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.error("scan adapter failed: %s", str(e), exc_info=True)
         return {"success": False, "error": "参数适配失败，请检查输入参数"}
 
@@ -270,7 +270,7 @@ async def quick_scan(params: QuickScanParams = None):
                 logger.info("DataHub options data too old (%.1fs), falling back to REST", options_age)
     except ImportError:
         logger.debug("DataHub not available, using REST fallback")
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.debug("DataHub read failed: %s, using REST fallback", str(e))
 
     if not spot:
@@ -318,7 +318,7 @@ async def quick_scan(params: QuickScanParams = None):
             )
             if not isinstance(binance_contracts, list):
                 binance_contracts = []
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.warning("binance_options fetch failed: %s", str(e))
             binance_contracts = []
 
@@ -331,7 +331,7 @@ async def quick_scan(params: QuickScanParams = None):
             dvol_data = await asyncio.to_thread(get_dvol_from_deribit, currency)
             if not dvol_data:
                 dvol_data = {}
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.warning("Failed to fetch DVOL from Deribit: %s", str(e))
             dvol_data = {}
 

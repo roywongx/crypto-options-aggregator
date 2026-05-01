@@ -261,7 +261,7 @@ async def fetch_large_trades_async(
                 trades, results_by_inst, seen, spot, limit,
                 classify_fn, parse_inst_fn, calc_delta_fn, severity_fn, risk_emoji_fn
             )
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Deribit live trades fallback error: %s", e)
 
     return _finalize_results(results, limit, severity_fn, risk_emoji_fn)

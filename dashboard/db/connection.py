@@ -100,7 +100,7 @@ def close_db_connection():
     if conn:
         try:
             conn.close()
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.warning("close_db_connection error: %s", str(e))
         finally:
             _read_local.conn = None

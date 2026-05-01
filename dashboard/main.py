@@ -7,15 +7,10 @@ v5.0: 渐进式重构 - API 端点已迁移到 api/ 目录模块
 
 import os
 import sys
-import json
-import sqlite3
 import asyncio
 import logging
-import subprocess
-import math
 from concurrent.futures import ThreadPoolExecutor
 import httpx
-import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -84,7 +79,7 @@ def _get_cached_contracts_count(currency: str = "BTC") -> int:
     if row and row[0]:
         try:
             return len(json.loads(row[0]))
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.debug("_get_cached_contracts_count parse error: %s", str(e))
     return 0
 
@@ -119,7 +114,7 @@ async def lifespan(app: FastAPI):
         from services.paper_trading import init_paper_trading_db
         init_paper_trading_db()
         logger.info("模拟盘数据库初始化完成")
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError) as e:
         logger.warning("模拟盘数据库初始化失败: %s", e)
 
     scan_task = None
@@ -130,7 +125,7 @@ async def lifespan(app: FastAPI):
         from services.datahub import start_datahub_services, datahub
         datahub_task = asyncio.create_task(start_datahub_services())
         logger.info("DataHub 服务已启动")
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning("DataHub 启动失败，将使用 REST fallback: %s", e)
 
     # 启动后台定时扫描任务
@@ -150,12 +145,12 @@ async def lifespan(app: FastAPI):
                             params = QuickScanParams(currency=currency, option_type="ALL")
                             await quick_scan(params)
                             logger.info("定时扫描完成: %s", currency)
-                        except Exception as e:
+                        except (RuntimeError, ValueError, TypeError) as e:
                             logger.error("定时扫描失败 %s: %s", currency, str(e))
                 except asyncio.CancelledError:
                     logger.info("后台扫描任务已取消")
                     break
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
                     logger.error("后台扫描任务异常: %s", str(e))
                     await asyncio.sleep(60)  # 异常后等待1分钟再继续
 
@@ -240,7 +235,33 @@ app.add_middleware(
     max_age=600,
 )
 
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+class CachedStaticFiles(StaticFiles):
+    """带智能缓存策略的静态文件服务
+    - 带 hash 的文件 (如 app.v123.js) → 1年长期缓存
+    - 不带 hash 的 JS/CSS → 1小时缓存（开发时可用 no-cache）
+    - HTML 文件 → no-cache
+    """
+    CACHE_LONG = "public, max-age=31536000, immutable"
+    CACHE_SHORT = "public, max-age=3600, must-revalidate"
+    CACHE_NONE = "no-cache, no-store, must-revalidate"
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            ext = Path(path).suffix.lower()
+            # 检查是否带 hash (如 app.abc123.js 或 app-v1.2.3.js)
+            has_hash = bool(__import__('re').search(r'[.\-][a-f0-9]{8,}[.\-]|\.v\d+\.', path))
+            if ext == '.html' or not has_hash and ext in ('.js', '.css'):
+                response.headers["Cache-Control"] = self.CACHE_NONE
+            elif has_hash and ext in ('.js', '.css', '.woff2', '.png', '.jpg', '.svg'):
+                response.headers["Cache-Control"] = self.CACHE_LONG
+            elif ext in ('.js', '.css', '.woff2', '.png', '.jpg', '.svg', '.ico'):
+                response.headers["Cache-Control"] = self.CACHE_SHORT
+            else:
+                response.headers["Cache-Control"] = self.CACHE_NONE
+        return response
+
+app.mount("/static", CachedStaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 # 注册 api/ 目录路由模块
 from api import (
@@ -274,16 +295,6 @@ app.include_router(risk_router, dependencies=protected_dependencies)
 app.include_router(payoff_router, dependencies=protected_dependencies)
 
 
-@app.middleware("http")
-async def no_cache_middleware(request, call_next):
-    response = await call_next(request)
-    if request.url.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
-
-
 @app.get("/", response_class=HTMLResponse)
 async def root():
     html_path = Path(__file__).parent / "static" / "index.html"
@@ -295,5 +306,6 @@ if __name__ == "__main__":
     import uvicorn
     # 单worker模式：后台定时扫描任务需要在单worker中运行
     # 如需多worker，请移除main.py中的background_scan_async()启动代码
-    print("[STARTUP] Starting uvicorn server on 0.0.0.0:8000", flush=True)
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info", access_log=True)
+    port = int(os.environ.get("PORT", 8000))
+    print(f"[STARTUP] Starting uvicorn server on 0.0.0.0:{port}", flush=True)
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", access_log=True)

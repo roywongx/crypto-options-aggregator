@@ -56,7 +56,7 @@ async def mcp_chat(request: MCPChatRequest):
 
     try:
         market_result = await mcp_registry.execute_tool("get_market_overview", {"currency": request.currency})
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError) as e:
         market_result = {"success": False, "data": {}}
 
     market_context = ""

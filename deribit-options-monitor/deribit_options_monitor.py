@@ -374,7 +374,7 @@ class DeribitOptionsMonitor:
                 points = self._resample_hourly(rows)
                 if len(points) >= 24:
                     return points, resolution
-            except Exception as exc:
+            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as exc:
                 last_error = exc
         raise RuntimeError(f"Unable to fetch DVOL history: {last_error}")
 
@@ -455,7 +455,7 @@ class DeribitOptionsMonitor:
                 "spot_price": float(result.get("index_price", 0)),
                 "delivery_price": float(result.get("estimated_delivery_price", 0)),
             }
-        except Exception:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError):
             return {"spot_price": None, "delivery_price": None}
 
     def doctor(self) -> dict[str, Any]:
@@ -468,19 +468,19 @@ class DeribitOptionsMonitor:
             with self._connect() as conn:
                 conn.execute("SELECT 1")
             checks["checks"]["sqlite"] = {"ok": True}
-        except Exception as exc:
+        except (sqlite3.Error, sqlite3.OperationalError, RuntimeError) as exc:
             checks["checks"]["sqlite"] = {"ok": False, "error": str(exc)}
 
         try:
             self._get_book_summaries("BTC")
             checks["checks"]["book_summary"] = {"ok": True}
-        except Exception as exc:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as exc:
             checks["checks"]["book_summary"] = {"ok": False, "error": str(exc)}
 
         try:
             self._get_last_trades("BTC", count=5)
             checks["checks"]["last_trades"] = {"ok": True}
-        except Exception as exc:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as exc:
             checks["checks"]["last_trades"] = {"ok": False, "error": str(exc)}
 
         try:
@@ -490,7 +490,7 @@ class DeribitOptionsMonitor:
                 "resolution": resolution,
                 "points": len(points),
             }
-        except Exception as exc:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as exc:
             checks["checks"]["dvol"] = {"ok": False, "error": str(exc)}
 
         checks["ok"] = all(item.get("ok") for item in checks["checks"].values())
@@ -705,7 +705,7 @@ class DeribitOptionsMonitor:
                     name = future_map[future]
                     try:
                         results[name] = future.result()
-                    except Exception:
+                    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError):
                         results[name] = {}
 
         # 填充剩余的（从缓存）
@@ -1447,7 +1447,7 @@ class DeribitOptionsMonitor:
                         large = result
                     else:
                         sell_put = result
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
                     errors.append(f"{name}: {str(e)}")
                     # 保留默认值
         alerts: list[dict[str, Any]] = []
@@ -1609,7 +1609,7 @@ class DeribitOptionsMonitor:
         try:
             resp = self._request_json(f"/api/v2/public/get_order_book", {"instrument_name": instrument_name})
             return resp.get("result", {}) if resp else {}
-        except Exception:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError):
             return {}
 
     def get_greeks_for_contracts(self, currency: str) -> dict[str, dict]:
@@ -1642,7 +1642,7 @@ class DeribitOptionsMonitor:
                         "mark_iv": greeks.get("mark_iv")
                     }
                 return inst, cache[inst]
-            except Exception:
+            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError):
                 return inst, {}
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -1650,7 +1650,7 @@ class DeribitOptionsMonitor:
             for future in concurrent.futures.as_completed(futures, timeout=30):
                 try:
                     future.result()
-                except Exception:
+                except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError):
                     pass
         
         return cache

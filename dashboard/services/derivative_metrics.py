@@ -99,7 +99,7 @@ class DerivativeMetrics:
             sharpe_30d = cls._calc_single_sharpe(returns_30d)
             
             return sharpe_7d, sharpe_30d
-        except Exception as e:
+        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning(f"Sharpe Ratio计算失败: {e}")
         
         return None, None
@@ -181,7 +181,7 @@ class DerivativeMetrics:
                 signal = "极度空头（可能底部）"
             
             return funding_rate, signal
-        except Exception as e:
+        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning(f"资金费率获取失败: {e}")
         
         return None, None
@@ -237,7 +237,7 @@ class DerivativeMetrics:
                 signal = "现货主导（健康）"
             
             return round(ratio, 2), signal
-        except Exception as e:
+        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning(f"期货/现货比率获取失败: {e}")
         
         return None, None

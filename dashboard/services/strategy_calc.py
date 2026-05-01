@@ -34,7 +34,7 @@ async def calc_roll_plan(current_strike: float, current_qty: float, target_strik
         option_type_enum = OptionType.CALL if option_type.upper() == 'CALL' else OptionType.PUT
         chain = await exchange.get_options_chain('BTC', option_type_enum)
         contracts = [c.to_dict() for c in chain]
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning("Error fetching options chain: %s", e)
 
     plans = []
@@ -147,7 +147,7 @@ async def calc_new_plan(currency: str, spot: float, min_dte: int, max_dte: int, 
         option_type_enum = OptionType.CALL if option_type.upper() == 'CALL' else OptionType.PUT
         chain = await exchange.get_options_chain(currency, option_type_enum)
         contracts = [c.to_dict() for c in chain]
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning("Error fetching options chain: %s", e)
 
     plans = []

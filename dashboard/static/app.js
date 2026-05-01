@@ -1,23 +1,25 @@
+import { $, safeHTML, STRATEGY_PRESETS, API_BASE, API_TIMEOUT_MS, FETCH_MAX_RETRIES, TABLE_PAGE_SIZE, getApiKey, safeFetch, getFieldName } from './utils.js';
+import { loadTermStructure, showTermStructureError } from './term-structure.js';
+import { loadMaxPain, showMaxPainError } from './maxpain.js';
+import { runSandbox, exportCSV } from './sandbox.js';
 
-function $(id) { return document.getElementById(id); }
+// 向后兼容：将模块函数挂载到 window，供内联 onclick 使用
+window.loadTermStructure = () => loadTermStructure({ safeFetch, safeHTML, API_BASE, showAlert: window.showAlert || (()=>{}) });
+window.loadMaxPain = () => loadMaxPain({ safeFetch, safeHTML, API_BASE });
+window.runSandbox = () => runSandbox({ safeFetch, safeHTML, API_BASE });
+window.exportCSV = () => exportCSV(API_BASE);
+window.showTermStructureError = showTermStructureError;
+window.showMaxPainError = showMaxPainError;
+window.safeHTML = safeHTML;
+window.safeFetch = safeFetch;
+window.API_BASE = API_BASE;
+window.API_TIMEOUT_MS = API_TIMEOUT_MS;
+window.FETCH_MAX_RETRIES = FETCH_MAX_RETRIES;
+window.TABLE_PAGE_SIZE = TABLE_PAGE_SIZE;
+window.getApiKey = getApiKey;
+window.getFieldName = getFieldName;
 
-function safeHTML(str) {
-    if (str == null) return '';
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-
-const STRATEGY_PRESETS = {
-    "PUT": {
-        "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0, "label": "纯收租"},
-        "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0, "label": "标准平衡"},
-        "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0, "label": "折价接货"}
-    },
-    "CALL": {
-        "conservative": {"max_delta": 0.15, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 8.0, "label": "保留上涨"},
-        "standard":     {"max_delta": 0.25, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 10.0, "label": "标准备兑"},
-        "aggressive":   {"max_delta": 0.35, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 15.0, "label": "强横盘"}
-    }
-};
+// STRATEGY_PRESETS 已从 utils.js 导入
 let _currentPreset = 'standard';
 
 /**
@@ -32,60 +34,10 @@ let chartPeriods = { dvol: 168, pcr: 168 };
 let currentSpotPrice = null;
 let scanStatusInterval = null;
 
-const TABLE_PAGE_SIZE = 30;
 let _allContracts = [];
 let _displayedCount = 0;
 let _currentSortField = null;
 let _currentSortDir = 'desc';
-
-const API_BASE = '';
-const API_TIMEOUT_MS = 30000;
-const FETCH_MAX_RETRIES = 1;
-
-function getApiKey() {
-    try {
-        return localStorage.getItem('dashboard_api_key') || '';
-    } catch (_) {
-        return '';
-    }
-}
-
-async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-    try {
-        const apiKey = getApiKey();
-        const headers = apiKey ? {'X-API-Key': apiKey} : {};
-        const opts = {
-            ...options,
-            signal: controller.signal,
-            headers: {
-                ...headers,
-                ...(options.headers || {})
-            }
-        };
-        const res = await fetch(url, opts);
-        clearTimeout(timer);
-        if (!res.ok) {
-            let detail = '';
-            try {
-                const errData = await res.clone().json();
-                detail = errData.detail || errData.message || errData.error || '';
-            } catch (_) {
-                try { detail = await res.clone().text(); } catch (_) {}
-            }
-            throw new Error(`HTTP ${res.status}: ${res.statusText}${detail ? ' - ' + detail : ''}`);
-        }
-        return res;
-    } catch (e) {
-        clearTimeout(timer);
-        if (retries > 0 && e.name !== 'AbortError') {
-            await new Promise(r => setTimeout(r, 1000));
-            return safeFetch(url, options, retries - 1);
-        }
-        throw e;
-    }
-}
 
 
 
@@ -405,8 +357,8 @@ async function triggerScan() {
             // 扫描完成后刷新图表
             const currency = document.getElementById('currencySelect')?.value || 'BTC';
             loadWindAnalysis().catch(() => {});
-            loadTermStructure().catch(() => {});
-            loadMaxPain().catch(() => {});
+            window.loadTermStructure().catch(() => {});
+            window.loadMaxPain().catch(() => {});
             loadPcrChart(currency, chartPeriods.pcr || 168).catch(() => {});
             loadDvolChartData().catch(() => {});
             loadRiskDashboard(currency).catch(() => {});
@@ -1083,8 +1035,8 @@ function loadPageDataAsync() {
     loadLatestData(false, true).catch(e => console.error('[loadPageDataAsync] loadLatestData failed:', e));
     loadMacroData().catch(e => console.error('[loadPageDataAsync] loadMacroData failed:', e));
     loadWindAnalysis().catch(e => console.error('[loadPageDataAsync] loadWindAnalysis failed:', e));
-    loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
-    loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
+    window.loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
+    window.loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
     loadPcrChart(currency, chartPeriods.pcr || 168).catch(e => console.error('[loadPageDataAsync] loadPcrChart failed:', e));
     refreshAndLoadDvol(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadDvol failed:', e));
     refreshAndLoadTrades(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadTrades failed:', e));
@@ -2302,8 +2254,8 @@ async function loadDvolChartData() {
             return;
         }
 
-        // Filter out zero/invalid dvol values
-        const filtered = data.filter(d => d.dvol && d.dvol > 0);
+        // Filter out zero/invalid dvol values and outliers (e.g. 50)
+        const filtered = data.filter(d => d.dvol && d.dvol > 0 && d.dvol < 49);
 
         dvolChart.data.labels = filtered.map(d => {
             const date = parseUTC(d.time || d.timestamp);
@@ -3002,28 +2954,7 @@ function updateSortIcons(activeField, direction) {
     });
 }
 
-function getFieldName(field) {
-    const names = {
-        'platform': '平台',
-        'option_type': '类型',
-        'expiry': '到期日',
-        'dte': '到期天数',
-        'strike': '行权价',
-        'delta': 'Delta',
-        'gamma': 'Gamma',
-        'vega': 'Vega',
-        'mark_iv': '隐含波动率',
-        'apr': '年化收益',
-        'premium': '权利金',
-        'liquidity_score': '流动性',
-        'loss_at_10pct': '-10%亏损',
-        'breakeven': '盈亏平衡',
-        'open_interest': '持仓量',
-        'spread_pct': '买卖价差',
-        'risk': '风险等级'
-    };
-    return names[field] || field;
-}
+// getFieldName 已从 utils.js 导入
 
 // 大单风向标功能
 
@@ -3238,10 +3169,9 @@ async function loadWindAnalysis() {
         console.error('加载风向分析失败:', error);
     }
 }
-// Module 1: IV Term Structure
+// Module 1: IV Term Structure (已迁移到 term-structure.js)
 // ============================================================
-let tsChart = null;
-async function loadTermStructure(retryCount = 0) {
+async function _loadTermStructure(retryCount = 0) {
     const maxRetries = 2;
     const statusEl = document.getElementById('ts7');
     if (!statusEl) { console.warn('TS: container not found'); return; }
@@ -3251,10 +3181,10 @@ async function loadTermStructure(retryCount = 0) {
         const d = await resp.json();
         if (d.error) {
             if (retryCount < maxRetries) {
-                setTimeout(() => loadTermStructure(retryCount + 1), 2000);
-                return;
-            }
-            showTermStructureError(d.error);
+                setTimeout(() => _loadTermStructure(retryCount + 1), 2000);
+            return;
+        }
+        _showTermStructureError(d.error);
             return;
         }
 
@@ -3519,14 +3449,14 @@ async function loadTermStructure(retryCount = 0) {
     } catch(e) {
         console.error('TS error:', e);
         if (retryCount < maxRetries) {
-            setTimeout(() => loadTermStructure(retryCount + 1), 2000);
+            setTimeout(() => _loadTermStructure(retryCount + 1), 2000);
         } else {
-            showTermStructureError(e.message);
+            _showTermStructureError(e.message);
         }
     }
 }
 
-function showTermStructureError(message) {
+function _showTermStructureError(message) {
     const el = document.getElementById('termStructureChart');
     if (el && el.parentElement) {
         // 保留 canvas，使用 overlay 显示错误
@@ -3540,7 +3470,7 @@ function showTermStructureError(message) {
         }
         errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
             '数据加载失败: ' + safeHTML(message) + '<br>' +
-            '<button onclick="loadTermStructure()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
+            '<button onclick="window.loadTermStructure()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
             '<i class="fas fa-redo mr-1"></i>重试</button>';
         errDiv.style.display = '';
     }
@@ -3550,7 +3480,7 @@ function showTermStructureError(message) {
 // Module 2: Max Pain & GEX
 // ============================================================
 let mpChart = null;
-async function loadMaxPain(retryCount = 0) {
+async function _loadMaxPain(retryCount = 0) {
     const maxRetries = 2;
     const spotEl = document.getElementById('mpSpot');
     if (!spotEl) { console.warn('MP: container not found'); return; }
@@ -3560,10 +3490,10 @@ async function loadMaxPain(retryCount = 0) {
         const d = await resp.json();
         if (d.error || !d.expiries) {
             if (retryCount < maxRetries) {
-                setTimeout(() => loadMaxPain(retryCount + 1), 2000);
+                setTimeout(() => _loadMaxPain(retryCount + 1), 2000);
                 return;
             }
-            showMaxPainError(d.error || '无数据');
+            _showMaxPainError(d.error || '无数据');
             return;
         }
 
@@ -3787,14 +3717,14 @@ async function loadMaxPain(retryCount = 0) {
     } catch(e) {
         console.error('MP error:', e);
         if (retryCount < maxRetries) {
-            setTimeout(() => loadMaxPain(retryCount + 1), 2000);
+            setTimeout(() => _loadMaxPain(retryCount + 1), 2000);
         } else {
-            showMaxPainError(e.message);
+            _showMaxPainError(e.message);
         }
     }
 }
 
-function showMaxPainError(message) {
+function _showMaxPainError(message) {
     const container = document.getElementById('painGexChart');
     if (container && container.parentElement) {
         // 保留 canvas，使用 overlay 显示错误
@@ -3808,7 +3738,7 @@ function showMaxPainError(message) {
         }
         errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
             '最大痛点数据加载失败: ' + safeHTML(message) + '<br>' +
-            '<button onclick="loadMaxPain()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
+            '<button onclick="window.loadMaxPain()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
             '<i class="fas fa-redo mr-1"></i>重试</button>';
         errDiv.style.display = '';
     }
@@ -3817,7 +3747,7 @@ function showMaxPainError(message) {
 // ============================================================
 // Module 3: Martingale Sandbox v2.0
 // ============================================================
-async function runSandbox() {
+async function _runSandbox() {
     var strike = parseFloat(document.getElementById('sbStrike').value) || 65000;
     var optionType = document.getElementById('sbOptionType').value || 'P';
     var qty = parseFloat(document.getElementById('sbQty').value) || 1;
@@ -3965,7 +3895,7 @@ async function runSandbox() {
 }
 
 
-function exportCSV() {
+function _exportCSV() {
     const currency = document.getElementById('currencySelect')?.value || 'BTC';
     const url = `${API_BASE}/api/export/csv?currency=${currency}&hours=168`;
     const a = document.createElement('a');

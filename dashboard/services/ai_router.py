@@ -226,6 +226,6 @@ def simple_openai_chat(
             logger.warning("OpenAI API 错误: %s", response.text)
             return None
             
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning("OpenAI 请求失败: %s", str(e))
         return None

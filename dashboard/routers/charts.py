@@ -136,7 +136,7 @@ async def get_vol_surface(currency: str = "BTC"):
             WHERE currency = ? AND contracts_data IS NOT NULL
             ORDER BY timestamp DESC LIMIT 1
         """, (currency,))
-    except Exception as e:
+    except (OSError, IOError, RuntimeError) as e:
         logger.warning("Vol surface DB query failed: %s", e)
         rows = []
 
@@ -217,7 +217,7 @@ async def get_vol_surface(currency: str = "BTC"):
                             for i in range(len(term_data)):
                                 if term_data[i]["avg_iv"] is None:
                                     term_data[i]["avg_iv"] = round(float(f(i)), 2)
-        except Exception as e:
+        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning("Vol surface Deribit fallback failed: %s", e)
 
     if len(term_data) < 2:

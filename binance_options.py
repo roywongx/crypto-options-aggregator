@@ -132,7 +132,7 @@ def fetch_binance_options(currency, min_dte, max_dte, max_delta, strike=None, st
 
         results.sort(key=lambda x: (x['liquidity_score'], x['apr']), reverse=True)
         return results
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         import traceback
         logger.error("fetch_binance_options error: %s", e)
         return []

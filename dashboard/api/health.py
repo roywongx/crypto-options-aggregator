@@ -31,7 +31,7 @@ async def health_check():
         cursor.execute("SELECT 1")
         cursor.fetchone()
         health["checks"]["database"] = "ok"
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         health["checks"]["database"] = f"error: {str(e)}"
         health["status"] = "degraded"
     
@@ -58,7 +58,7 @@ async def health_check():
                 health["checks"]["scan_status"] = "fresh"
         else:
             health["checks"]["scan_status"] = "no_data"
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError) as e:
         health["checks"]["scan_status"] = f"error: {str(e)}"
         health["status"] = "degraded"
     

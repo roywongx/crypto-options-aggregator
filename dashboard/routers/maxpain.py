@@ -9,8 +9,8 @@ router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 def _fetch_deribit_summaries(currency="BTC"):
     try:
-        from services.deribit_monitor import get_deribit_monitor
-        mon = get_deribit_monitor()
+        from services.instrument import _get_deribit_monitor
+        mon = _get_deribit_monitor()
         return mon._get_book_summaries(currency)
     except (ImportError, RuntimeError, ConnectionError) as e:
         logger.debug("Deribit summaries fetch failed: %s", e)

@@ -104,7 +104,7 @@ class UnifiedRiskAssessor:
                     f"信号: {dvol_data.get('signal', '')}"
                 ]
             }
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             return {
                 "score": 50,
                 "dvol": 50,

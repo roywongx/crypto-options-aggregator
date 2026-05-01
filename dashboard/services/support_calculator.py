@@ -34,7 +34,7 @@ class DynamicSupportCalculator:
                 },
                 "timestamp": datetime.now().isoformat()
             }
-        except Exception as e:
+        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.error(f"计算动态支撑位失败: {e}")
             return {
                 "regular": 55000.0,
@@ -56,7 +56,7 @@ class DynamicSupportCalculator:
             closes = [float(k[4]) for k in klines]
             if closes:
                 return sum(closes) / len(closes)
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.warning(f"获取200日均线失败: {e}")
 
         return 85000.0 if self.currency == "BTC" else 3000.0
@@ -85,7 +85,7 @@ class DynamicSupportCalculator:
                     "high": high,
                     "low": low
                 }
-        except Exception as e:
+        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning(f"计算斐波那契回撤位失败: {e}")
 
         if self.currency == "BTC":
@@ -131,7 +131,7 @@ class DynamicSupportCalculator:
                     if mvrv and mvrv > 0:
                         realized = price / mvrv
                         return round(realized, 2)
-        except Exception as e:
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning(f"获取链上价格失败: {e}")
 
         return 40000.0 if self.currency == "BTC" else 2500.0  # 接近真实Realized Price

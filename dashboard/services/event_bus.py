@@ -155,14 +155,14 @@ class EventBus:
                     await handler(event)
                 else:
                     handler(event)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
                 logger.error("Event handler error for %s: %s", event.event_type.value, str(e))
         
         for subscriber in self._subscribers.get(event.event_type, []):
             if subscriber._active:
                 try:
                     await subscriber._queue.put(event)
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
                     logger.error("Failed to deliver event to subscriber: %s", str(e))
     
     def get_snapshot(self, event_type: EventType) -> Optional[Dict]:
@@ -210,7 +210,7 @@ class EventBus:
                             source="spot_price_service"
                         )
                 await asyncio.sleep(3)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error("Spot price publisher error: %s", str(e))
                 await asyncio.sleep(5)
     
@@ -227,7 +227,7 @@ class EventBus:
                             source="dvol_service"
                         )
                 await asyncio.sleep(30)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error("DVOL publisher error: %s", str(e))
                 await asyncio.sleep(30)
     
@@ -248,7 +248,7 @@ class EventBus:
                             source="funding_rate_service"
                         )
                 await asyncio.sleep(60)
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError) as e:
                 logger.error("Funding rate publisher error: %s", str(e))
                 await asyncio.sleep(60)
     

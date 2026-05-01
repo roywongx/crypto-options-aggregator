@@ -324,7 +324,7 @@ class BinanceExchange(BaseExchange):
         try:
             dvol = await asyncio.to_thread(get_dvol_from_deribit, currency)
             return dvol or 0
-        except Exception as e:
+        except (OSError, IOError, RuntimeError) as e:
             logger.error("Binance get_dvol error: %s", str(e))
             return 0
 
@@ -333,7 +333,7 @@ class BinanceExchange(BaseExchange):
         try:
             spot = await asyncio.to_thread(get_spot_price, currency)
             return spot or 0
-        except Exception as e:
+        except (OSError, IOError, RuntimeError) as e:
             logger.error("Binance get_spot_price error: %s", str(e))
             return 0
 
@@ -348,7 +348,7 @@ class BinanceExchange(BaseExchange):
                 resp.raise_for_status()
                 data = resp.json()
                 return float(data.get("lastFundingRate", 0))
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Binance get_funding_rate error: %s", str(e))
             return 0
 
@@ -366,7 +366,7 @@ class BinanceExchange(BaseExchange):
                     item["symbol"]: float(item.get("sumOpenInterest", 0))
                     for item in data
                 }
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Binance get_open_interest error: %s", str(e))
             return {}
 
@@ -496,7 +496,7 @@ class DeribitExchange(BaseExchange):
         try:
             dvol = await asyncio.to_thread(get_dvol_from_deribit, currency)
             return dvol or 0
-        except Exception as e:
+        except (OSError, IOError, RuntimeError) as e:
             logger.error("Deribit get_dvol error: %s", str(e))
             return 0
 
@@ -505,7 +505,7 @@ class DeribitExchange(BaseExchange):
         try:
             spot = await asyncio.to_thread(get_spot_price_deribit, currency)
             return spot or 0
-        except Exception as e:
+        except (OSError, IOError, RuntimeError) as e:
             logger.error("Deribit get_spot_price error: %s", str(e))
             return 0
 
@@ -519,7 +519,7 @@ class DeribitExchange(BaseExchange):
                 resp.raise_for_status()
                 data = resp.json()
                 return float(data.get("result", 0))
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Deribit get_funding_rate error: %s", str(e))
             return 0
 
@@ -536,7 +536,7 @@ class DeribitExchange(BaseExchange):
                     item["instrument_name"]: item.get("open_interest", 0)
                     for item in data
                 }
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Deribit get_open_interest error: %s", str(e))
             return {}
 
@@ -580,7 +580,7 @@ class ExchangeRegistry:
                     currency, option_type, **kwargs
                 )
                 summary[ex_type.value] = [c.to_dict() for c in chain]
-            except Exception as e:
+            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
                 logger.error(f"{ex_type.value} chain error: {str(e)}")
                 summary[ex_type.value] = []
         return summary

@@ -3,6 +3,11 @@
  * v8.1: 合并版 - 完整参数 + 情景模拟 + 预设功能
  */
 
+// 从 app.js 模块获取全局工具函数
+const _gsSafeFetch = () => window.safeFetch || (() => { throw new Error('safeFetch not ready'); });
+const _gsAPIBase = () => window.API_BASE || '';
+const _gsShowAlert = () => window.showAlert || (() => {});
+
 function gridSafeHTML(str) {
     if (str == null) return '';
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -39,18 +44,41 @@ async function initGridStrategy() {
 }
 
 async function loadGridPresets() {
-    try {
-        const response = await safeFetch(`${API_BASE}/api/grid/presets`);
-        const data = await response.json();
-        if (data.presets) {
-            gridPresets = {};
-            data.presets.forEach(p => {
-                gridPresets[p.id] = p;
-            });
+    // 使用默认预设，避免后端 API 404
+    gridPresets = {
+        'sell_put_grid': {
+            id: 'sell_put_grid',
+            put_count: 7,
+            call_count: 0,
+            min_dte: 14,
+            max_dte: 90,
+            min_apr: 8
+        },
+        'conservative': {
+            id: 'conservative',
+            put_count: 5,
+            call_count: 0,
+            min_dte: 30,
+            max_dte: 60,
+            min_apr: 10
+        },
+        'balanced': {
+            id: 'balanced',
+            put_count: 5,
+            call_count: 3,
+            min_dte: 14,
+            max_dte: 90,
+            min_apr: 8
+        },
+        'aggressive': {
+            id: 'aggressive',
+            put_count: 3,
+            call_count: 5,
+            min_dte: 7,
+            max_dte: 45,
+            min_apr: 15
         }
-    } catch (error) {
-        console.error('加载网格预设失败:', error);
-    }
+    };
 }
 
 function applyGridPreset(presetId) {
@@ -100,8 +128,8 @@ async function loadGridStrategy() {
         const loadingEl = document.getElementById('gridLoading');
         if (loadingEl) loadingEl.classList.remove('hidden');
         
-        const response = await safeFetch(
-            `${API_BASE}/api/grid/recommend?currency=${currency}&put_count=${putCount}&call_count=${callCount}&min_dte=${minDte}&max_dte=${maxDte}&min_apr=${minApr}`
+        const response = await _gsSafeFetch()(
+            `${_gsAPIBase()}/api/grid/recommend?currency=${currency}&put_count=${putCount}&call_count=${callCount}&min_dte=${minDte}&max_dte=${maxDte}&min_apr=${minApr}`
         );
         
         gridData = await response.json();
@@ -114,8 +142,9 @@ async function loadGridStrategy() {
         
     } catch (error) {
         console.error('加载网格策略失败:', error);
-        if (typeof showAlert === 'function') {
-            showAlert(`网格策略加载失败: ${error.message}`, 'error');
+        const _alert = _gsShowAlert();
+        if (typeof _alert === 'function') {
+            _alert(`网格策略加载失败: ${error.message}`, 'error');
         }
         const loadingEl = document.getElementById('gridLoading');
         if (loadingEl) loadingEl.classList.add('hidden');

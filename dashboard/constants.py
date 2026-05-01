@@ -49,7 +49,7 @@ def get_dynamic_spot_price(currency: str, fallback: float = None) -> float:
         """, (currency,))
         if rows and rows[0][0]:
             return float(rows[0][0])
-    except Exception as e:
+    except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
         import logging
         logging.getLogger(__name__).debug("database spot price fallback failed: %s", str(e))
     

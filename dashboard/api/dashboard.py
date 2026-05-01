@@ -73,7 +73,7 @@ def _fetch_onchain_metrics(currency: str):
     try:
         from services.onchain_metrics import OnChainMetrics
         return OnChainMetrics.get_all_metrics(currency)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         return {"error": str(e)}
 
 
@@ -82,7 +82,7 @@ def _fetch_derivative_metrics(currency: str):
     try:
         from services.derivative_metrics import DerivativeMetrics
         return DerivativeMetrics.get_all_metrics()
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         return {"error": str(e)}
 
 
@@ -94,7 +94,7 @@ def _fetch_pressure_test(currency: str):
         spot = get_spot_price(currency)
         # 返回基础 Greeks 数据
         return PressureTestEngine.get_greeks(spot, spot, 30/365, 0.05, 0.5)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         return {"error": str(e)}
 
 
@@ -129,5 +129,5 @@ def _fetch_ai_sentiment(currency: str):
         
         spot = get_spot_price(currency)
         return AISentimentAnalyzer.analyze_market_sentiment(trades, spot)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError) as e:
         return {"error": str(e)}

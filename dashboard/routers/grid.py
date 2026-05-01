@@ -51,7 +51,7 @@ async def create_grid(req: GridCreateRequest):
         spot = get_spot_price(req.currency)
         if not spot:
             spot = get_spot_fallback(req.currency)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning("Grid create: spot price failed: %s", e)
         spot = get_spot_fallback(req.currency)
 
@@ -73,7 +73,7 @@ async def create_grid(req: GridCreateRequest):
         return result
     except HTTPException:
         raise
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.error("Grid create failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"创建网格策略失败: {str(e)}")
 
@@ -85,7 +85,7 @@ async def list_grid_positions(currency: str = "BTC"):
     try:
         gm = GridManager()
         return gm.list_positions(currency)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.error("Grid list failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取网格列表失败: {str(e)}")
 
@@ -102,7 +102,7 @@ async def get_grid_detail(position_id: int):
         return detail
     except HTTPException:
         raise
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.error("Grid detail failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取网格详情失败: {str(e)}")
 
@@ -121,7 +121,7 @@ async def adjust_grid(req: GridAdjustRequest):
         return result
     except HTTPException:
         raise
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.error("Grid adjust failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"调整网格失败: {str(e)}")
 
@@ -138,7 +138,7 @@ async def close_grid(req: GridCloseRequest):
         return result
     except HTTPException:
         raise
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.error("Grid close failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"关闭网格失败: {str(e)}")
 
@@ -162,7 +162,7 @@ async def backtest_grid(
         spot = get_spot_price(currency)
         if not spot:
             spot = get_spot_fallback(currency)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError) as e:
         logger.warning("Grid backtest: spot price failed: %s", e)
         spot = get_spot_fallback(currency)
 
@@ -185,6 +185,6 @@ async def backtest_grid(
         return result
     except HTTPException:
         raise
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.error("Grid backtest failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"回测失败: {str(e)}")

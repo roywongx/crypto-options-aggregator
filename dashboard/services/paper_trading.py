@@ -80,7 +80,7 @@ def init_paper_trading_db():
             )
         
         logger.info("Paper Trading DB 初始化完成")
-    except Exception as e:
+    except (OSError, IOError, RuntimeError) as e:
         logger.error("Paper Trading DB 初始化失败: %s", str(e))
 
 
@@ -172,7 +172,7 @@ def paper_open_position(
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         }
 
-    except Exception as e:
+    except (sqlite3.Error, sqlite3.OperationalError, RuntimeError) as e:
         logger.error("开仓失败: %s", str(e))
         return {"error": str(e)}
 
@@ -246,7 +246,7 @@ def paper_close_position(
             "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         }
 
-    except Exception as e:
+    except (sqlite3.Error, sqlite3.OperationalError, RuntimeError) as e:
         logger.error("平仓失败: %s", str(e))
         return {"error": str(e)}
 
@@ -385,7 +385,7 @@ def get_roll_suggestion(position_id: int) -> Dict[str, Any]:
             "dte": dte
         }
         
-    except Exception as e:
+    except (sqlite3.Error, sqlite3.OperationalError, RuntimeError) as e:
         return {"error": str(e)}
 
 

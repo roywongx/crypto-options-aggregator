@@ -76,8 +76,8 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
         return _dvol_cache.get("data", {})
     
     try:
-        from services.deribit_monitor import get_deribit_monitor
-        mon = get_deribit_monitor()
+        from services.instrument import _get_deribit_monitor
+        mon = _get_deribit_monitor()
         result = mon.get_dvol_signal(currency)
         if not result:
             return {}
@@ -97,7 +97,7 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
         _dvol_cache = {"currency": currency, "data": data}
         _dvol_cache_time = now
         return data
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
         logger.warning(f"获取DVOL失败(高级版): {e}, 回退简单版")
         return _get_dvol_simple_fallback(currency)
 
@@ -142,7 +142,7 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
                     "percentile_7d": round(sum(1 for x in closes if x <= current) / len(closes) * 100, 1) if closes else 50.0
                 }
         return {}
-    except Exception as e:
+    except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
         logger.warning(f"获取DVOL失败(简单版): {e}")
         return {}
 
