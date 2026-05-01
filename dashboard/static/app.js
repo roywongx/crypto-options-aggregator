@@ -4290,3 +4290,154 @@ function renderDebateErrors(errors) {
 
 // 初始化辩论模块
 initDebateSection();
+
+
+// ============================================================
+// IV 波动率微笑图 + Greeks 风险矩阵
+// ============================================================
+
+async function loadIVSmile() {
+    const container = document.getElementById('ivSmileChart');
+    if (!container) return;
+    container.innerHTML = '<div class="text-gray-400 text-sm py-8 text-center">加载中...</div>';
+
+    try {
+        const currency = document.getElementById('ivSmileCurrency')?.value || 'BTC';
+        const resp = await safeFetch(`${API_BASE}/api/charts/iv-smile?currency=${currency}`);
+        if (resp.error) {
+            container.innerHTML = `<div class="text-yellow-400 text-sm py-4">${safeHTML(resp.error)}</div>`;
+            return;
+        }
+
+        const smiles = resp.smiles || {};
+        const spot = resp.spot || 0;
+        let html = '';
+
+        for (const [key, smile] of Object.entries(smiles)) {
+            const all = smile.all || [];
+            if (all.length === 0) continue;
+
+            // 找到 ATM 附近
+            const minIv = Math.min(...all.map(p => p.iv));
+            const maxIv = Math.max(...all.map(p => p.iv));
+            const ivRange = maxIv - minIv || 1;
+
+            html += `<div class="mb-4">
+                <div class="text-sm text-gray-400 mb-2">到期 ${smile.dte} 天 (Spot: $${spot.toLocaleString()})</div>
+                <div class="flex items-end gap-0.5 h-32">`;
+
+            // 按 strike 排序，画柱状图
+            const sorted = [...all].sort((a, b) => a.strike - b.strike);
+            const barWidth = Math.max(4, Math.min(20, 200 / sorted.length));
+
+            for (const p of sorted) {
+                const height = Math.max(5, ((p.iv - minIv) / ivRange) * 100);
+                const isPut = p.type === 'P';
+                const isATM = Math.abs(p.strike - spot) / spot < 0.02;
+                const color = isATM ? 'bg-yellow-400' : isPut ? 'bg-green-500' : 'bg-blue-500';
+                const opacity = p.oi > 100 ? 'opacity-100' : 'opacity-50';
+
+                html += `<div class="group relative flex flex-col items-center" style="width:${barWidth}px">
+                    <div class="${color} ${opacity} rounded-t w-full transition-all hover:opacity-100"
+                         style="height:${height}%"></div>
+                    <div class="hidden group-hover:block absolute bottom-full mb-1 bg-gray-900 border border-gray-600 rounded p-1.5 text-xs whitespace-nowrap z-10">
+                        <div>K=$${p.strike.toLocaleString()} | IV=${p.iv}%</div>
+                        <div>${p.type} | OI=${p.oi} | 距现货${p.moneyness}%</div>
+                    </div>
+                </div>`;
+            }
+
+            html += `</div>
+                <div class="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>$${sorted[0]?.strike?.toLocaleString() || ''}</span>
+                    <span class="text-yellow-400">ATM</span>
+                    <span>$${sorted[sorted.length-1]?.strike?.toLocaleString() || ''}</span>
+                </div>
+                <div class="flex gap-3 mt-2 text-xs">
+                    <span class="text-green-400">● Put</span>
+                    <span class="text-blue-400">● Call</span>
+                    <span class="text-yellow-400">● ATM</span>
+                </div>
+            </div>`;
+        }
+
+        container.innerHTML = html || '<div class="text-gray-400 text-sm py-4">暂无微笑数据</div>';
+    } catch (e) {
+        container.innerHTML = `<div class="text-red-400 text-sm py-4">加载失败: ${e.message}</div>`;
+    }
+}
+
+async function loadGreeksSummary() {
+    const container = document.getElementById('greeksGrid');
+    if (!container) return;
+    container.innerHTML = '<div class="text-gray-400 text-sm py-4 text-center">加载中...</div>';
+
+    try {
+        const currency = document.getElementById('greeksCurrency')?.value || 'BTC';
+        const resp = await safeFetch(`${API_BASE}/api/charts/greeks-summary?currency=${currency}`);
+        if (resp.error) {
+            container.innerHTML = `<div class="text-yellow-400 text-sm">${safeHTML(resp.error)}</div>`;
+            return;
+        }
+
+        const g = resp.greeks || {};
+        const risk = resp.risk_assessment || {};
+        const spot = resp.spot || 0;
+
+        const deltaColor = Math.abs(g.delta) > 500 ? 'text-red-400' : Math.abs(g.delta) > 100 ? 'text-yellow-400' : 'text-green-400';
+        const thetaColor = g.theta < -100 ? 'text-red-400' : g.theta < -20 ? 'text-yellow-400' : 'text-green-400';
+
+        container.innerHTML = `
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-xs text-gray-400">Delta (Δ)</div>
+                    <div class="text-xl font-bold ${deltaColor}">${g.delta?.toLocaleString() || 0}</div>
+                    <div class="text-xs text-gray-500">价格敏感度</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-xs text-gray-400">Gamma (Γ)</div>
+                    <div class="text-xl font-bold text-blue-400">${g.gamma?.toFixed(4) || 0}</div>
+                    <div class="text-xs text-gray-500">Delta 变化率</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-xs text-gray-400">Theta (Θ)</div>
+                    <div class="text-xl font-bold ${thetaColor}">$${g.theta?.toLocaleString() || 0}</div>
+                    <div class="text-xs text-gray-500">每日时间损耗</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-xs text-gray-400">Vega (V)</div>
+                    <div class="text-xl font-bold text-purple-400">$${g.vega?.toLocaleString() || 0}</div>
+                    <div class="text-xs text-gray-500">IV 敏感度</div>
+                </div>
+            </div>
+            <div class="bg-gray-800/30 rounded-lg p-3">
+                <div class="text-sm font-medium text-gray-300 mb-2">情景分析</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">若 ${currency} 下跌 10%</span>
+                        <span class="${risk.delta_pnl_if_down_10pct < 0 ? 'text-red-400' : 'text-green-400'}">${risk.delta_pnl_if_down_10pct < 0 ? '' : '+'}$${risk.delta_pnl_if_down_10pct?.toLocaleString() || 0}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">若 ${currency} 上涨 10%</span>
+                        <span class="${risk.delta_pnl_if_up_10pct > 0 ? 'text-green-400' : 'text-red-400'}">+${risk.delta_pnl_if_up_10pct?.toLocaleString() || 0}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-400">若 IV 上升 5%</span>
+                        <span class="text-green-400">+$${risk.vega_pnl_if_iv_up_5pct?.toLocaleString() || 0}</span>
+                    </div>
+                </div>
+                <div class="mt-2 text-xs text-gray-500">
+                    合约: ${resp.contract_count}个 (${resp.put_count} Put / ${resp.call_count} Call) | 
+                    Delta 风险: ${risk.delta_risk || '未知'}
+                </div>
+            </div>`;
+    } catch (e) {
+        container.innerHTML = `<div class="text-red-400 text-sm">加载失败: ${e.message}</div>`;
+    }
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+    loadIVSmile();
+    loadGreeksSummary();
+});

@@ -23,8 +23,31 @@ async def copilot_chat(
     from services.ai_router import ai_chat_with_config
     from services.macro_data import get_fear_greed_index, get_funding_rate
     from services.dvol_analyzer import get_dvol_from_deribit
+    from services.options_debate_engine import run_debate
 
     context_parts = []
+
+    # 注入辩论引擎分析结果
+    try:
+        debate = await run_in_threadpool(run_debate, currency.upper(), True)
+        synth = debate.get("synthesis", {})
+        reports = debate.get("reports", [])
+        context_parts.append(f"=== 多智能体辩论分析 ===")
+        context_parts.append(f"综合评分: {synth.get('overall_score', 'N/A')}")
+        context_parts.append(f"建议: {synth.get('recommendation_label', 'N/A')}")
+        context_parts.append(f"共识度: {synth.get('consensus', 'N/A')}")
+        for r in reports:
+            context_parts.append(f"{r['name']}: {r['verdict']} (分数:{r['score']}, 置信度:{r['confidence']}%)")
+            for p in r.get("key_points", [])[:2]:
+                context_parts.append(f"  - {p}")
+        suggestions = synth.get("entry_suggestions", [])
+        if suggestions:
+            context_parts.append(f"入场建议:")
+            for s in suggestions[:2]:
+                if isinstance(s, dict):
+                    context_parts.append(f"  {s.get('action', '')} | {s.get('reason', '')}")
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.debug("Copilot debate injection failed: %s", e)
 
     try:
         fg = await run_in_threadpool(get_fear_greed_index)

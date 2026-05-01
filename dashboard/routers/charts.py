@@ -235,3 +235,185 @@ async def get_vol_surface(currency: str = "BTC"):
         "term_structure": term_data,
         "backwardation": backwardation
     }
+
+
+@router.get("/iv-smile")
+async def get_iv_smile(currency: str = "BTC"):
+    """获取波动率微笑数据 (strike vs IV，最近到期)"""
+    from services.spot_price import get_spot_price
+    from services.instrument import _parse_inst_name
+    from db.connection import execute_read
+
+    try:
+        spot = get_spot_price(currency)
+    except (RuntimeError, ValueError):
+        from constants import get_spot_fallback
+        spot = get_spot_fallback(currency)
+
+    # 从 DB 获取最新合约数据
+    rows = execute_read("""
+        SELECT contracts_data FROM scan_records
+        WHERE currency = ? AND contracts_data IS NOT NULL
+        ORDER BY timestamp DESC LIMIT 1
+    """, (currency,))
+
+    if not rows or not rows[0][0]:
+        return {"error": "无合约数据", "smile": [], "currency": currency, "spot": spot}
+
+    try:
+        contracts = json.loads(rows[0][0])
+    except json.JSONDecodeError:
+        return {"error": "数据解析失败", "smile": [], "currency": currency, "spot": spot}
+
+    # 按到期日分组
+    by_expiry = {}
+    for c in contracts:
+        iv = c.get("mark_iv") or c.get("iv") or 0
+        strike = c.get("strike", 0)
+        dte = c.get("dte", 0)
+        option_type = c.get("option_type", "")
+        oi = c.get("oi", 0) or c.get("open_interest", 0)
+        volume = c.get("volume", 0)
+
+        iv_float = float(iv) if iv else 0
+        if iv_float > 0 and iv_float < 1.0:
+            iv_float *= 100  # 小数转百分比
+
+        if iv_float <= 0 or strike <= 0 or dte <= 0:
+            continue
+
+        # 过滤无效 IV (价差过大或无 OI)
+        if float(oi) < 5:
+            continue
+
+        exp_key = int(dte)
+        if exp_key not in by_expiry:
+            by_expiry[exp_key] = []
+        by_expiry[exp_key].append({
+            "strike": float(strike),
+            "iv": round(iv_float, 2),
+            "type": option_type.upper()[0] if option_type else "?",
+            "oi": float(oi),
+            "volume": float(volume) if volume else 0,
+            "moneyness": round((float(strike) - spot) / spot * 100, 2) if spot > 0 else 0,
+        })
+
+    if not by_expiry:
+        return {"error": "无有效 IV 数据", "smile": [], "currency": currency, "spot": spot}
+
+    # 取最近到期 + 最远到期 做对比
+    sorted_expiries = sorted(by_expiry.keys())
+    result = {"currency": currency, "spot": round(spot, 2), "smiles": {}}
+
+    for exp_dte in sorted_expiries[:3]:  # 最近3个到期日
+        points = sorted(by_expiry[exp_dte], key=lambda x: x["strike"])
+        # 分离 Put/Call
+        puts = [p for p in points if p["type"] == "P"]
+        calls = [p for p in points if p["type"] == "C"]
+        result["smiles"][f"dte_{exp_dte}"] = {
+            "dte": exp_dte,
+            "puts": puts,
+            "calls": calls,
+            "all": points,
+        }
+
+    return result
+
+
+@router.get("/greeks-summary")
+async def get_greeks_summary(currency: str = "BTC"):
+    """获取持仓 Greeks 汇总 (风险矩阵)"""
+    from services.spot_price import get_spot_price
+    from services.shared_calculations import black_scholes_price
+    from db.connection import execute_read
+
+    try:
+        spot = get_spot_price(currency)
+    except (RuntimeError, ValueError):
+        from constants import get_spot_fallback
+        spot = get_spot_fallback(currency)
+
+    # 从 DB 获取最新合约数据
+    rows = execute_read("""
+        SELECT contracts_data FROM scan_records
+        WHERE currency = ? AND contracts_data IS NOT NULL
+        ORDER BY timestamp DESC LIMIT 1
+    """, (currency,))
+
+    if not rows or not rows[0][0]:
+        return {"error": "无合约数据", "greeks": {}, "currency": currency, "spot": spot}
+
+    try:
+        contracts = json.loads(rows[0][0])
+    except json.JSONDecodeError:
+        return {"error": "数据解析失败", "greeks": {}, "currency": currency, "spot": spot}
+
+    total_delta = 0.0
+    total_gamma = 0.0
+    total_theta = 0.0
+    total_vega = 0.0
+    total_premium = 0.0
+    total_notional = 0.0
+    contract_count = 0
+    put_count = 0
+    call_count = 0
+
+    for c in contracts:
+        strike = float(c.get("strike", 0))
+        dte = int(c.get("dte", 0))
+        iv_raw = c.get("mark_iv") or c.get("iv") or 0
+        iv = float(iv_raw) if iv_raw else 0
+        if iv > 0 and iv < 1.0:
+            iv *= 100
+        option_type = c.get("option_type", "")
+        premium = float(c.get("premium_usd", c.get("premium", 0)) or 0)
+        oi = float(c.get("oi", 0) or c.get("open_interest", 0) or 0)
+
+        if strike <= 0 or dte <= 0 or iv <= 0:
+            continue
+
+        # 用 BS 模型计算 Greeks
+        bs = black_scholes_price(option_type, strike, spot, dte, iv)
+        qty = max(oi, 1)  # 用 OI 作为权重
+
+        total_delta += bs["delta"] * qty
+        total_gamma += bs["gamma"] * qty
+        total_theta += bs["theta"] * qty
+        total_vega += bs["vega"] * qty
+        total_premium += premium * qty
+        total_notional += strike * qty
+        contract_count += 1
+
+        if option_type.upper()[0] == "P":
+            put_count += 1
+        elif option_type.upper()[0] == "C":
+            call_count += 1
+
+    # 风险评级
+    abs_delta = abs(total_delta)
+    delta_risk = "🔴 高" if abs_delta > 1000 else "🟡 中" if abs_delta > 100 else "🟢 低"
+
+    return {
+        "currency": currency,
+        "spot": round(spot, 2),
+        "contract_count": contract_count,
+        "put_count": put_count,
+        "call_count": call_count,
+        "greeks": {
+            "delta": round(total_delta, 2),
+            "gamma": round(total_gamma, 6),
+            "theta": round(total_theta, 2),
+            "vega": round(total_vega, 2),
+        },
+        "risk_assessment": {
+            "delta_risk": delta_risk,
+            "delta_pnl_if_down_10pct": round(total_delta * spot * -0.1, 0),
+            "delta_pnl_if_up_10pct": round(total_delta * spot * 0.1, 0),
+            "theta_daily_decay": round(total_theta, 0),
+            "vega_pnl_if_iv_up_5pct": round(total_vega * 5, 0),
+        },
+        "totals": {
+            "premium": round(total_premium, 0),
+            "notional": round(total_notional, 0),
+        }
+    }
