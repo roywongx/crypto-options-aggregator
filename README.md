@@ -14,16 +14,16 @@
 </p>
 
 <p align="center">
-  <a href="#快速开始">快速开始</a> •
-  <a href="#核心架构">核心架构</a> •
-  <a href="#功能模块">功能模块</a> •
-  <a href="#api-文档">API 文档</a> •
-  <a href="#更新日志">更新日志</a>
+  <a href="#-quick-start">快速开始</a> •
+  <a href="#-architecture">核心架构</a> •
+  <a href="#-features">功能模块</a> •
+  <a href="#-api">API 文档</a> •
+  <a href="#-changelog">更新日志</a>
 </p>
 
 ---
 
-## 一、项目解决的核心痛点
+## 🎯 项目解决的核心痛点
 
 ### 痛点 1：期权数据分散，跨平台比对效率低下
 加密货币期权数据分散在 Binance、Deribit 等多个交易所，交易者需要在不同平台间切换比对，耗时且容易遗漏最优机会。
@@ -59,9 +59,9 @@
 
 ---
 
-## 二、核心架构
+## 🏗️ 核心架构
 
-### 2.1 数据流架构 — 从交易所到前端的毫秒级链路
+### 数据流架构 — 从交易所到前端的毫秒级链路
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -159,7 +159,7 @@
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 关键设计决策
+### 关键设计决策
 
 | 设计点 | 决策 | 理由 |
 |--------|------|------|
@@ -173,15 +173,15 @@
 
 ---
 
-## 三、快速开始
+## 🚀 快速开始
 
-### 3.1 环境要求
+### 环境要求
 
 - Python 3.13+
 - 支持 asyncio 的运行时环境
 - 网络连接（用于访问 Binance / Deribit API）
 
-### 3.2 安装步骤
+### 安装步骤
 
 ```bash
 # 1. 克隆仓库
@@ -201,7 +201,7 @@ python main.py
 
 浏览器打开 → **http://localhost:8000**
 
-### 3.3 Docker 部署 (待实现)
+### Docker 部署 (待实现)
 
 > ⚠️ Dockerfile 尚未创建，以下命令待后续补充。
 
@@ -212,7 +212,7 @@ python main.py
 
 ---
 
-## 四、功能模块
+## ✨ 功能模块
 
 | 模块 | 功能 | 技术亮点 |
 |------|------|----------|
@@ -227,11 +227,11 @@ python main.py
 
 ---
 
-## 五、API 文档
+## 📡 API 文档
 
 启动服务后访问：**http://localhost:8000/docs**
 
-### 5.1 核心 API 端点
+### 核心 API 端点
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -250,7 +250,7 @@ python main.py
 | `/api/paper/positions` | GET | 模拟盘持仓 |
 | `/api/paper/trade` | POST | 模拟盘交易 |
 
-### 5.2 认证
+### 认证
 
 所有 API 端点（除 `/api/health` 外）需要 `X-API-Key` Header：
 
@@ -262,7 +262,7 @@ curl -H "X-API-Key: your-api-key" http://localhost:8000/api/latest
 
 ---
 
-## 六、项目结构
+## 📁 项目结构
 
 ```
 crypto-options-aggregator/
@@ -303,9 +303,23 @@ crypto-options-aggregator/
 
 ---
 
-## 七、测试
+## 🧪 测试
 
-### 7.1 运行 E2E 测试 (待实现)
+### 运行单元测试
+
+```bash
+python -m pytest tests/test_core.py -v
+```
+
+### 测试覆盖
+
+- **Margin Calculator**: 验证 PUT/CALL 保证金计算、最小值保护、非负约束
+- **Black-Scholes**: 验证期权定价、Greeks 计算、边界条件
+- **Win Rate**: 验证 OTM/ITM 胜率计算
+- **Grid Score**: 验证评分归一化和推荐等级映射
+- **Norm CDF**: 验证正态分布累积函数精度
+
+### E2E 测试 (待实现)
 
 > ⚠️ `test_e2e.py` 尚未创建，以下命令待后续补充。
 
@@ -314,21 +328,9 @@ crypto-options-aggregator/
 # python test_e2e.py
 ```
 
-### 7.2 测试覆盖
-
-- **CORS 跨域**: 验证 OPTIONS preflight 和 GET 响应头
-- **API Key 认证**: 验证无 Key 返回 403，有 Key 正常访问
-- **健康检查**: 验证服务状态和数据源连通性
-- **DataHub 状态**: 验证实时数据中心运行状态
-- **交易 API**: 验证参数校验（days/le=90, limit/le=500）
-- **模拟盘**: 验证开仓、持仓查询、保证金计算
-- **IV 计算**: 验证 Black-Scholes delta 计算（IV=50 百分比单位）
-- **扫描引擎**: 验证模块导入和函数可用性
-- **事务管理**: 验证原子性操作（持仓/交易/现金一致性）
-
 ---
 
-## 八、更新日志
+## 📝 更新日志
 
 ### v5.3 — 架构债务清理与 HTTP 库统一（当前）
 
@@ -397,7 +399,7 @@ crypto-options-aggregator/
 
 ---
 
-## 九、贡献指南
+## 🤝 贡献指南
 
 欢迎提交 Issue 和 Pull Request！
 
@@ -409,7 +411,7 @@ crypto-options-aggregator/
 
 ---
 
-## 十、许可证
+## 📄 许可证
 
 本项目采用 [MIT License](LICENSE) 开源许可证。
 
