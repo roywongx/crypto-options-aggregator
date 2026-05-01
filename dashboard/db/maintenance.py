@@ -1,7 +1,11 @@
 # Database Maintenance
 import sqlite3
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
 
 def get_db_maintenance_stats(conn: sqlite3.Connection) -> dict:
     """获取数据库维护统计信息"""
@@ -27,6 +31,7 @@ def get_db_maintenance_stats(conn: sqlite3.Connection) -> dict:
         "last_scan_timestamp": last_scan
     }
 
+
 def cleanup_old_records(conn: sqlite3.Connection, days: int = 30) -> dict:
     """清理指定天数之前的旧记录"""
     cursor = conn.cursor()
@@ -46,14 +51,16 @@ def cleanup_old_records(conn: sqlite3.Connection, days: int = 30) -> dict:
         "cutoff_date": cutoff_date.isoformat()
     }
 
+
 def vacuum_database(conn: sqlite3.Connection) -> bool:
     """执行 VACUUM 压缩数据库"""
     try:
         conn.execute("VACUUM")
         return True
-    except Exception as e:
-        print(f"VACUUM failed: {e}")
+    except sqlite3.OperationalError as e:
+        logger.error("VACUUM failed: %s", e)
         return False
+
 
 def vacuum_if_needed(conn: sqlite3.Connection, threshold_mb: float = 100) -> dict:
     """如果数据库超过阈值大小，执行 VACUUM"""

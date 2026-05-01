@@ -3,6 +3,7 @@ import sys
 import time
 import logging
 import sqlite3
+import threading
 from typing import Optional, Dict
 from pathlib import Path
 
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 # 缓存：{currency: (price, timestamp)}
 _spot_cache: Dict[str, tuple] = {}
 _CACHE_TTL_SECONDS = 5  # 5秒缓存，确保所有组件使用相同的时间戳和价格
+_cache_lock = threading.Lock()
+
 
 async def get_spot_price_binance_async(currency: str = "BTC") -> Optional[float]:
     """从 Binance 异步获取现货价格"""
@@ -33,6 +36,7 @@ async def get_spot_price_binance_async(currency: str = "BTC") -> Optional[float]
             continue
     return None
 
+
 async def get_spot_price_deribit_async(currency: str = "BTC") -> Optional[float]:
     """从 Deribit 异步获取现货价格"""
     try:
@@ -49,6 +53,7 @@ async def get_spot_price_deribit_async(currency: str = "BTC") -> Optional[float]
     except (ValueError, KeyError) as e:
         logger.warning("Deribit 响应解析失败: %s", e)
     return None
+
 
 def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
     """从 Binance 获取现货价格（同步版本，向后兼容）"""
@@ -71,6 +76,7 @@ def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
         logger.warning("获取现货价格失败: %s", e)
     return None
 
+
 def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
     """从 Deribit 获取现货价格（同步版本，向后兼容）"""
     try:
@@ -87,6 +93,7 @@ def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
     except (ValueError, KeyError) as e:
         logger.warning("Deribit 响应解析失败: %s", e)
     return None
+
 
 async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> float:
     """异步统一入口获取现货价格
@@ -106,13 +113,15 @@ async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> f
         RuntimeError: 所有来源都失败时抛出
     """
     now = time.time()
-    if currency in _spot_cache:
-        cached_price, cached_time = _spot_cache[currency]
-        if now - cached_time < _CACHE_TTL_SECONDS:
-            return cached_price
+    with _cache_lock:
+        if currency in _spot_cache:
+            cached_price, cached_time = _spot_cache[currency]
+            if now - cached_time < _CACHE_TTL_SECONDS:
+                return cached_price
 
     if source == "cache":
-        return _spot_cache.get(currency, (None, 0))[0] or 0.0
+        with _cache_lock:
+            return _spot_cache.get(currency, (None, 0))[0] or 0.0
 
     sources = []
 
@@ -125,19 +134,22 @@ async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> f
     if source in ("auto", "binance"):
         spot = _try("BinanceSpot", await get_spot_price_binance_async(currency))
         if spot:
-            _spot_cache[currency] = (spot, now)
+            with _cache_lock:
+                _spot_cache[currency] = (spot, now)
             return spot
 
     if source in ("auto", "deribit"):
         spot = _try("DeribitIndex", await get_spot_price_deribit_async(currency))
         if spot:
-            _spot_cache[currency] = (spot, now)
+            with _cache_lock:
+                _spot_cache[currency] = (spot, now)
             return spot
 
     raise RuntimeError(
         f"[CRITICAL] Cannot obtain spot price for {currency}. "
         f"All sources exhausted: {sources}."
     )
+
 
 def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
     """
@@ -159,13 +171,15 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
     """
     # 检查缓存
     now = time.time()
-    if currency in _spot_cache:
-        cached_price, cached_time = _spot_cache[currency]
-        if now - cached_time < _CACHE_TTL_SECONDS:
-            return cached_price
+    with _cache_lock:
+        if currency in _spot_cache:
+            cached_price, cached_time = _spot_cache[currency]
+            if now - cached_time < _CACHE_TTL_SECONDS:
+                return cached_price
 
     if source == "cache":
-        return _spot_cache.get(currency, (None, 0))[0] or 0.0
+        with _cache_lock:
+            return _spot_cache.get(currency, (None, 0))[0] or 0.0
 
     sources = []
 
@@ -179,13 +193,15 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
     if source in ("auto", "binance"):
         spot = _try("BinanceSpot", get_spot_price_binance(currency))
         if spot:
-            _spot_cache[currency] = (spot, now)
+            with _cache_lock:
+                _spot_cache[currency] = (spot, now)
             return spot
 
     if source in ("auto", "deribit"):
         spot = _try("DeribitIndex", get_spot_price_deribit(currency))
         if spot:
-            _spot_cache[currency] = (spot, now)
+            with _cache_lock:
+                _spot_cache[currency] = (spot, now)
             return spot
 
     # CCXT fallback
@@ -197,7 +213,8 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
             t = ex.fetch_ticker(sym_map.get(currency, f"{currency}/USDT"))
             spot = _try("CCXT", t.get('last') if t else None)
             if spot:
-                _spot_cache[currency] = (spot, now)
+                with _cache_lock:
+                    _spot_cache[currency] = (spot, now)
                 return spot
         except (ImportError, Exception) as e:
             logger.warning("CCXT failed for %s: %s", currency, e)
@@ -217,12 +234,14 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
                         if "price" in d:
                             spot = _try(url_base.split("//")[1].split(".")[0], d["price"])
                             if spot:
-                                _spot_cache[currency] = (spot, now)
+                                with _cache_lock:
+                                    _spot_cache[currency] = (spot, now)
                                 return spot
                         elif currency.lower() in d:
                             spot = _try("CoinGecko", d[currency.lower()].get("usd"))
                             if spot:
-                                _spot_cache[currency] = (spot, now)
+                                with _cache_lock:
+                                    _spot_cache[currency] = (spot, now)
                                 return spot
                 except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
                     logger.debug("Fallback oracle %s failed: %s", url_base, e)
@@ -234,6 +253,7 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
         f"[CRITICAL] Cannot obtain spot price for {currency}. "
         f"All sources exhausted: {sources}."
     )
+
 
 def _get_spot_from_scan(currency: str = "BTC"):
     try:

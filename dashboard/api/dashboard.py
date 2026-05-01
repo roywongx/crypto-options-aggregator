@@ -57,130 +57,15 @@ async def dashboard_init(currency: str = Query(default="BTC")):
 
 
 def _fetch_wind_analysis(currency: str, days: int = 30):
-    """获取大单风向标分析"""
-    since = datetime.utcnow() - timedelta(days=days)
-    since_str = since.strftime('%Y-%m-%d %H:%M:%S')
-    
-    grouped = execute_read("""
-        SELECT direction, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
-        FROM large_trades_history
-        WHERE currency = ? AND timestamp >= ?
-        GROUP BY direction, option_type
-    """, (currency, since_str))
-    
-    summary_data = {'buy_put': 0, 'sell_call': 0, 'buy_call': 0, 'sell_put': 0, 'total': 0, 'put_vol': 0, 'call_vol': 0}
-    for row in grouped:
-        direction = (row[0] or '').lower()
-        ot = (row[1] or 'PUT').upper()
-        count = row[3] or 0
-        vol = row[2] or 0
-        summary_data['total'] += count
-        if direction == 'buy' and ot == 'PUT':
-            summary_data['buy_put'] += count
-            summary_data['put_vol'] += vol
-        elif direction == 'sell' and ot == 'CALL':
-            summary_data['sell_call'] += count
-            summary_data['call_vol'] += vol
-        elif direction == 'buy' and ot == 'CALL':
-            summary_data['buy_call'] += count
-            summary_data['call_vol'] += vol
-        elif direction == 'sell' and ot == 'PUT':
-            summary_data['sell_put'] += count
-            summary_data['put_vol'] += vol
-    
-    total = summary_data['total'] or 1
-    bp = summary_data['buy_put']
-    sc = summary_data['sell_call']
-    bc = summary_data['buy_call']
-    sp = summary_data['sell_put']
-    
-    bp_ratio = bp / total
-    sc_ratio = sc / total
-    buy_ratio = (bp + bc) / total
-    dominant = "看跌保护" if bp_ratio > 0.3 else ("Covered Call偏好" if sc_ratio > 0.3 else "中性")
-    
-    sentiment_score = round((bp_ratio * 2 + sc_ratio * 1.5 + bc / total * 1) - (sp / total * 1), 2) if total > 10 else 0
-    
-    try:
-        spot = get_spot_price(currency)
-    except (RuntimeError, ValueError) as e:
-        logger.warning("Dashboard wind spot price failed: %s", e)
-        spot = 0
-    
-    return {
-        "currency": currency, "spot": spot, "days": days,
-        "buy_ratio": round(buy_ratio, 3), "dominant_flow": dominant,
-        "risk_level": RiskFramework.get_status(spot),
-        "sentiment_score": sentiment_score,
-        "sentiment_text": dominant,
-        "summary": summary_data
-    }
+    """获取大单风向标分析（委托给 scan_engine 的统一实现）"""
+    from services.scan_engine import _fetch_wind_analysis as _se_wind
+    return _se_wind(currency, days)
 
 
 def _fetch_term_structure(currency: str):
-    """获取 IV 期限结构"""
-    from services.iv_term_structure import IVTermStructureAnalyzer
-
-    try:
-        spot = get_spot_price(currency)
-    except (RuntimeError, ValueError) as e:
-        logger.warning("Term structure spot price failed: %s, using fallback", e)
-        from constants import get_spot_fallback
-        spot = get_spot_fallback(currency)
-
-    # 从数据库获取最近的 scan_records 中的合约数据
-    try:
-        rows = execute_read("""
-            SELECT contracts_data FROM scan_records
-            WHERE currency = ? AND contracts_data IS NOT NULL
-            ORDER BY timestamp DESC LIMIT 1
-        """, (currency,))
-    except Exception as e:
-        logger.warning("Term structure DB query failed: %s", e)
-        rows = []
-
-    import json
-    term_data = []
-    if rows and rows[0][0]:
-        try:
-            contracts = json.loads(rows[0][0])
-            # 按到期日分组，计算每个到期日的平均 IV
-            expiry_ivs = {}
-            for c in contracts:
-                iv = c.get("mark_iv") or c.get("iv") or 0
-                dte = c.get("dte", 0)
-                if iv > 0 and dte > 0:
-                    key = int(dte)
-                    if key not in expiry_ivs:
-                        expiry_ivs[key] = []
-                    expiry_ivs[key].append(float(iv))
-
-            for dte, ivs in sorted(expiry_ivs.items()):
-                avg_iv = sum(ivs) / len(ivs)
-                term_data.append({"dte": dte, "avg_iv": round(avg_iv, 2)})
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning("Term structure JSON parse failed: %s", e)
-
-    if len(term_data) < 2:
-        return {"error": "数据不足，至少需要 2 个期限点", "term_structure": [], "backwardation": False}
-
-    # 使用 IVTermStructureAnalyzer 进行分析
-    analysis = IVTermStructureAnalyzer.analyze_term_structure(term_data, spot)
-
-    backwardation = False
-    if len(term_data) >= 2:
-        front_iv = term_data[0]["avg_iv"]
-        back_iv = term_data[-1]["avg_iv"]
-        if front_iv and back_iv:
-            backwardation = front_iv > back_iv * 1.05
-
-    return {
-        "currency": currency,
-        "term_structure": term_data,
-        "backwardation": backwardation,
-        "analysis": analysis,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    """获取 IV 期限结构（委托给 scan_engine 的统一实现）"""
+    from services.scan_engine import _fetch_term_structure as _se_term
+    return _se_term(currency)
 
 
 def _fetch_onchain_metrics(currency: str):

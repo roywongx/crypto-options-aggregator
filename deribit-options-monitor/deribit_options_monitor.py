@@ -640,8 +640,8 @@ class DeribitOptionsMonitor:
                     "cv": round(cv, 4),
                     "data_days": len(closes) // 24,
                 }
-        except Exception:
-            pass
+        except (ValueError, ZeroDivisionError, IndexError, KeyError) as e:
+            logger.debug("_calc_volatility_thresholds calculation failed: %s", e)
 
         # 默认阈值
         return {"high_conf": 2.0, "mid_conf": 1.5, "cv": None, "data_days": 0}

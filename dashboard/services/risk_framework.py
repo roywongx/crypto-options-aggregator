@@ -1,5 +1,6 @@
 # Services - Risk Framework
 import logging
+import threading
 from config import config
 from datetime import datetime
 
@@ -11,11 +12,12 @@ class RiskFramework:
     # 静态回退值
     REGULAR_FLOOR = config.BTC_REGULAR_FLOOR
     EXTREME_FLOOR = config.BTC_EXTREME_FLOOR
-    
+
     # 动态支撑位计算器实例
     _support_calculator = None
     _cached_floors = None
     _cache_timestamp = None
+    _cache_lock = threading.Lock()
 
     @classmethod
     def _get_support_calculator(cls):
@@ -29,20 +31,23 @@ class RiskFramework:
     def _get_floors(cls) -> dict:
         """获取支撑位，带缓存（缓存时间延长至4小时）"""
         now = datetime.now()
-        
-        # 缓存4小时
-        if (cls._cached_floors and cls._cache_timestamp and 
-            (now - cls._cache_timestamp).total_seconds() < 14400):
-            return cls._cached_floors
-        
+
+        with cls._cache_lock:
+            # 缓存4小时
+            if (cls._cached_floors and cls._cache_timestamp and
+                (now - cls._cache_timestamp).total_seconds() < 14400):
+                return cls._cached_floors
+
         # 重新计算
         try:
             calculator = cls._get_support_calculator()
-            cls._cached_floors = calculator.get_dynamic_floors()
-            cls._cache_timestamp = now
-            return cls._cached_floors
-        except Exception as e:
-            logger.warning(f"获取动态支撑位失败: {e}")
+            floors = calculator.get_dynamic_floors()
+            with cls._cache_lock:
+                cls._cached_floors = floors
+                cls._cache_timestamp = now
+            return floors
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            logger.warning("获取动态支撑位失败: %s", e)
             # 回退到静态值
             return {
                 "regular": cls.REGULAR_FLOOR,

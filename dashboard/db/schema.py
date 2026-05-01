@@ -1,5 +1,8 @@
 # Database schema definitions
 import sqlite3
+import logging
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_SCAN_RECORDS = """
 CREATE TABLE IF NOT EXISTS scan_records (
@@ -61,18 +64,15 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_scan_timestamp ON scan_records(timestamp DESC)",
 ]
 
-# JSON1 虚拟列索引（用于 contracts_data/top_contracts_data 的快速查询）
-JSON_INDEXES = [
-    # 提取 top_contracts_data 中第一个合约的 APR 作为虚拟列
-    "ALTER TABLE scan_records ADD COLUMN IF NOT EXISTS top_apr REAL GENERATED ALWAYS AS (COALESCE(json_extract(top_contracts_data, '$[0].apr'), 0)) VIRTUAL",
-    "CREATE INDEX IF NOT EXISTS idx_scan_top_apr ON scan_records(top_apr)",
-    # 提取 contracts_data 长度作为虚拟列
-    "ALTER TABLE scan_records ADD COLUMN IF NOT EXISTS contracts_count INTEGER GENERATED ALWAYS AS (COALESCE(json_array_length(contracts_data), 0)) VIRTUAL",
-    "CREATE INDEX IF NOT EXISTS idx_scan_contracts_count ON scan_records(contracts_count)",
-]
-
 SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'top_contracts_data', 'raw_output']
 TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
+
+
+def _is_duplicate_column_error(e: sqlite3.OperationalError) -> bool:
+    """判断是否为重复列错误（安全忽略）"""
+    msg = str(e).lower()
+    return "duplicate column" in msg or "already exists" in msg
+
 
 def init_database_schema(conn: sqlite3.Connection):
     """Initialize database schema"""
@@ -98,13 +98,13 @@ def init_database_schema(conn: sqlite3.Connection):
             cursor.execute(f"ALTER TABLE large_trades_history ADD COLUMN {col} {'REAL' if col in ('notional_usd','delta','premium_usd') else 'TEXT'}")
 
     # 创建 JSON1 虚拟列索引（SQLite ALTER TABLE 不支持 IF NOT EXISTS）
-    # 使用 try/except 处理已存在的列，因为 PRAGMA table_info 可能不显示虚拟列
     try:
         cursor.execute(
             "ALTER TABLE scan_records ADD COLUMN top_apr REAL GENERATED ALWAYS AS (COALESCE(json_extract(top_contracts_data, '$[0].apr'), 0)) VIRTUAL"
         )
     except sqlite3.OperationalError as e:
-        if "duplicate column" not in str(e).lower():
+        if not _is_duplicate_column_error(e):
+            logger.error("Failed to add top_apr virtual column: %s", e)
             raise
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_scan_top_apr ON scan_records(top_apr)")
 
@@ -113,7 +113,8 @@ def init_database_schema(conn: sqlite3.Connection):
             "ALTER TABLE scan_records ADD COLUMN contracts_count INTEGER GENERATED ALWAYS AS (COALESCE(json_array_length(contracts_data), 0)) VIRTUAL"
         )
     except sqlite3.OperationalError as e:
-        if "duplicate column" not in str(e).lower():
+        if not _is_duplicate_column_error(e):
+            logger.error("Failed to add contracts_count virtual column: %s", e)
             raise
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_scan_contracts_count ON scan_records(contracts_count)")
 
@@ -126,9 +127,10 @@ def ensure_top_contracts_column(conn):
     try:
         cursor.execute("SELECT top_contracts_data FROM scan_records LIMIT 1")
     except sqlite3.OperationalError:
-        # Column doesn't exist, add it
         try:
             cursor.execute("ALTER TABLE scan_records ADD COLUMN top_contracts_data TEXT")
             conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as e:
+            if not _is_duplicate_column_error(e):
+                logger.error("Failed to add top_contracts_data column: %s", e)
+                raise

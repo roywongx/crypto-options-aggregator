@@ -91,6 +91,9 @@ import httpx
 from concurrent.futures import ThreadPoolExecutor
 from scipy import interpolate
 
+# 全局 ThreadPoolExecutor 实例（避免每次扫描创建新线程池）
+_scan_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="scan_engine")
+
 from services.large_trades_fetcher import fetch_large_trades_sync, fetch_large_trades_async
 
 logger = logging.getLogger(__name__)
@@ -144,31 +147,31 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     try:
         mon = _get_deribit_monitor()
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            f_dvol = executor.submit(mon.get_dvol_signal, params.currency)
-            f_trades = executor.submit(mon.get_large_trade_alerts, currency=params.currency, min_usd_value=200000)
+        executor = _scan_executor
+        f_dvol = executor.submit(mon.get_dvol_signal, params.currency)
+        f_trades = executor.submit(mon.get_large_trade_alerts, currency=params.currency, min_usd_value=200000)
 
-            def _run_binance():
-                kw = {"currency": params.currency, "min_dte": use_min_dte,
-                      "max_dte": use_max_dte, "max_delta": use_delta,
-                      "margin_ratio": use_margin, "option_type": params.option_type}
-                return scan_binance_options(**kw)
+        def _run_binance():
+            kw = {"currency": params.currency, "min_dte": use_min_dte,
+                  "max_dte": use_max_dte, "max_delta": use_delta,
+                  "margin_ratio": use_margin, "option_type": params.option_type}
+            return scan_binance_options(**kw)
 
-            f_bin = executor.submit(_run_binance)
+        f_bin = executor.submit(_run_binance)
 
-            dvol_res = f_dvol.result(timeout=60)
-            trades_res = f_trades.result(timeout=60)
-            bin_res = f_bin.result(timeout=60)
+        dvol_res = f_dvol.result(timeout=60)
+        trades_res = f_trades.result(timeout=60)
+        bin_res = f_bin.result(timeout=60)
 
-            def _run_deribit():
-                return mon.scan_options(
-                    currency=params.currency, option_type=params.option_type,
-                    min_dte=use_min_dte, max_dte=use_max_dte,
-                    max_delta=use_delta, margin_ratio=use_margin
-                )
+        def _run_deribit():
+            return mon.scan_options(
+                currency=params.currency, option_type=params.option_type,
+                min_dte=use_min_dte, max_dte=use_max_dte,
+                max_delta=use_delta, margin_ratio=use_margin
+            )
 
-            f_der = executor.submit(_run_deribit)
-            der_res = f_der.result(timeout=60)
+        f_der = executor.submit(_run_deribit)
+        der_res = f_der.result(timeout=60)
 
         parsed = format_report(params.currency, dvol_res, trades_res, bin_res, der_res, json_output=True)
         if not isinstance(parsed, dict):
