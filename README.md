@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v5.2-Production%20Ready-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v5.3-Production%20Ready-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator Pro</h1>
@@ -237,6 +237,9 @@ docker run -p 8000:8000 --env-file .env crypto-options-aggregator
 | `/api/latest` | GET | 获取最新扫描结果 |
 | `/api/quick-scan` | POST | 快速扫描期权链 |
 | `/api/dvol` | GET | DVOL 分析数据 |
+| `/api/charts/vol-surface` | GET | IV 期限结构（支持 Backwardation/Contango 判断） |
+| `/api/charts/dvol` | GET | DVOL 历史图表数据 |
+| `/api/charts/pcr` | GET | Put/Call Ratio 图表 |
 | `/api/large-trades` | GET | 大宗交易记录 |
 | `/api/risk/overview` | GET | 风险概览 |
 | `/api/copilot/chat` | POST | AI Co-Pilot 对话 |
@@ -275,7 +278,10 @@ crypto-options-aggregator/
 │   ├── services/                 # 业务逻辑层
 │   │   ├── datahub.py            # DataHub 实时数据中心
 │   │   ├── scan_engine.py        # 扫描引擎
+│   │   ├── large_trades_fetcher.py # 大宗交易获取器（从 scan_engine 提取）
+│   │   ├── http_client.py        # 统一 HTTP 客户端（httpx 封装）
 │   │   ├── dvol_analyzer.py      # DVOL 分析器
+│   │   ├── iv_term_structure.py  # IV 期限结构分析器
 │   │   ├── paper_trading.py      # 模拟盘引擎
 │   │   ├── async_http.py         # 异步 HTTP 客户端
 │   │   └── ...
@@ -320,7 +326,25 @@ python test_e2e.py
 
 ## 八、更新日志
 
-### v5.2 — 稳定性与安全性全面提升（当前）
+### v5.3 — 架构债务清理与 HTTP 库统一（当前）
+
+#### 架构优化
+- **HTTP 库统一**: 全代码库从 `requests` 迁移到 `httpx`，新增 `services/http_client.py` 统一封装同步/异步客户端，复用 TCP 连接
+- **代码去重**: 从 `scan_engine.py` 提取 `large_trades_fetcher.py`，消除 async/sync 双版本函数的 140 行重复代码
+- **异常处理规范化**: 替换 186 个裸 `except Exception` 为具体异常类型（`httpx.HTTPError`、`ValueError`、`KeyError` 等），添加结构化日志记录
+- **数据库配置统一**: 通过 `DASHBOARD_DB_PATH` 环境变量统一 dashboard 和 Deribit monitor 的数据库路径
+- **JSON1 索引优化**: 添加 `top_apr` 和 `contracts_count` 虚拟列及索引，加速 JSON blob 查询
+
+#### 功能修复
+- **IV 期限结构 v2.0**: 新增 `/api/charts/vol-surface` 端点，从数据库合约数据计算 ATM IV 期限结构，支持 Backwardation/Contango 判断
+- **IV 单位标准化**: `vol-surface` API 自动检测并统一 IV 单位（小数 0.42 → 百分比 42%）
+- **SQLite 兼容性**: 修复 `ALTER TABLE ADD COLUMN IF NOT EXISTS` 语法错误（SQLite 不支持），改用 try/except 处理重复列
+- **生命周期修复**: 修复 `lifespan` 中 `UnboundLocalError: logger` 错误，确保服务正常启动
+
+#### 依赖更新
+- `requirements.txt`: 移除 `requests`，统一使用 `httpx>=0.27.0`
+
+### v5.2 — 稳定性与安全性全面提升
 
 #### 前端修复
 - **自动刷新保护**: 添加 `_refreshInFlight` 锁，防止接口慢于刷新间隔时并发请求造成 UI 竞态
