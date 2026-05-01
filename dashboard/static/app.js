@@ -180,6 +180,22 @@ function setupEventListeners() {
     if (tradesCurrency) tradesCurrency.addEventListener('change', loadWindAnalysis);
     const tradesDays = document.getElementById('tradesDays');
     if (tradesDays) tradesDays.addEventListener('change', loadWindAnalysis);
+
+    // AI 配置事件监听
+    const aiSettingsBtn = document.getElementById('aiSettingsBtn');
+    if (aiSettingsBtn) aiSettingsBtn.addEventListener('click', openAiSettings);
+    const closeAiSettings = document.getElementById('closeAiSettings');
+    if (closeAiSettings) closeAiSettings.addEventListener('click', closeAiSettingsModal);
+    const saveAiSettings = document.getElementById('saveAiSettings');
+    if (saveAiSettings) saveAiSettings.addEventListener('click', saveAiConfig);
+    const clearAiSettings = document.getElementById('clearAiSettings');
+    if (clearAiSettings) clearAiSettings.addEventListener('click', clearAiConfig);
+    const aiSettingsModal = document.getElementById('aiSettingsModal');
+    if (aiSettingsModal) {
+        aiSettingsModal.addEventListener('click', (e) => {
+            if (e.target === aiSettingsModal) closeAiSettingsModal();
+        });
+    }
 }
 
 function updateParamDisplay() {
@@ -2393,8 +2409,14 @@ async function sendCopilotMessage(event) {
     
     try {
         const currency = document.getElementById('currencySelect')?.value || 'BTC';
+        const aiCfg = getAiConfig();
+        const headers = {};
+        if (aiCfg.api_key) headers['X-AI-API-Key'] = aiCfg.api_key;
+        if (aiCfg.base_url) headers['X-AI-Base-URL'] = aiCfg.base_url;
+        if (aiCfg.model) headers['X-AI-Model'] = aiCfg.model;
         const response = await fetch(`${API_BASE}/api/copilot/chat?message=${encodeURIComponent(message)}&currency=${currency}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: headers
         });
         const data = await response.json();
         
@@ -2409,6 +2431,64 @@ async function sendCopilotMessage(event) {
     } catch (e) {
         loadingDiv.remove();
         addCopilotMessage('请求失败，请检查网络连接。');
+    }
+}
+
+// AI 配置函数
+function openAiSettings() {
+    const modal = document.getElementById('aiSettingsModal');
+    if (modal) modal.classList.add('active');
+    // 加载已保存的配置
+    try {
+        const cfg = JSON.parse(localStorage.getItem('ai_config') || '{}');
+        const keyInput = document.getElementById('aiApiKey');
+        const urlInput = document.getElementById('aiBaseUrl');
+        const modelInput = document.getElementById('aiModel');
+        if (keyInput) keyInput.value = cfg.api_key || '';
+        if (urlInput) urlInput.value = cfg.base_url || '';
+        if (modelInput) modelInput.value = cfg.model || '';
+    } catch (_) {}
+}
+
+function closeAiSettingsModal() {
+    const modal = document.getElementById('aiSettingsModal');
+    if (modal) modal.classList.remove('active');
+}
+
+function saveAiConfig() {
+    const apiKey = document.getElementById('aiApiKey')?.value.trim() || '';
+    const baseUrl = document.getElementById('aiBaseUrl')?.value.trim() || '';
+    const model = document.getElementById('aiModel')?.value.trim() || '';
+    const cfg = { api_key: apiKey, base_url: baseUrl, model: model };
+    try {
+        localStorage.setItem('ai_config', JSON.stringify(cfg));
+        showAlert('AI 配置已保存', 'success');
+    } catch (e) {
+        showAlert('保存失败: ' + e.message, 'error');
+    }
+    closeAiSettingsModal();
+}
+
+function clearAiConfig() {
+    try {
+        localStorage.removeItem('ai_config');
+        const keyInput = document.getElementById('aiApiKey');
+        const urlInput = document.getElementById('aiBaseUrl');
+        const modelInput = document.getElementById('aiModel');
+        if (keyInput) keyInput.value = '';
+        if (urlInput) urlInput.value = '';
+        if (modelInput) modelInput.value = '';
+        showAlert('AI 配置已清除', 'success');
+    } catch (e) {
+        showAlert('清除失败: ' + e.message, 'error');
+    }
+}
+
+function getAiConfig() {
+    try {
+        return JSON.parse(localStorage.getItem('ai_config') || '{}');
+    } catch (_) {
+        return {};
     }
 }
 

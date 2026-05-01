@@ -8,12 +8,19 @@ router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 
 
 @router.post("/chat")
-async def copilot_chat(message: str, currency: str = "BTC"):
+async def copilot_chat(
+    message: str,
+    currency: str = "BTC",
+    x_ai_api_key: str = "",
+    x_ai_base_url: str = "",
+    x_ai_model: str = ""
+):
     """
     AI Copilot 对话接口
     自动注入当前市场上下文（DVOL、恐惧贪婪指数、大宗交易、持仓数据）
+    支持通过 Header 传入自定义 AI 配置 (X-AI-API-Key, X-AI-Base-URL, X-AI-Model)
     """
-    from services.ai_router import ai_chat
+    from services.ai_router import ai_chat_with_config
     from services.macro_data import get_fear_greed_index, get_funding_rate
     from services.dvol_analyzer import get_dvol_from_deribit
 
@@ -54,6 +61,22 @@ async def copilot_chat(message: str, currency: str = "BTC"):
         {"role": "user", "content": message}
     ]
 
-    response = await run_in_threadpool(ai_chat, messages, preset="chinese", temperature=0.5, max_tokens=500)
+    # 构建自定义配置
+    ai_config = {}
+    if x_ai_api_key:
+        ai_config["api_key"] = x_ai_api_key
+    if x_ai_base_url:
+        ai_config["base_url"] = x_ai_base_url
+    if x_ai_model:
+        ai_config["model"] = x_ai_model
+
+    response = await run_in_threadpool(
+        ai_chat_with_config,
+        messages,
+        preset="chinese",
+        temperature=0.5,
+        max_tokens=500,
+        custom_config=ai_config
+    )
 
     return {"response": response, "context": context_parts, "currency": currency}

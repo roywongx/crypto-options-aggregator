@@ -52,13 +52,36 @@ def ai_chat(
     max_tokens: int = 1000
 ) -> Optional[str]:
     """
-    通用 AI 聊天接口
+    通用 AI 聊天接口（使用环境变量配置）
     
     Args:
         messages: [{"role": "user", "content": "..."}]
         preset: analysis | code | fast | chinese
         temperature: 0-1
         max_tokens: 最大输出长度
+    
+    Returns:
+        AI 回复文本，或 None
+    """
+    return ai_chat_with_config(messages, preset, temperature, max_tokens)
+
+
+def ai_chat_with_config(
+    messages: List[Dict[str, str]],
+    preset: str = "fast",
+    temperature: float = 0.7,
+    max_tokens: int = 1000,
+    custom_config: Dict[str, str] = None
+) -> Optional[str]:
+    """
+    通用 AI 聊天接口（支持自定义配置）
+    
+    Args:
+        messages: [{"role": "user", "content": "..."}]
+        preset: analysis | code | fast | chinese
+        temperature: 0-1
+        max_tokens: 最大输出长度
+        custom_config: 自定义配置 {"api_key": "...", "base_url": "...", "model": "..."}
     
     Returns:
         AI 回复文本，或 None
@@ -71,37 +94,48 @@ def ai_chat(
     model = preset_config["model"]
     fallbacks = preset_config.get("fallback", [])
     
-    # 从环境变量获取 API Key
-    api_key = os.environ.get("LITELLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    # 优先使用自定义配置
+    api_key = None
+    base_url = None
+    if custom_config:
+        api_key = custom_config.get("api_key")
+        base_url = custom_config.get("base_url")
+        if custom_config.get("model"):
+            model = custom_config["model"]
+            fallbacks = []  # 自定义模型不使用 fallback
+    
+    # 回退到环境变量
     if not api_key:
-        logger.warning("未设置 LITELLM_API_KEY 或 OPENAI_API_KEY")
+        api_key = os.environ.get("LITELLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("未设置 AI API Key")
         return None
     
     try:
-        response = completion(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            api_key=api_key,
-        )
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "api_key": api_key,
+        }
+        if base_url:
+            kwargs["api_base"] = base_url
+        
+        response = completion(**kwargs)
         return response.choices[0].message.content
 
     except (ImportError, RuntimeError, ConnectionError, TimeoutError) as e:
-        # 尝试 fallback
-        for fallback_model in fallbacks:
-            try:
-                response = completion(
-                    model=fallback_model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    api_key=api_key,
-                )
-                return response.choices[0].message.content
-            except (ImportError, RuntimeError, ConnectionError, TimeoutError) as fb_e:
-                logger.debug("AI fallback %s failed: %s", fallback_model, fb_e)
-                continue
+        # 尝试 fallback（仅当未指定自定义模型时）
+        if not custom_config or not custom_config.get("model"):
+            for fallback_model in fallbacks:
+                try:
+                    kwargs["model"] = fallback_model
+                    response = completion(**kwargs)
+                    return response.choices[0].message.content
+                except (ImportError, RuntimeError, ConnectionError, TimeoutError) as fb_e:
+                    logger.debug("AI fallback %s failed: %s", fallback_model, fb_e)
+                    continue
 
         logger.warning("AI 回复失败 (所有模型): %s", e)
         return None
