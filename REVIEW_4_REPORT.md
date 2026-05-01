@@ -45,23 +45,32 @@
 
 ---
 
-## ✅ 遗留问题已修复 (本次提交)
+## 🔍 遗留问题状态
 
-### MEDIUM
+### ✅ 已修复 (commit cc121e5 by Trae CN + d31fa25 by Hermes 验证修复)
+
+| ID | 文件 | 问题 | 状态 |
+|----|------|------|------|
+| M-3 | services/exchange_abstraction.py | 复用 monitors.py 单例 | ✅ 已修复 |
+| M-5 | services/monitors.py | 共享单例模块 + 线程安全 | ✅ 已修复 |
+| M-7 | api/strategy.py | 多币种支持 (使用 _get_book_summaries) | ✅ 已修复 (Hermes修正) |
+| L-3 | grid-strategy.js | setTimeout → MutationObserver | ✅ 已修复 |
+| L-4 | grid-strategy.js | URLSearchParams | ✅ 已修复 |
+| L-5 | tests/ | pytest 测试 | ⚠️ 仅骨架，无实际测试 |
+
+### 验证中发现并修复的新问题 (commit d31fa25)
 
 | ID | 文件 | 问题 | 修复方式 |
 |----|------|------|----------|
-| M-3 | services/exchange_abstraction.py:413 | 每次 `get_options_chain()` 新建 DeribitOptionsMonitor | 改用 `services.monitors.get_deribit_monitor()` 单例 |
-| M-5 | services/scan_engine.py + main.py | 两处各自维护 `_get_deribit_monitor()` 单例 | 统一迁移到 `services/monitors.py` 共享模块 |
-| M-7 | api/strategy.py:84 | 只支持BTC/ETH，SOL会走错误逻辑 | 添加多币种支持：BTC/ETH/SOL + 通用 `_get_book_summaries()` 回退 |
+| NEW-1 | main.py:190 | 关闭时 NameError (引用已删除的 _deribit_monitor_cache) | 改用 monitors.clear_all_monitors() |
+| NEW-2 | monitors.py | 声称线程安全但无锁 | 添加 threading.Lock 双重检查锁 |
+| NEW-3 | strategy.py:88-98 | 调用不存在的方法 (get_btc_option_summaries 等) | 统一用 _get_book_summaries(currency) |
 
-### LOW
+### 仍需处理
 
-| ID | 问题 | 修复方式 |
-|----|------|----------|
-| L-3 | grid-strategy.js `setTimeout(initGridStrategy, 1500)` 魔法数字 | 改为 `MutationObserver` 监听 DOM 加载，5秒超时保护 |
-| L-4 | grid-strategy.js URL参数拼接未用 URLSearchParams | 改用 `URLSearchParams` 对象构建查询参数 |
-| L-5 | 测试文件散落在根目录，无正式pytest结构 | 创建 `tests/` 目录 + `conftest.py` + 3个测试文件 |
+| ID | 问题 | 优先级 |
+|----|------|--------|
+| L-5 | tests/ 目录只有 conftest.py 骨架，需要写实际测试 | LOW |
 
 **修复详情:**
 - 新增 `services/monitors.py`: 统一单例管理器，集中管理 DeribitOptionsMonitor 创建和复用
