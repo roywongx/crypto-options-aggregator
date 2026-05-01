@@ -4068,3 +4068,225 @@ function openRollCalcModal() {
 }
 
 
+// =========================================================================
+// AI 辩论分析 (Multi-Agent Debate Engine)
+// =========================================================================
+
+function initDebateSection() {
+    const runBtn = document.getElementById('debateRunBtn');
+    if (!runBtn) return;
+    runBtn.addEventListener('click', () => runDebate());
+}
+
+async function runDebate() {
+    const currency = document.getElementById('debateCurrency').value;
+    const runBtn = document.getElementById('debateRunBtn');
+    const loading = document.getElementById('debateLoading');
+    const empty = document.getElementById('debateEmpty');
+    const results = document.getElementById('debateResults');
+
+    // 显示加载状态
+    runBtn.disabled = true;
+    runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>分析中...</span>';
+    loading.classList.remove('hidden');
+    empty.classList.add('hidden');
+    results.classList.add('hidden');
+
+    try {
+        const resp = await safeFetch(`${API_BASE}/api/debate/analyze?currency=${currency}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+        renderDebateResults(data);
+    } catch (e) {
+        console.error('Debate failed:', e);
+        showAlert('辩论分析失败: ' + e.message, 'error');
+        empty.classList.remove('hidden');
+    } finally {
+        runBtn.disabled = false;
+        runBtn.innerHTML = '<i class="fas fa-play"></i> <span>开始分析</span>';
+        loading.classList.add('hidden');
+    }
+}
+
+function renderDebateResults(data) {
+    const results = document.getElementById('debateResults');
+    results.classList.remove('hidden');
+
+    const synthesis = data.synthesis || {};
+    const reports = data.reports || [];
+    const summary = data.market_data_summary || {};
+
+    // 1. 最终建议
+    renderDebateVerdict(synthesis);
+
+    // 2. 各智能体卡片
+    renderDebateAgents(reports);
+
+    // 3. 市场数据摘要
+    renderDebateMarketSummary(summary, data);
+
+    // 4. 错误信息
+    renderDebateErrors(data.errors || []);
+}
+
+function renderDebateVerdict(synthesis) {
+    const score = synthesis.overall_score || 0;
+    const rec = synthesis.recommendation || 'hold';
+    const recLabel = synthesis.recommendation_label || '观望';
+    const consensus = synthesis.consensus || '';
+
+    // 评分颜色
+    const scoreColor = score > 30 ? 'text-green-400' : score > 0 ? 'text-emerald-300' : score > -30 ? 'text-yellow-400' : 'text-red-400';
+
+    // 推荐图标
+    const recIcons = {
+        'strong_buy': '🚀', 'buy': '📈', 'hold': '⚖️', 'sell': '📉', 'strong_sell': '🚨'
+    };
+
+    document.getElementById('debateRecIcon').textContent = recIcons[rec] || '⚖️';
+    document.getElementById('debateRecLabel').textContent = recLabel;
+    document.getElementById('debateRecLabel').className = 'text-xl font-bold ' + scoreColor;
+    document.getElementById('debateConsensus').textContent = '共识度: ' + consensus;
+    document.getElementById('debateOverallScore').textContent = score > 0 ? '+' + score : score;
+    document.getElementById('debateOverallScore').className = 'text-3xl font-bold ' + scoreColor;
+
+    // 入场建议
+    const sugDiv = document.getElementById('debateSuggestions');
+    const suggestions = synthesis.entry_suggestions || [];
+    if (suggestions.length === 0) {
+        sugDiv.innerHTML = '<div class="text-gray-400 text-sm">暂无具体建议</div>';
+        return;
+    }
+
+    let html = '';
+    for (const sug of suggestions) {
+        const actionColor = sug.action === 'Sell Put' ? 'green' : sug.action === '减仓/对冲' ? 'red' : 'yellow';
+        html += `<div class="bg-gray-800/50 rounded-lg p-3 border border-${actionColor}-500/20">`;
+        html += `<div class="flex items-center justify-between mb-1">`;
+        html += `<span class="text-${actionColor}-400 font-semibold text-sm">${safeHTML(sug.action)}</span>`;
+        if (sug.apr) html += `<span class="text-xs text-gray-400">APR ${sug.apr}% | 胜率 ${sug.win_rate}%</span>`;
+        html += `</div>`;
+        if (sug.strike) {
+            html += `<div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-xs">`;
+            html += `<div class="bg-gray-900/40 rounded px-2 py-1"><span class="text-gray-500">行权价</span><div class="font-bold text-white">$${sug.strike.toLocaleString()}</div></div>`;
+            html += `<div class="bg-gray-900/40 rounded px-2 py-1"><span class="text-gray-500">权利金</span><div class="font-bold text-white">$${sug.premium}</div></div>`;
+            html += `<div class="bg-gray-900/40 rounded px-2 py-1"><span class="text-gray-500">DTE</span><div class="font-bold text-white">${sug.dte}天</div></div>`;
+            html += `<div class="bg-gray-900/40 rounded px-2 py-1"><span class="text-gray-500">单次ROI</span><div class="font-bold text-${actionColor}-400">${sug.roi_per_trade}%</div></div>`;
+            html += `</div>`;
+        }
+        if (sug.reason) html += `<div class="text-xs text-gray-400 mt-2">${safeHTML(sug.reason)}</div>`;
+        if (sug.具体操作 && Array.isArray(sug.具体操作)) {
+            html += '<ul class="text-xs text-gray-300 mt-2 list-disc list-inside space-y-1">';
+            for (const op of sug.具体操作) html += `<li>${safeHTML(op)}</li>`;
+            html += '</ul>';
+        }
+        html += `</div>`;
+    }
+    sugDiv.innerHTML = html;
+}
+
+function renderDebateAgents(reports) {
+    const container = document.getElementById('debateAgentCards');
+    let html = '';
+
+    const agentColors = {
+        '🐂 多头分析师': { bg: 'green', border: 'green', icon: '🐂' },
+        '🐻 空头分析师': { bg: 'red', border: 'red', icon: '🐻' },
+        '📊 波动率分析师': { bg: 'blue', border: 'blue', icon: '📊' },
+        '🐋 资金流向分析师': { bg: 'purple', border: 'purple', icon: '🐋' },
+        '🛡️ 风险官': { bg: 'yellow', border: 'yellow', icon: '🛡️' },
+    };
+
+    for (const r of reports) {
+        const colors = agentColors[r.name] || { bg: 'gray', border: 'gray', icon: '🤖' };
+        const score = r.score || 0;
+        const scoreColor = score > 20 ? 'text-green-400' : score > 0 ? 'text-emerald-300' : score > -20 ? 'text-yellow-400' : 'text-red-400';
+        const barWidth = Math.min(100, Math.abs(score));
+        const barColor = score > 0 ? 'bg-green-500' : score < 0 ? 'bg-red-500' : 'bg-gray-500';
+
+        html += `<div class="card-glass rounded-xl p-4 border-l-4 border-${colors.border}-500/60 metric-card">`;
+        // Header
+        html += `<div class="flex items-center justify-between mb-3">`;
+        html += `<div class="flex items-center gap-2"><span class="text-xl">${colors.icon}</span><span class="font-semibold text-sm">${safeHTML(r.name)}</span></div>`;
+        html += `<span class="text-lg font-bold ${scoreColor}">${score > 0 ? '+' : ''}${score}</span>`;
+        html += `</div>`;
+        // Verdict
+        html += `<div class="mb-3"><span class="text-xs px-2 py-0.5 rounded-full bg-${colors.bg}-500/20 text-${colors.bg}-300 font-medium">${safeHTML(r.verdict)}</span>`;
+        html += `<span class="text-xs text-gray-500 ml-2">置信度 ${r.confidence}%</span></div>`;
+        // Score bar
+        html += `<div class="w-full h-2 bg-gray-700 rounded-full mb-3 overflow-hidden"><div class="h-full ${barColor} rounded-full transition-all" style="width: ${barWidth}%"></div></div>`;
+        // Key points
+        html += `<ul class="text-xs text-gray-300 space-y-1.5">`;
+        for (const pt of (r.key_points || [])) {
+            html += `<li class="flex items-start gap-1.5"><span class="text-gray-500 mt-0.5">•</span><span>${safeHTML(pt)}</span></li>`;
+        }
+        html += `</ul>`;
+        // Extra data
+        const extra = r.data || {};
+        const showKeys = Object.entries(extra).filter(([k, v]) => typeof v !== 'object' && v !== '' && v !== 0);
+        if (showKeys.length > 0) {
+            html += `<div class="mt-3 pt-2 border-t border-gray-700/50 grid grid-cols-2 gap-1.5 text-[10px]">`;
+            for (const [k, v] of showKeys.slice(0, 6)) {
+                const label = {avg_apr:'平均APR', avg_win_rate:'平均胜率', best_apr:'最佳APR', contract_count:'合约数',
+                    dvol:'DVOL', z_score:'Z-Score', percentile_7d:'IV百分位', regime:'波动率体制', skew:'IV偏度',
+                    pcr:'PCR', whale_trades:'超大单', buy_pct:'买入占比', daily_var_pct:'日VaR%',
+                    recommended_position_pct:'建议仓位%', vol_trend:'波动率趋势'}[k] || k;
+                html += `<div><span class="text-gray-500">${label}</span>: <span class="text-gray-300 font-medium">${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(1)) : v}</span></div>`;
+            }
+            html += `</div>`;
+        }
+        html += `</div>`;
+    }
+    container.innerHTML = html;
+}
+
+function renderDebateMarketSummary(summary, data) {
+    const grid = document.getElementById('debateMarketGrid');
+    const spot = summary.spot || 0;
+    const dvol = summary.dvol || 0;
+    const riskLabel = summary.risk_label || '';
+    const tradesCount = summary.large_trades_count || 0;
+    const contractsCount = summary.contracts_count || 0;
+    const dvolSignal = summary.dvol_signal || '';
+
+    let html = '';
+    html += _summaryCard('现货价格', spot > 0 ? '$' + spot.toLocaleString() : '--', 'text-orange-400');
+    html += _summaryCard('DVOL', dvol > 0 ? dvol.toFixed(1) + '%' : '--', 'text-blue-400', dvolSignal);
+    html += _summaryCard('风险状态', riskLabel || '--', '');
+    html += _summaryCard('数据', `${tradesCount} 大单 | ${contractsCount} 合约`, 'text-gray-300');
+
+    if (data.errors && data.errors.length > 0) {
+        html += _summaryCard('数据警告', `${data.errors.length} 项`, 'text-yellow-400');
+    }
+
+    grid.innerHTML = html;
+}
+
+function _summaryCard(label, value, color, sub) {
+    return `<div class="p-2 bg-gray-900/40 rounded-lg">
+        <div class="text-[10px] text-gray-500 mb-1">${label}</div>
+        <div class="text-sm font-bold ${color || 'text-white'}">${safeHTML(value)}</div>
+        ${sub ? `<div class="text-[10px] text-gray-500 mt-0.5">${safeHTML(sub)}</div>` : ''}
+    </div>`;
+}
+
+function renderDebateErrors(errors) {
+    const el = document.getElementById('debateErrors');
+    if (!errors || errors.length === 0) {
+        el.classList.add('hidden');
+        return;
+    }
+    el.classList.remove('hidden');
+    el.innerHTML = '<div class="font-semibold mb-1">⚠️ 数据获取警告</div>' +
+        errors.map(e => `<div>• ${safeHTML(e)}</div>`).join('');
+}
+
+// 初始化辩论模块
+initDebateSection();

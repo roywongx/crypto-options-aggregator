@@ -910,6 +910,91 @@
             </div>
         </section>
 
+        <!-- AI 辩论分析 -->
+        <section id="debateSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-purple-500">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-robot text-purple-500"></i>
+                    <h3 class="font-semibold text-lg">AI 辩论分析</h3>
+                    <span class="text-xs text-gray-400 ml-2">多智能体确定性分析 · 5 位 AI 分析师独立研判</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <select id="debateCurrency" class="input-dark rounded-lg px-3 py-1.5 text-sm">
+                        <option value="BTC">BTC</option>
+                        <option value="ETH">ETH</option>
+                    </select>
+                    <button id="debateRunBtn" class="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                        <i class="fas fa-play"></i>
+                        <span>开始分析</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 辩论结果区 -->
+            <div id="debateResults" class="hidden">
+                <!-- 最终建议大卡 -->
+                <div id="debateVerdict" class="mb-6 p-5 rounded-xl border-2 border-purple-500/40 bg-gradient-to-r from-purple-900/30 to-gray-900/30">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-3">
+                            <span id="debateRecIcon" class="text-4xl">⚖️</span>
+                            <div>
+                                <div id="debateRecLabel" class="text-xl font-bold"></div>
+                                <div id="debateConsensus" class="text-sm text-gray-400"></div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs text-gray-400">综合评分</div>
+                            <div id="debateOverallScore" class="text-3xl font-bold"></div>
+                        </div>
+                    </div>
+                    <!-- 入场建议 -->
+                    <div id="debateSuggestions" class="mt-4 space-y-2"></div>
+                </div>
+
+                <!-- 各智能体分析卡片 -->
+                <div class="mb-3">
+                    <h4 class="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+                        <i class="fas fa-users text-purple-400"></i> 各分析师独立报告
+                    </h4>
+                </div>
+                <div id="debateAgentCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                </div>
+
+                <!-- 市场数据摘要 -->
+                <div id="debateMarketSummary" class="mt-4 p-4 bg-gray-800/40 rounded-lg">
+                    <h4 class="text-sm font-semibold text-gray-400 mb-2 flex items-center gap-2">
+                        <i class="fas fa-database text-gray-500"></i> 市场数据摘要
+                    </h4>
+                    <div id="debateMarketGrid" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs"></div>
+                </div>
+
+                <!-- 错误信息 -->
+                <div id="debateErrors" class="hidden mt-3 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-xs text-yellow-300"></div>
+            </div>
+
+            <!-- 空状态 -->
+            <div id="debateEmpty" class="text-center py-12">
+                <i class="fas fa-balance-scale text-5xl text-purple-500/30 mb-3"></i>
+                <p class="text-gray-400 text-sm">点击「开始分析」启动多智能体辩论</p>
+                <p class="text-gray-500 text-xs mt-1">5 位 AI 分析师将从不同角度独立研判并给出综合建议</p>
+            </div>
+
+            <!-- 加载状态 -->
+            <div id="debateLoading" class="hidden text-center py-12">
+                <div class="inline-flex items-center gap-3">
+                    <i class="fas fa-spinner fa-spin text-purple-400 text-2xl"></i>
+                    <span class="text-gray-300">辩论分析进行中...</span>
+                </div>
+                <div class="mt-3 flex justify-center gap-4 text-xs text-gray-500">
+                    <span>🐂 多头分析师</span>
+                    <span>🐻 空头分析师</span>
+                    <span>📊 波动率分析师</span>
+                    <span>🐋 资金流向分析师</span>
+                    <span>🛡️ 风险官</span>
+                </div>
+            </div>
+        </section>
+
         <!-- 扫描参数 -->
         <section class="card-glass rounded-xl p-5 mb-6">
             <div class="flex items-center gap-2 mb-4">

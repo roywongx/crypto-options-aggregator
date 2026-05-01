@@ -34,6 +34,7 @@ from .strategy import router as strategy_router
 from .sandbox import router as sandbox_router
 from .risk import router as risk_router
 from .payoff import router as payoff_router
+from .debate import router as debate_router
 
 __all__ = [
     "scan_router",
@@ -50,4 +51,5 @@ __all__ = [
     "sandbox_router",
     "risk_router",
     "payoff_router",
+    "debate_router",
 ]

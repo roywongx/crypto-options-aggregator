@@ -259,7 +259,7 @@ app.mount("/static", CachedStaticFiles(directory=Path(__file__).parent / "static
 from api import (
     scan_router, dashboard_router, paper_trading_router,
     mcp_router, exchanges_router, datahub_router, copilot_router, health_router, macro_router,
-    refresh_router, strategy_router, sandbox_router, risk_router, payoff_router
+    refresh_router, strategy_router, sandbox_router, risk_router, payoff_router, debate_router
 )
 
 # 公开路由（无需鉴权）
@@ -285,6 +285,7 @@ app.include_router(strategy_router, dependencies=protected_dependencies)
 app.include_router(sandbox_router, dependencies=protected_dependencies)
 app.include_router(risk_router, dependencies=protected_dependencies)
 app.include_router(payoff_router, dependencies=protected_dependencies)
+app.include_router(debate_router, dependencies=protected_dependencies)
 
 
 @app.get("/", response_class=HTMLResponse)

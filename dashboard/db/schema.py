@@ -62,7 +62,23 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_dvol_timestamp ON dvol_history(timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_scan_currency_timestamp ON scan_records(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_scan_timestamp ON scan_records(timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_debate_currency_timestamp ON debate_results(currency, timestamp DESC)",
 ]
+
+SCHEMA_DEBATE_RESULTS = """
+CREATE TABLE IF NOT EXISTS debate_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    currency TEXT NOT NULL,
+    spot_price REAL,
+    overall_score REAL,
+    recommendation TEXT,
+    recommendation_label TEXT,
+    consensus TEXT,
+    reports_json TEXT,
+    synthesis_json TEXT,
+    timestamp DATETIME NOT NULL
+)
+"""
 
 SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'top_contracts_data', 'raw_output']
 TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
@@ -81,6 +97,7 @@ def init_database_schema(conn: sqlite3.Connection):
     cursor.execute(SCHEMA_SCAN_RECORDS)
     cursor.execute(SCHEMA_LARGE_TRADES_HISTORY)
     cursor.execute(SCHEMA_DVOL_HISTORY)
+    cursor.execute(SCHEMA_DEBATE_RESULTS)
 
     for idx in INDEXES:
         cursor.execute(idx)
