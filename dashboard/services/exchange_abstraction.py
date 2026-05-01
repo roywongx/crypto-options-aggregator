@@ -106,7 +106,8 @@ class OptionContract:
         """年化收益率估算"""
         if self.dte <= 0 or self.premium_usd <= 0:
             return 0
-        return (self.premium_usd / max(self.strike, 1)) * (365 / self.dte) * 100
+        margin_est = max(self.strike * 0.2, (self.strike - self.premium_usd) * 0.2)
+        return (self.premium_usd / max(margin_est, 1)) * (365 / self.dte) * 100
 
     def to_dict(self) -> Dict[str, Any]:
         return {

@@ -381,7 +381,7 @@ def get_roll_suggestion(position_id: int) -> Dict[str, Any]:
             "suggestion": {
                 "new_strike": round(suggested_strike, 0),
                 "reason": "降低 Delta 暴露，提高安全边际",
-                "estimated_new_apr": round(current_premium * 1.2 / (suggested_strike * 0.2), 1)
+                "estimated_new_apr": round(current_premium * 1.2 / max(suggested_strike * 0.2, 1) * (365 / max(dte, 1)) * 100, 1) if dte > 0 else 0
             },
             "spot": spot,
             "dte": dte
