@@ -187,12 +187,11 @@ async def lifespan(app: FastAPI):
 
         # 关闭 Deribit monitor session
         try:
-            mon = _deribit_monitor_cache.get('mon')
-            if mon and hasattr(mon, '_session'):
-                mon._session.close()
-                logger.info("Deribit session 已关闭")
-        except (AttributeError, RuntimeError) as e:
-            logger.debug("Deribit session close failed: %s", e)
+            from services.monitors import clear_all_monitors
+            clear_all_monitors()
+            logger.info("Deribit monitors 已清理")
+        except (ImportError, RuntimeError) as e:
+            logger.debug("Deribit monitor cleanup failed: %s", e)
 
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)

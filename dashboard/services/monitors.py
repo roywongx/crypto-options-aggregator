@@ -6,11 +6,13 @@
 import os
 import sys
 import logging
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# 全局单例缓存
+# 全局单例缓存 (线程安全)
+_monitor_lock = threading.Lock()
 _monitor_cache = {}
 
 
@@ -25,18 +27,21 @@ def get_deribit_monitor():
         DeribitOptionsMonitor 实例
     """
     if 'deribit' not in _monitor_cache:
-        # 添加 deribit-options-monitor 到路径
-        deribit_path = os.path.join(os.path.dirname(__file__), '..', '..', 'deribit-options-monitor')
-        if deribit_path not in sys.path:
-            sys.path.insert(0, deribit_path)
-        
-        try:
-            from deribit_options_monitor import DeribitOptionsMonitor
-            _monitor_cache['deribit'] = DeribitOptionsMonitor()
-            logger.info("DeribitOptionsMonitor 单例已创建")
-        except ImportError as e:
-            logger.error("无法导入 DeribitOptionsMonitor: %s", e)
-            raise
+        with _monitor_lock:
+            # Double-check locking
+            if 'deribit' not in _monitor_cache:
+                # 添加 deribit-options-monitor 到路径
+                deribit_path = os.path.join(os.path.dirname(__file__), '..', '..', 'deribit-options-monitor')
+                if deribit_path not in sys.path:
+                    sys.path.insert(0, deribit_path)
+                
+                try:
+                    from deribit_options_monitor import DeribitOptionsMonitor
+                    _monitor_cache['deribit'] = DeribitOptionsMonitor()
+                    logger.info("DeribitOptionsMonitor 单例已创建")
+                except ImportError as e:
+                    logger.error("无法导入 DeribitOptionsMonitor: %s", e)
+                    raise
     
     return _monitor_cache['deribit']
 
@@ -57,11 +62,25 @@ def get_monitor(monitor_type: str):
         raise ValueError(f"不支持的 monitor 类型: {monitor_type}")
 
 
+def clear_all_monitors():
+    """关闭并清除所有 monitor 缓存（用于服务关闭）"""
+    with _monitor_lock:
+        for name, mon in _monitor_cache.items():
+            try:
+                if hasattr(mon, '_session') and mon._session:
+                    mon._session.close()
+                    logger.info("Monitor '%s' session 已关闭", name)
+            except (AttributeError, RuntimeError) as e:
+                logger.debug("Monitor '%s' close failed: %s", name, e)
+        _monitor_cache.clear()
+        logger.info("所有 Monitor 缓存已清除")
+
+
 def clear_monitor_cache():
     """清除所有 monitor 缓存（主要用于测试）"""
-    global _monitor_cache
-    _monitor_cache.clear()
-    logger.info("Monitor 缓存已清除")
+    with _monitor_lock:
+        _monitor_cache.clear()
+        logger.info("Monitor 缓存已清除")
 
 
 def get_monitor_status() -> dict:
