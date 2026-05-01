@@ -22,11 +22,11 @@ if sys.platform == 'win32':
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-import requests
+import httpx
 
 
 DERIBIT_API_BASE = "https://www.deribit.com/api/v2"
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 20.0
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
 SUPPORTED_CURRENCIES = {"BTC", "ETH", "SOL", "XRP"}
 
@@ -82,24 +82,29 @@ class DeribitOptionsMonitor:
     """Monitor BTC options on Deribit using public endpoints only."""
 
     def __init__(self, db_path: str | None = None):
-        state_dir = Path(os.environ.get("OPENCLAW_HOME", Path.home() / ".openclaw")).expanduser()
-        default_db = (
-            state_dir
-            / "workspace"
-            / "skills"
-            / "deribit-options-monitor"
-            / ".cache"
-            / "deribit_monitor.sqlite3"
-        )
-        self.db_path = Path(db_path).expanduser() if db_path else default_db
+        # 优先使用传入路径，其次环境变量 DERIBIT_MONITOR_DB_PATH，最后回退到默认路径
+        env_db = os.environ.get("DERIBIT_MONITOR_DB_PATH", "")
+        if db_path:
+            self.db_path = Path(db_path).expanduser()
+        elif env_db:
+            self.db_path = Path(env_db).expanduser()
+        else:
+            state_dir = Path(os.environ.get("OPENCLAW_HOME", Path.home() / ".openclaw")).expanduser()
+            self.db_path = (
+                state_dir
+                / "workspace"
+                / "skills"
+                / "deribit-options-monitor"
+                / ".cache"
+                / "deribit_monitor.sqlite3"
+            )
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # 缓存结构: {instrument_name: {"data": ..., "ts": timestamp_ms}}
         self._order_book_cache: dict[str, dict[str, Any]] = {}
         self._instrument_meta_cache: dict[str, InstrumentMeta] = {}  # instrument 解析缓存
         self._cache_ttl_seconds = 60  # 缓存 60 秒
-        self._session = requests.Session() # Reuse TCP connections for 10x speedup
-        adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=50)
-        self._session.mount('https://', adapter)
+        limits = httpx.Limits(max_connections=50, max_keepalive_connections=50)
+        self._session = httpx.Client(limits=limits, timeout=httpx.Timeout(REQUEST_TIMEOUT, connect=5.0))
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -169,14 +174,14 @@ class DeribitOptionsMonitor:
         self,
         path: str,
         params: dict[str, Any],
-        timeout: int = REQUEST_TIMEOUT,
+        timeout: float = REQUEST_TIMEOUT,
         retries: int = 3,
     ) -> dict[str, Any]:
         url = f"{DERIBIT_API_BASE}/{path.lstrip('/')}"
         last_error: Exception | None = None
         for _ in range(retries):
             try:
-                resp = requests.get(
+                resp = self._session.get(
                     url,
                     params=params,
                     headers={"User-Agent": USER_AGENT},
@@ -187,7 +192,7 @@ class DeribitOptionsMonitor:
                 if payload.get("error"):
                     raise RuntimeError(str(payload["error"]))
                 return payload
-            except Exception as exc:
+            except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as exc:
                 last_error = exc
         raise RuntimeError(f"Deribit request failed for {path}: {last_error}")
 

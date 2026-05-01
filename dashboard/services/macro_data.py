@@ -6,9 +6,11 @@
 - FRED 无风险利率
 """
 import logging
-import requests
+import httpx
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+
+from services.http_client import http_get
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +42,12 @@ def get_fear_greed_index() -> Dict[str, Any]:
         return _fg_cache
     
     try:
-        resp = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
+        resp = http_get("https://api.alternative.me/fng/?limit=1", timeout=10.0)
         data = resp.json()
         if data.get("data"):
             item = data["data"][0]
             value = int(item["value"])
-            
+
             if value <= 20:
                 classification = "极度恐慌"
             elif value <= 40:
@@ -56,7 +58,7 @@ def get_fear_greed_index() -> Dict[str, Any]:
                 classification = "贪婪"
             else:
                 classification = "极度贪婪"
-            
+
             result = {
                 "value": value,
                 "classification": classification,
@@ -67,8 +69,8 @@ def get_fear_greed_index() -> Dict[str, Any]:
             _fg_cache = result
             _fg_cache_time = now
             return result
-    except Exception as e:
-        logger.warning("Fear & Greed Index 获取失败: %s", str(e))
+    except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.warning("Fear & Greed Index 获取失败: %s", e)
     
     return {"value": None, "classification": "未知", "source": "alternative.me"}
 
@@ -168,17 +170,17 @@ def get_funding_rate(currency: str = "BTC") -> Dict[str, Any]:
     
     try:
         symbol = f"{currency}USDT"
-        
+
         # 当前资金费率
-        resp = requests.get(
+        resp = http_get(
             "https://fapi.binance.com/fapi/v1/premiumIndex",
             params={"symbol": symbol},
-            timeout=10
+            timeout=10.0
         )
         data = resp.json()
         current_rate = float(data.get("lastFundingRate", 0))
         result["current_rate"] = round(current_rate * 100, 6)
-        
+
         # 资金费率情绪判断
         if current_rate < -0.001:
             result["sentiment"] = "极度看空 (空头付钱)"
@@ -190,13 +192,13 @@ def get_funding_rate(currency: str = "BTC") -> Dict[str, Any]:
             result["sentiment"] = "看多"
         else:
             result["sentiment"] = "中性"
-        
+
         # 更新缓存
         _funding_cache = {"currency": currency, "data": result}
         _funding_cache_time = now
-            
-    except Exception as e:
-        logger.warning("资金费率获取失败: %s", str(e))
+
+    except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.warning("资金费率获取失败: %s", e)
     
     return result
 

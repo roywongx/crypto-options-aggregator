@@ -3,7 +3,11 @@ import json
 import argparse
 import sys
 import concurrent.futures
+import logging
+import urllib.error
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 STRATEGY_PRESETS = {
     "PUT": {
@@ -67,7 +71,8 @@ def simulate_loss(item, drop_pct, spot_price):
         gamma = float(item.get('gamma', 0))
         dPrice = (delta * dSpot) + (0.5 * gamma * (dSpot ** 2))
         return round(dPrice, 2)
-    except Exception:
+    except (ValueError, TypeError, KeyError) as e:
+        logger.debug("simulate_loss failed: %s", e)
         return 0
 
 def validate_contract(item):
@@ -77,9 +82,9 @@ def validate_contract(item):
     iv = item.get('mark_iv', item.get('iv', 0))
     if iv == 0:
         warnings.append("IV=0")
-    elif iv > 2.0:
+    elif iv > 200:
         warnings.append(f"IV异常偏高({iv})")
-    elif iv < 0.01 and iv > 0:
+    elif iv < 1 and iv > 0:
         warnings.append(f"IV异常偏低({iv})")
     
     oi = item.get('open_interest', item.get('oi', 0))
@@ -123,10 +128,11 @@ def extract_spot_price(binance_data, deribit_data, currency="BTC"):
                         return float(d["price"])
                     elif coin_id in d and d[coin_id].get("usd", 0) > 100:
                         return float(d[coin_id]["usd"])
-            except Exception:
+            except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError) as e:
+                logger.debug("Spot price source %s failed: %s", url_base, e)
                 continue
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("extract_spot_price fallback failed: %s", e)
 
     raise RuntimeError(
         f"[CRITICAL] extract_spot_price: Cannot obtain spot price for {currency}. "

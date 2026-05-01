@@ -2,6 +2,7 @@
 import json
 import io
 import csv
+import logging
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -10,6 +11,7 @@ from db.connection import execute_read
 from services.spot_price import get_spot_price
 from services.risk_framework import RiskFramework
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["scan"])
 
 
@@ -17,7 +19,8 @@ def _get_spot_safe(currency: str) -> float:
     """安全获取现货价格，失败时返回0"""
     try:
         return get_spot_price(currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Spot price fetch failed for %s: %s", currency, e)
         return 0
 
 
@@ -92,19 +95,22 @@ async def get_latest(currency: str = Query(default="BTC")):
 
     try:
         contracts = json.loads(row[7]) if row[7] else []
-    except Exception:
+    except json.JSONDecodeError as e:
+        logger.warning("Failed to parse contracts JSON: %s", e)
         contracts = []
 
     try:
         large_trades = json.loads(row[6]) if row[6] else []
-    except Exception:
+    except json.JSONDecodeError as e:
+        logger.warning("Failed to parse large_trades JSON: %s", e)
         large_trades = []
 
     raw = {}
     if row[9]:
         try:
             raw = json.loads(row[9])
-        except Exception:
+        except json.JSONDecodeError as e:
+            logger.warning("Failed to parse raw JSON: %s", e)
             raw = {}
 
     floors = RiskFramework._get_floors()
@@ -155,7 +161,8 @@ async def export_csv(currency: str = Query(default="BTC"), hours: int = Query(de
     
     try:
         contracts = json.loads(rows[0][0])
-    except Exception:
+    except json.JSONDecodeError as e:
+        logger.error("CSV export data parse error: %s", e)
         return JSONResponse(content={"error": "Data parse error"}, status_code=500)
     
     output = io.StringIO()

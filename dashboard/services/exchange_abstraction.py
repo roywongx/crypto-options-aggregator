@@ -86,12 +86,12 @@ class OptionContract:
             # 尝试解析 Deribit 格式: 15MAY26
             exp_date = datetime.strptime(self.expiry, '%d%b%y')
             return max(1, (exp_date - datetime.utcnow()).days)
-        except Exception:
+        except (ValueError, TypeError):
             try:
                 # 尝试解析标准格式: 2025-06-27
                 exp_date = datetime.strptime(self.expiry, '%Y-%m-%d')
                 return max(1, (exp_date - datetime.utcnow()).days)
-            except Exception:
+            except (ValueError, TypeError):
                 return 30
 
     @property
@@ -415,7 +415,8 @@ class DeribitExchange(BaseExchange):
             mon = DeribitOptionsMonitor()
             try:
                 return mon._get_book_summaries(currency)
-            except Exception:
+            except (RuntimeError, ConnectionError, TimeoutError) as e:
+                logger.warning("Deribit book summaries fetch failed: %s", e)
                 return []
 
         results = await asyncio.to_thread(_fetch)

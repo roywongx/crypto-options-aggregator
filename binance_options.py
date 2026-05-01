@@ -1,23 +1,23 @@
-import requests
+import httpx
 import json
 import time
 import argparse
 import sys
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import logging
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 if sys.platform == 'win32':
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def get_session():
-    session = requests.Session()
-    retry = Retry(connect=1, read=1, backoff_factor=0.1, status_forcelist=[ 500, 502, 503, 504 ])
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
+    """获取httpx会话，复用TCP连接"""
+    limits = httpx.Limits(max_connections=50, max_keepalive_connections=50)
+    transport = httpx.HTTPTransport(retries=1)
+    session = httpx.Client(transport=transport, limits=limits, timeout=httpx.Timeout(10.0, connect=5.0))
     return session
 
 def calc_liquidity_score(volume, spread_pct):
@@ -33,14 +33,14 @@ def fetch_oi_map(session, currency, expirations):
             r = session.get(base_url, params={
                 'underlyingAsset': currency,
                 'expiration': exp_yymmdd
-            }, timeout=15).json()
+            }, timeout=15.0).json()
             if isinstance(r, list):
                 for item in r:
                     sym = item.get('symbol', '')
                     oi_val = float(item.get('sumOpenInterest', 0))
                     oi_map[sym] = round(oi_val, 2)
-        except Exception:
-            pass
+        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException, ValueError, TypeError) as e:
+            logger.debug("Binance OI fetch failed: %s", e)
     return oi_map
 
 def ms_to_yymmdd(ms_timestamp):
@@ -50,7 +50,7 @@ def ms_to_yymmdd(ms_timestamp):
 def fetch_binance_options(currency, min_dte, max_dte, max_delta, strike=None, strike_range=None, min_vol=0, max_spread=20.0, margin_ratio=0.2, option_type='PUT'):
     try:
         session = get_session()
-        timeout = 3
+        timeout = 3.0
         r_mark = session.get('https://eapi.binance.com/eapi/v1/mark', timeout=timeout).json()
         r_info = session.get('https://eapi.binance.com/eapi/v1/exchangeInfo', timeout=timeout).json()
         r_ticker = session.get('https://eapi.binance.com/eapi/v1/ticker', timeout=timeout).json()
@@ -134,8 +134,11 @@ def fetch_binance_options(currency, min_dte, max_dte, max_delta, strike=None, st
         return results
     except Exception as e:
         import traceback
-        logger.error("fetch_binance_options error: %s", str(e))
+        logger.error("fetch_binance_options error: %s", e)
         return []
+    finally:
+        if 'session' in locals():
+            session.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

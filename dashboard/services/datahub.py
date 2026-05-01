@@ -57,8 +57,8 @@ class DataHub:
         for queue in self._subscribers.get(topic, []):
             try:
                 await queue.put({"symbol": symbol, "data": data, "timestamp": time.time()})
-            except Exception:
-                pass
+            except (asyncio.CancelledError, RuntimeError) as e:
+                logger.debug("Queue put failed: %s", e)
     
     async def update_options_chain(self, currency: str, chain_data: Dict[str, Dict]):
         async with self._lock:

@@ -1,6 +1,8 @@
+import logging
 from fastapi import APIRouter, Query
 from datetime import datetime, timedelta
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/trades", tags=["trades"])
 
 
@@ -109,7 +111,8 @@ async def get_wind_analysis(
         try:
             from services.spot_price import get_spot_price
             spot = get_spot_price(currency)
-        except Exception:
+        except (RuntimeError, ValueError) as e:
+            logger.warning("Trades API spot price failed: %s, using fallback", e)
             from constants import get_spot_fallback
             spot = get_spot_fallback(currency)
 

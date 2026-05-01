@@ -2,13 +2,11 @@
 动态支撑位计算器
 基于Binance真实K线数据和链上数据计算动态支撑位
 """
-import requests
-import urllib3
+import httpx
 import logging
 from datetime import datetime, timedelta
 from services.api_retry import request_with_retry
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 

@@ -14,7 +14,7 @@
 - Funding Rate < -0.05%: 空头过度
 - Futures/Spot Volume > 3: 杠杆过高
 """
-import requests
+import httpx
 import logging
 import math
 from typing import Dict, Any, Optional, List, Tuple

@@ -1,7 +1,9 @@
 """AI Co-Pilot API"""
+import logging
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 
 
@@ -20,22 +22,22 @@ async def copilot_chat(message: str, currency: str = "BTC"):
     try:
         fg = await run_in_threadpool(get_fear_greed_index)
         context_parts.append(f"恐惧贪婪指数: {fg.get('value', 'N/A')} ({fg.get('classification', '')})")
-    except Exception:
-        pass
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.debug("Copilot fear/greed fetch failed: %s", e)
 
     try:
         fr = await run_in_threadpool(get_funding_rate, currency)
         rate = fr.get('current_rate')
         if rate is not None:
             context_parts.append(f"{currency}资金费率: {rate:.4f}%")
-    except Exception:
-        pass
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.debug("Copilot funding rate fetch failed: %s", e)
 
     try:
         dvol = await run_in_threadpool(get_dvol_from_deribit, currency)
         context_parts.append(f"DVOL: {dvol.get('current', 0):.1f} (信号: {dvol.get('signal', '')})")
-    except Exception:
-        pass
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.debug("Copilot DVOL fetch failed: %s", e)
 
     context = "\n".join(context_parts) if context_parts else "当前市场数据获取中"
 

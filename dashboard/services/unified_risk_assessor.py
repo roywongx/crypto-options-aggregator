@@ -2,10 +2,13 @@
 统一风险评估器
 整合价格、波动率、链上数据等多维度风险
 """
+import logging
 from typing import Dict, Any
 from services.risk_framework import RiskFramework
 import concurrent.futures
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class UnifiedRiskAssessor:
@@ -127,7 +130,8 @@ class UnifiedRiskAssessor:
 
             if fng_value is not None and fng_value <= 20:
                 score = min(score, 70)
-        except Exception:
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            logger.debug("Fear/greed fetch failed: %s", e)
             factors.append("恐惧贪婪指数: 获取失败")
 
         try:
@@ -140,8 +144,8 @@ class UnifiedRiskAssessor:
                 score = min(100, score + 15)
             elif dvol_z < -2:
                 score = max(0, score - 10)
-        except Exception:
-            pass
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            logger.debug("DVOL fetch failed: %s", e)
 
         if not factors:
             status = self.risk_framework.get_status(spot)
@@ -183,7 +187,8 @@ class UnifiedRiskAssessor:
                     factors.append("暂无合约数据")
             else:
                 factors.append("暂无扫描数据")
-        except Exception:
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            logger.warning("Liquidity data fetch failed: %s", e)
             factors.append("流动性数据获取失败")
 
         return {"score": score, "factors": factors}

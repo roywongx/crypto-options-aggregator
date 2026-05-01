@@ -1,7 +1,9 @@
 """风险评估 API"""
+import logging
 from fastapi import APIRouter, Query
 from fastapi.concurrency import run_in_threadpool
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["risk"])
 
 
@@ -37,7 +39,8 @@ def _calc_max_pain_sync(currency: str = "BTC"):
 
     try:
         spot = get_spot_price(currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Max pain spot price failed: %s, using fallback", e)
         db_spot = _get_spot_from_scan()
         spot = db_spot if db_spot > 1000 else (strikes[len(strikes)//2] if strikes else 0)
 
@@ -210,13 +213,15 @@ def get_risk_overview_sync(currency: str = "BTC"):
     # 获取链上指标数据
     try:
         onchain_data = OnChainMetrics.get_all_metrics(currency)
-    except Exception:
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.warning("OnChain metrics failed: %s", e)
         onchain_data = {"error": "获取链上指标失败"}
 
     # 获取衍生品市场数据
     try:
         derivative_data = DerivativeMetrics.get_all_metrics()
-    except Exception:
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.warning("Derivative metrics failed: %s", e)
         derivative_data = {"error": "获取衍生品数据失败"}
 
     # 获取压力测试数据
@@ -224,7 +229,8 @@ def get_risk_overview_sync(currency: str = "BTC"):
         pressure_test_data = PressureTestEngine.stress_test(
             S=spot, K=spot, T=30/365, r=0.05, sigma=0.5, option_type="C"
         )
-    except Exception:
+    except (ValueError, TypeError, RuntimeError) as e:
+        logger.warning("Pressure test failed: %s", e)
         pressure_test_data = {"error": "获取压力测试数据失败"}
 
     # 获取 AI 情绪分析数据
@@ -251,7 +257,8 @@ def get_risk_overview_sync(currency: str = "BTC"):
             })
         
         ai_sentiment_data = AISentimentAnalyzer.analyze_market_sentiment(trades, spot)
-    except Exception:
+    except (RuntimeError, ValueError, TypeError) as e:
+        logger.warning("AI sentiment analysis failed: %s", e)
         ai_sentiment_data = {"error": "获取AI情绪分析失败"}
 
     return {

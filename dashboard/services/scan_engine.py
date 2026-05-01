@@ -86,9 +86,10 @@ def save_scan_record(data: Dict[str, Any]):
 import asyncio
 import logging
 import httpx
-import requests as req_lib
 from concurrent.futures import ThreadPoolExecutor
 from scipy import interpolate
+
+from services.large_trades_fetcher import fetch_large_trades_sync, fetch_large_trades_async
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +272,8 @@ async def quick_scan(params: QuickScanParams = None):
         logger.info("Quick scan: DataHub not ready, using REST fallback for spot price")
         try:
             spot = await get_spot_price_async(currency)
-        except Exception:
+        except (RuntimeError, ValueError) as e:
+            logger.warning("Quick scan: Spot price fallback failed: %s", e)
             spot = 0
 
     if spot is None or spot <= 0:
@@ -282,14 +284,15 @@ async def quick_scan(params: QuickScanParams = None):
         logger.info("Quick scan: DataHub not ready, fetching Deribit via REST")
         try:
             summaries = await asyncio.to_thread(fetch_deribit_summaries, currency)
-        except Exception as e:
-            logger.error("Quick scan: Failed to fetch Deribit summaries: %s", str(e))
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            logger.error("Quick scan: Failed to fetch Deribit summaries: %s", e)
             summaries = []
 
     if not large_trades:
         try:
             large_trades = await _fetch_large_trades_async(currency, days=1, limit=40)
-        except Exception:
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            logger.warning("Quick scan: Large trades fetch failed: %s", e)
             large_trades = []
 
     if not binance_contracts:
@@ -339,7 +342,8 @@ async def quick_scan(params: QuickScanParams = None):
         try:
             from scipy.stats import norm
             dvol_pct = round(norm.cdf(dvol_z) * 100, 1)
-        except Exception:
+        except (ImportError, ValueError) as e:
+            logger.debug("scipy norm.cdf failed: %s, using linear fallback", e)
             dvol_pct = round(50 + dvol_z * 20, 1)
             dvol_pct = max(1, min(99, dvol_pct))
 
@@ -554,285 +558,13 @@ async def quick_scan(params: QuickScanParams = None):
 
 
 async def _fetch_large_trades_async(currency: str, days: int = 7, limit: int = 50):
-    """异步获取大单交易：优先DB，不足时从Deribit实时API补充"""
-    spot = await get_spot_price_async(currency)
-
-    since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db_connection(read_only=True)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta,
-               premium_usd, severity
-        FROM large_trades_history
-        WHERE currency = ? AND timestamp > ?
-          AND instrument_name IS NOT NULL AND instrument_name != ''
-          AND instrument_name != '(EMPTY)' AND strike > 100
-        ORDER BY notional_usd DESC LIMIT ?
-    """, (currency, since, limit))
-    rows = cursor.fetchall()
-
-    results = []
-    seen = set()
-    results_by_inst = {}
-    for r in rows:
-        inst = (r[0] or '').strip()
-        strike = r[4] or 0
-        direction = r[1] or ''
-        opt_type = r[5] or ''
-        if not inst or strike <= 100 or inst in seen:
-            continue
-        seen.add(inst)
-        fl = r[6] or ''
-        delta_val = r[7] or 0
-        if not fl or fl == 'unknown':
-            fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
-
-        notional = r[2] or 0
-        if notional <= 0 and (r[3] or 0) > 0 and strike > 0:
-            notional = float(r[3]) * spot
-
-        entry = {
-            "instrument_name": inst, "direction": direction,
-            "notional_usd": round(float(notional), 2),
-            "volume": r[3] or 0,
-            "strike": strike, "option_type": opt_type, "flow_label": fl,
-            "delta": delta_val,
-            "premium_usd": r[8] or 0,
-            "severity": r[9] or ''
-        }
-        results.append(entry)
-        results_by_inst[inst] = entry
-
-    MIN_NOTIONAL = 100000
-    db_missing_premium = sum(1 for r in results if not r.get('premium_usd'))
-    need_api = len(results) < max(5, limit // 2) or db_missing_premium > len(results) * 0.5
-    if need_api:
-        try:
-            async with httpx.AsyncClient() as client:
-                api_url = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency"
-                response = await client.get(api_url, params={
-                    "currency": currency, "kind": "option", "count": 500
-                }, timeout=10.0)
-                payload = response.json()
-                trades = payload.get("result", {}).get("trades", [])
-
-            for t in trades:
-                inst = t.get("instrument_name", "")
-                if not inst:
-                    continue
-
-                meta = None
-                try:
-                    meta = _parse_inst_name(inst)
-                except Exception:
-                    continue
-                if not meta:
-                    continue
-
-                direction = t.get("direction", "")
-                trade_amount = float(t.get("amount", 0))
-                index_price = float(t.get("index_price", 0) or spot)
-                option_price = float(t.get("price", 0))
-
-                notional_usd = trade_amount * index_price
-                premium_usd = trade_amount * option_price * index_price
-
-                if notional_usd < MIN_NOTIONAL:
-                    continue
-
-                trade_iv = float(t.get("iv") or 50)
-                delta_val = abs(calc_delta_bs(meta.strike, spot,
-                    trade_iv, meta.dte, meta.option_type))
-
-                fl = _classify_flow_heuristic(
-                    direction, meta.option_type, delta_val, meta.strike, spot)
-
-                is_block = t.get("block_trade", False) or t.get("block_trade_id") is not None
-
-                api_entry = {
-                    "instrument_name": inst, "direction": direction,
-                    "notional_usd": round(notional_usd, 2),
-                    "premium_usd": round(premium_usd, 2),
-                    "volume": round(trade_amount, 4),
-                    "strike": meta.strike,
-                    "option_type": meta.option_type,
-                    "flow_label": fl,
-                    "delta": delta_val,
-                    "iv": round(trade_iv, 1),
-                    "is_block": is_block,
-                    "trade_price": option_price
-                }
-
-                if inst in results_by_inst:
-                    db_entry = results_by_inst[inst]
-                    if not db_entry.get('premium_usd'):
-                        db_entry['premium_usd'] = round(premium_usd, 2)
-                    if not db_entry.get('iv'):
-                        db_entry['iv'] = round(trade_iv * 100, 1)
-                    if not db_entry.get('is_block'):
-                        db_entry['is_block'] = is_block
-                    if not db_entry.get('trade_price'):
-                        db_entry['trade_price'] = option_price
-                    if not db_entry.get('notional_usd') or db_entry['notional_usd'] < notional_usd:
-                        db_entry['notional_usd'] = round(notional_usd, 2)
-                        db_entry['volume'] = round(trade_amount, 4)
-                else:
-                    seen.add(inst)
-                    results.append(api_entry)
-                    results_by_inst[inst] = api_entry
-
-                if len(results) >= limit:
-                    break
-        except Exception as e:
-            print(f"Deribit live trades fallback error: {e}")
-
-    for t in results:
-        if not t.get("severity"):
-            t["severity"] = _severity_from_notional(t.get("notional_usd", 0) or 0)
-        t["risk_level"] = _risk_emoji(abs(t.get("delta", 0) or 0))
-
-    results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
-    return results[:limit]
+    """异步获取大单交易：委托给 large_trades_fetcher"""
+    return await fetch_large_trades_async(currency, days, limit)
 
 
 def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
-    """获取大单交易：优先DB，不足时从Deribit实时API补充"""
-    spot = get_spot_price(currency)
-
-    since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db_connection(read_only=True)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT instrument_name, direction, notional_usd, volume, strike, option_type, flow_label, delta,
-               premium_usd, severity
-        FROM large_trades_history
-        WHERE currency = ? AND timestamp > ?
-          AND instrument_name IS NOT NULL AND instrument_name != ''
-          AND instrument_name != '(EMPTY)' AND strike > 100
-        ORDER BY notional_usd DESC LIMIT ?
-    """, (currency, since, limit))
-    rows = cursor.fetchall()
-
-    results = []
-    seen = set()
-    results_by_inst = {}
-    for r in rows:
-        inst = (r[0] or '').strip()
-        strike = r[4] or 0
-        direction = r[1] or ''
-        opt_type = r[5] or ''
-        if not inst or strike <= 100 or inst in seen:
-            continue
-        seen.add(inst)
-        fl = r[6] or ''
-        delta_val = r[7] or 0
-        if not fl or fl == 'unknown':
-            fl = _classify_flow_heuristic(direction, opt_type, float(delta_val), strike, spot)
-
-        notional = r[2] or 0
-        if notional <= 0 and (r[3] or 0) > 0 and strike > 0:
-            notional = float(r[3]) * spot
-
-        entry = {
-            "instrument_name": inst, "direction": direction,
-            "notional_usd": round(float(notional), 2),
-            "volume": r[3] or 0,
-            "strike": strike, "option_type": opt_type, "flow_label": fl,
-            "delta": delta_val,
-            "premium_usd": r[8] or 0,
-            "severity": r[9] or ''
-        }
-        results.append(entry)
-        results_by_inst[inst] = entry
-
-    MIN_NOTIONAL = 100000
-    db_missing_premium = sum(1 for r in results if not r.get('premium_usd'))
-    need_api = len(results) < max(5, limit // 2) or db_missing_premium > len(results) * 0.5
-    if need_api:
-        try:
-            api_url = "https://www.deribit.com/api/v2/public/get_last_trades_by_currency"
-            payload = req_lib.get(api_url, params={
-                "currency": currency, "kind": "option", "count": 500
-            }, timeout=10).json()
-            trades = payload.get("result", {}).get("trades", [])
-
-            for t in trades:
-                inst = t.get("instrument_name", "")
-                if not inst:
-                    continue
-
-                meta = None
-                try:
-                    meta = _parse_inst_name(inst)
-                except Exception:
-                    continue
-                if not meta:
-                    continue
-
-                direction = t.get("direction", "")
-                trade_amount = float(t.get("amount", 0))
-                index_price = float(t.get("index_price", 0) or spot)
-                option_price = float(t.get("price", 0))
-
-                notional_usd = trade_amount * index_price
-                premium_usd = trade_amount * option_price * index_price
-
-                if notional_usd < MIN_NOTIONAL:
-                    continue
-
-                trade_iv = float(t.get("iv") or 50)
-                delta_val = abs(calc_delta_bs(meta.strike, spot,
-                    trade_iv, meta.dte, meta.option_type))
-
-                fl = _classify_flow_heuristic(
-                    direction, meta.option_type, delta_val, meta.strike, spot)
-
-                is_block = t.get("block_trade", False) or t.get("block_trade_id") is not None
-
-                api_entry = {
-                    "instrument_name": inst, "direction": direction,
-                    "notional_usd": round(notional_usd, 2),
-                    "premium_usd": round(premium_usd, 2),
-                    "volume": round(trade_amount, 4),
-                    "strike": meta.strike,
-                    "option_type": meta.option_type,
-                    "flow_label": fl,
-                    "delta": delta_val,
-                    "iv": round(trade_iv, 1),
-                    "is_block": is_block,
-                    "trade_price": option_price
-                }
-
-                if inst in results_by_inst:
-                    db_entry = results_by_inst[inst]
-                    if not db_entry.get('premium_usd'):
-                        db_entry['premium_usd'] = round(premium_usd, 2)
-                    if not db_entry.get('iv'):
-                        db_entry['iv'] = round(trade_iv * 100, 1)
-                    if not db_entry.get('is_block'):
-                        db_entry['is_block'] = is_block
-                    if not db_entry.get('trade_price'):
-                        db_entry['trade_price'] = option_price
-                    if not db_entry.get('notional_usd') or db_entry['notional_usd'] < notional_usd:
-                        db_entry['notional_usd'] = round(notional_usd, 2)
-                        db_entry['volume'] = round(trade_amount, 4)
-                else:
-                    seen.add(inst)
-                    results.append(api_entry)
-                    results_by_inst[inst] = api_entry
-
-                if len(results) >= limit:
-                    break
-        except Exception as e:
-            print(f"Deribit live trades fallback error: {e}")
-
-    for t in results:
-        if not t.get("severity"):
-            t["severity"] = _severity_from_notional(t.get("notional_usd", 0) or 0)
-        t["risk_level"] = _risk_emoji(abs(t.get("delta", 0) or 0))
-
-    results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
-    return results[:limit]
+    """同步获取大单交易：委托给 large_trades_fetcher"""
+    return fetch_large_trades_sync(currency, days, limit)
 
 
 def _fetch_wind_analysis(currency: str, days: int = 30):
@@ -910,7 +642,8 @@ def _fetch_wind_analysis(currency: str, days: int = 30):
 
     try:
         spot = get_spot_price(currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Wind analysis spot price failed: %s", e)
         spot = 0
 
     return {
@@ -931,7 +664,8 @@ def _fetch_term_structure(currency: str):
 
     try:
         spot = get_spot_price(currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Term structure spot price failed: %s, using fallback", e)
         spot = 70000 if currency == "BTC" else 3000
 
     summaries = fetch_deribit_summaries(currency)

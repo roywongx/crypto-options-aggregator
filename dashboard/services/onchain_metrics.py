@@ -12,7 +12,7 @@
 7. 减半倒计时: blockchain.info 区块高度
 8. 汇合评分系统: 多指标综合判断底部概率
 """
-import requests
+import httpx
 import logging
 import math
 from typing import Dict, Any, Optional, List, Tuple
@@ -132,30 +132,28 @@ class OnChainMetrics:
         
         # Binance
         try:
-            resp = requests.get(
+            resp = request_with_retry(
                 "https://api.binance.com/api/v3/ticker/price",
                 params={"symbol": "BTCUSDT"},
-                timeout=10,
-                verify=False
+                timeout=10.0, max_retries=2
             )
             if resp.status_code == 200:
                 return float(resp.json().get("price", 0))
-        except Exception as e:
-            logger.warning(f"Binance价格失败: {e}")
-        
+        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning("Binance价格失败: %s", e)
+
         # CoinGecko
         try:
-            resp = requests.get(
+            resp = request_with_retry(
                 "https://api.coingecko.com/api/v3/simple/price",
                 params={"ids": "bitcoin", "vs_currencies": "usd"},
-                timeout=10,
-                verify=False
+                timeout=10.0, max_retries=2
             )
             if resp.status_code == 200:
                 return resp.json().get("bitcoin", {}).get("usd")
-        except Exception as e:
-            logger.warning(f"CoinGecko价格失败: {e}")
-        
+        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning("CoinGecko价格失败: %s", e)
+
         return None
     
     @classmethod
@@ -282,11 +280,11 @@ class OnChainMetrics:
             daily_revenue = 3.125 * 144 * current_price  # 约 450 * price
             
             # 获取历史价格计算365日均线收入
-            import requests as req
-            resp = req.get(
+            from services.http_client import http_get
+            resp = http_get(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1d", "limit": 365},
-                timeout=10
+                timeout=10.0
             )
             klines = resp.json()
             

@@ -2,8 +2,12 @@
 import sys
 import time
 import logging
+import sqlite3
 from typing import Optional, Dict
 from pathlib import Path
+
+import httpx
+from services.http_client import http_get, async_http_get
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +17,46 @@ _CACHE_TTL_SECONDS = 5  # 5秒缓存，确保所有组件使用相同的时间�
 
 async def get_spot_price_binance_async(currency: str = "BTC") -> Optional[float]:
     """从 Binance 异步获取现货价格"""
-    import httpx
     symbol = f"{currency}USDT"
-    async with httpx.AsyncClient() as client:
+    for host in ["api3.binance.com", "api2.binance.com", "api1.binance.com"]:
+        try:
+            response = await async_http_get(
+                f"https://{host}/api/v3/ticker/price",
+                params={"symbol": symbol},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return float(data.get("price", 0))
+        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.debug("Binance async spot price host %s failed: %s", host, e)
+            continue
+    return None
+
+async def get_spot_price_deribit_async(currency: str = "BTC") -> Optional[float]:
+    """从 Deribit 异步获取现货价格"""
+    try:
+        response = await async_http_get(
+            "https://www.deribit.com/api/v2/public/get_index_price",
+            params={"currency": currency, "index_name": f"{currency.lower()}_usd"},
+            timeout=10.0
+        )
+        data = response.json()
+        if data.get("result"):
+            return float(data["result"]["index_price"])
+    except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.warning("获取Deribit现货价格失败: %s", e)
+    except (ValueError, KeyError) as e:
+        logger.warning("Deribit 响应解析失败: %s", e)
+    return None
+
+def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
+    """从 Binance 获取现货价格（同步版本，向后兼容）"""
+    try:
+        symbol = f"{currency}USDT"
         for host in ["api3.binance.com", "api2.binance.com", "api1.binance.com"]:
             try:
-                response = await client.get(
+                response = http_get(
                     f"https://{host}/api/v3/ticker/price",
                     params={"symbol": symbol},
                     timeout=5.0
@@ -26,62 +64,28 @@ async def get_spot_price_binance_async(currency: str = "BTC") -> Optional[float]
                 if response.status_code == 200:
                     data = response.json()
                     return float(data.get("price", 0))
-            except Exception:
-                continue
-    return None
-
-async def get_spot_price_deribit_async(currency: str = "BTC") -> Optional[float]:
-    """从 Deribit 异步获取现货价格"""
-    import httpx
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                "https://www.deribit.com/api/v2/public/get_index_price",
-                params={"currency": currency, "index_name": f"{currency}_usd"},
-                timeout=10.0
-            )
-            data = response.json()
-            if data.get("result"):
-                return float(data["result"]["index_price"])
-        except Exception as e:
-            logger.warning(f"获取Deribit现货价格失败: {e}")
-    return None
-
-def get_spot_price_binance(currency: str = "BTC") -> Optional[float]:
-    """从 Binance 获取现货价格（同步版本，向后兼容）"""
-    import requests
-    try:
-        symbol = f"{currency}USDT"
-        for host in ["api3.binance.com", "api2.binance.com", "api1.binance.com"]:
-            try:
-                response = requests.get(
-                    f"https://{host}/api/v3/ticker/price",
-                    params={"symbol": symbol},
-                    timeout=5
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return float(data.get("price", 0))
-            except Exception:
+            except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+                logger.debug("Binance spot price host %s failed: %s", host, e)
                 continue
     except Exception as e:
-        logger.warning(f"获取现货价格失败: {e}")
+        logger.warning("获取现货价格失败: %s", e)
     return None
 
 def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
     """从 Deribit 获取现货价格（同步版本，向后兼容）"""
-    import requests
     try:
-        response = requests.get(
+        response = http_get(
             "https://www.deribit.com/api/v2/public/get_index_price",
-            params={"currency": currency, "index_name": f"{currency}_usd"},
-            timeout=10
+            params={"currency": currency, "index_name": f"{currency.lower()}_usd"},
+            timeout=10.0
         )
         data = response.json()
         if data.get("result"):
             return float(data["result"]["index_price"])
-    except Exception as e:
-        logger.warning(f"获取Deribit现货价格失败: {e}")
+    except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.warning("获取Deribit现货价格失败: %s", e)
+    except (ValueError, KeyError) as e:
+        logger.warning("Deribit 响应解析失败: %s", e)
     return None
 
 async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> float:
@@ -195,8 +199,8 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
             if spot:
                 _spot_cache[currency] = (spot, now)
                 return spot
-        except Exception as e:
-            logger.warning(f"CCXT failed for {currency}: {e}")
+        except (ImportError, Exception) as e:
+            logger.warning("CCXT failed for %s: %s", currency, e)
 
     # 最后 fallback
     if source == "auto":
@@ -220,10 +224,11 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
                             if spot:
                                 _spot_cache[currency] = (spot, now)
                                 return spot
-                except Exception:
+                except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
+                    logger.debug("Fallback oracle %s failed: %s", url_base, e)
                     continue
         except Exception as e:
-            logger.warning(f"Fallback oracle failed: {e}")
+            logger.warning("Fallback oracle failed: %s", e)
 
     raise RuntimeError(
         f"[CRITICAL] Cannot obtain spot price for {currency}. "
@@ -236,8 +241,8 @@ def _get_spot_from_scan(currency: str = "BTC"):
         rows = execute_read("SELECT spot_price FROM scan_records WHERE currency=? AND spot_price > 0 ORDER BY timestamp DESC LIMIT 1", (currency,))
         if rows and float(rows[0][0]) > 0:
             return float(rows[0][0])
-    except Exception:
-        pass
+    except (sqlite3.OperationalError, ValueError) as e:
+        logger.debug("_get_spot_from_scan DB fallback failed: %s", e)
 
     try:
         import urllib.request
@@ -245,6 +250,6 @@ def _get_spot_from_scan(currency: str = "BTC"):
         url = f"https://api.binance.com/api/v3/ticker/price?symbol={currency}USDT"
         resp = urllib.request.urlopen(url, timeout=5)
         return float(json.loads(resp.read())["price"])
-    except Exception:
-        pass
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, ValueError, TimeoutError) as e:
+        logger.debug("_get_spot_from_scan urllib fallback failed: %s", e)
     return 0

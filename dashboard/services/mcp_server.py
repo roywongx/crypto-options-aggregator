@@ -221,9 +221,10 @@ class MCPToolRegistry:
             from services.dvol_analyzer import get_dvol_from_deribit
             dvol_data = get_dvol_from_deribit(currency)
             dvol = dvol_data.get("current", 50)
-        except Exception:
+        except (ImportError, RuntimeError, ConnectionError) as e:
+            logger.debug("MCP DVOL fetch failed: %s", e)
             dvol = 50
-        
+
         T = target_dte / 365.0
         sigma = dvol / 100.0 if dvol else 0.5
         r = 0.05
@@ -272,7 +273,8 @@ class MCPToolRegistry:
             from services.dvol_analyzer import get_dvol_from_deribit
             dvol_data = get_dvol_from_deribit(currency)
             dvol = dvol_data.get("current", 50)
-        except Exception:
+        except (ImportError, RuntimeError, ConnectionError) as e:
+            logger.debug("MCP roll DVOL fetch failed: %s", e)
             dvol = 50
         
         T_current = current_dte / 365.0

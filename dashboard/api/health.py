@@ -1,4 +1,5 @@
 """健康检查 API"""
+import logging
 import time
 from datetime import datetime, timezone
 from fastapi import APIRouter
@@ -10,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import config
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["health"])
 
 
@@ -66,7 +68,8 @@ async def health_check():
         now = time.time()
         fresh_count = sum(1 for _, (p, t) in _spot_cache.items() if now - t < _CACHE_TTL_SECONDS)
         health["checks"]["spot_cache_fresh"] = fresh_count
-    except Exception:
+    except (ImportError, AttributeError, TypeError) as e:
+        logger.debug("Health check spot cache failed: %s", e)
         health["checks"]["spot_cache"] = "unknown"
     
     status_code = 200 if health["status"] == "healthy" else 503

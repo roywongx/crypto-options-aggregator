@@ -1,10 +1,12 @@
 # Services - DVOL Analyzer
-import requests
+import httpx
 import sys
 import math
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+
+from services.http_client import http_get
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,7 @@ def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type
     try:
         from scipy.stats import norm
         nd1 = norm.cdf(d1)
-    except Exception:
+    except ImportError:
         nd1 = _norm_cdf_approx(d1)
     if option_type.upper() in ('P', 'PUT'):
         return round(nd1 - 1, 4)
@@ -108,9 +110,9 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
             "start_timestamp": int((datetime.utcnow() - timedelta(days=7)).timestamp() * 1000),
             "end_timestamp": int(datetime.utcnow().timestamp() * 1000)
         }
-        response = requests.get(
+        response = http_get(
             "https://www.deribit.com/api/v2/public/get_volatility_index_data",
-            params={**base_params, "resolution": "3600"}, timeout=10
+            params={**base_params, "resolution": "3600"}, timeout=10.0
         )
         data = response.json()
         if data.get("result") and data["result"].get("data"):
@@ -213,5 +215,6 @@ def calc_pop(delta_val: float, option_type: str, spot: float, strike: float, iv:
             pop = 1 - nd1 if delta_val < 0 else nd1
 
         return max(0.0, min(1.0, pop))
-    except Exception:
+    except (ImportError, ValueError, ZeroDivisionError) as e:
+        logger.debug("POP calc failed: %s", e)
         return 0.5

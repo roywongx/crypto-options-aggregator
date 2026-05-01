@@ -3,12 +3,24 @@ import sqlite3
 import threading
 import time
 import logging
+import os
 from pathlib import Path
 from typing import Optional, Any, Callable, TypeVar
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent.parent / "data" / "monitor.db"
+# 优先从环境变量读取，其次使用 Config.db_path()，最后回退到默认路径
+_env_db_path = os.getenv("DASHBOARD_DB_PATH", "")
+if _env_db_path:
+    DB_PATH = Path(_env_db_path)
+else:
+    try:
+        from config import config
+        DB_PATH = Path(config.db_path())
+    except (ImportError, AttributeError, ValueError) as e:
+        logger.warning("Config.db_path() fallback: %s", e)
+        DB_PATH = Path(__file__).parent.parent / "data" / "monitor.db"
+
 DB_PATH.parent.mkdir(exist_ok=True)
 
 # 写入锁：序列化所有写操作，避免 database is locked

@@ -676,10 +676,10 @@ function displayRecoveryResult(result) {
 
         recommendedDiv.innerHTML = `
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div class="text-center"><div class="text-xs text-gray-400 mb-1">推荐合约</div><div class="font-mono font-semibold text-white">${recommended.symbol}</div><div class="text-xs text-gray-500">${recommended.platform}</div></div>
+                <div class="text-center"><div class="text-xs text-gray-400 mb-1">推荐合约</div><div class="font-mono font-semibold text-white">${safeHTML(recommended.symbol)}</div><div class="text-xs text-gray-500">${safeHTML(recommended.platform)}</div></div>
                 <div class="text-center"><div class="text-xs text-gray-400 mb-1">卖出张数</div><div class="text-2xl font-bold text-orange-400">${recommended.num_contracts} 张</div></div>
                 <div class="text-center"><div class="text-xs text-gray-400 mb-1">所需保证金</div><div class="text-xl font-semibold text-white">$${recommended.total_margin.toLocaleString()}</div></div>
-                <div class="text-center"><div class="text-xs text-gray-400 mb-1">预期净利润</div><div class="text-xl font-bold text-green-400">+$${recommended.net_profit.toLocaleString()}</div><div class="text-xs ${riskColor}">${recommended.risk_level}</div></div>
+                <div class="text-center"><div class="text-xs text-gray-400 mb-1">预期净利润</div><div class="text-xl font-bold text-green-400">+$${recommended.net_profit.toLocaleString()}</div><div class="text-xs ${riskColor}">${safeHTML(recommended.risk_level)}</div></div>
             </div>
             <div class="mt-3 pt-3 border-t border-green-500/20 text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i>基于 ${recommended.apr.toFixed(1)}% APR，在 ${recommended.dte.toFixed(0)} 天内通过卖出 Put 期权获取权利金覆盖浮亏</div>
         `;
@@ -693,7 +693,7 @@ function displayRecoveryResult(result) {
 
             return `<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition ${index === 0 ? 'bg-green-500/5' : ''}">
                 <td class="py-2 px-2">${index === 0 ? '<span class="text-green-400 font-bold"><i class="fas fa-crown"></i> 推荐</span>' : `<span class="text-gray-500">#${index + 1}</span>`}</td>
-                <td class="py-2 px-2 font-mono text-xs">${plan.symbol}</td>
+                <td class="py-2 px-2 font-mono text-xs">${safeHTML(plan.symbol)}</td>
                 <td class="py-2 px-2 text-center">${plan.dte.toFixed(0)}</td>
                 <td class="py-2 px-2 text-right font-mono">${Math.round(plan.strike).toLocaleString()}</td>
                 <td class="py-2 px-2 text-right font-mono text-green-400">${plan.apr.toFixed(1)}%</td>
@@ -701,7 +701,7 @@ function displayRecoveryResult(result) {
                 <td class="py-2 px-2 text-right font-mono">$${plan.total_margin.toLocaleString()}</td>
                 <td class="py-2 px-2 text-right font-mono text-blue-400">$${plan.expected_premium.toLocaleString()}</td>
                 <td class="py-2 px-2 text-right font-mono ${profitColor} font-semibold">${plan.net_profit >= 0 ? '+' : ''}$${plan.net_profit.toLocaleString()}</td>
-                <td class="py-2 px-2 text-center ${riskColor} text-xs">${plan.risk_level}</td>
+                <td class="py-2 px-2 text-center ${riskColor} text-xs">${safeHTML(plan.risk_level)}</td>
             </tr>`;
         }).join('');
     } else {
@@ -1290,12 +1290,12 @@ function updateRiskDashboardUI(data) {
                     <div class="flex items-center gap-2">
                         <i class="fas fa-crosshairs text-yellow-400"></i>
                         <span class="text-gray-400">Delta:</span>
-                        <span class="font-mono font-bold text-yellow-300">${deltaRange}</span>
+                        <span class="font-mono font-bold text-yellow-300">${safeHTML(deltaRange)}</span>
                     </div>
                     <div class="flex items-center gap-2">
                         <i class="fas fa-clock text-purple-400"></i>
                         <span class="text-gray-400">DTE:</span>
-                        <span class="font-mono font-bold text-purple-300">${dteRange}</span>
+                        <span class="font-mono font-bold text-purple-300">${safeHTML(dteRange)}</span>
                     </div>
                 </div>
             `;
@@ -1496,7 +1496,7 @@ function updateConvergenceDashboard(convergence) {
                 'neutral': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
             };
             const c = colors[type] || colors.neutral;
-            return `<div class="p-2 rounded border ${c}">${icon} ${name}</div>`;
+            return `<div class="p-2 rounded border ${c}">${safeHTML(icon)} ${safeHTML(name)}</div>`;
         }).join('');
     } else {
         signalsEl.innerHTML = '<div class="text-gray-600 text-center py-2 col-span-4">无信号</div>';
@@ -1593,7 +1593,7 @@ function updateDerivativeMetrics(dm) {
             };
             signals.innerHTML = oa.signals.map(([icon, name, type]) => {
                 const c = colors[type] || colors.neutral;
-                return '<div class="p-2 rounded border ' + c + '">' + icon + ' ' + name + '</div>';
+                return '<div class="p-2 rounded border ' + c + '">' + safeHTML(icon) + ' ' + safeHTML(name) + '</div>';
             }).join('');
         }
     }
@@ -2012,7 +2012,7 @@ function showRollSuggestion(idx) {
     if (alternatives.length > 0) {
         alternativesHtml = `<div class="mt-4"><h4 class="font-semibold text-green-400 mb-2">建议滚仓至：</h4>${alternatives.map(alt => `
             <div class="bg-gray-800/50 rounded-lg p-3 mb-2">
-                <div class="flex justify-between"><span class="font-mono">${alt.symbol}</span><span class="text-green-400">${alt.apr.toFixed(1)}% APR</span></div>
+                <div class="flex justify-between"><span class="font-mono">${safeHTML(alt.symbol)}</span><span class="text-green-400">${alt.apr.toFixed(1)}% APR</span></div>
                 <div class="text-xs text-gray-400 mt-1">Strike: ${Math.round(alt.strike).toLocaleString()} | DTE: ${alt.dte.toFixed(0)} | Delta: ${Math.abs(alt.delta).toFixed(3)}</div>
             </div>
         `).join('')}</div>`;
@@ -2023,7 +2023,7 @@ function showRollSuggestion(idx) {
             <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
                 <h4 class="font-semibold text-red-400 mb-2">当前持仓风险</h4>
                 <div class="grid grid-cols-2 gap-4 text-sm">
-                    <div><span class="text-gray-400">合约:</span> <span class="font-mono">${contract.symbol}</span></div>
+                    <div><span class="text-gray-400">合约:</span> <span class="font-mono">${safeHTML(contract.symbol)}</span></div>
                     <div><span class="text-gray-400">Delta:</span> <span class="text-red-400 font-bold">${contract.delta.toFixed(3)}</span></div>
                     <div><span class="text-gray-400">行权价:</span> $${Math.round(contract.strike).toLocaleString()}</div>
                     <div><span class="text-gray-400">距离现货:</span> <span class="${distancePct < 2 ? 'text-red-400' : ''}">${distancePct.toFixed(1)}%</span></div>
@@ -3184,7 +3184,7 @@ async function loadWindAnalysis() {
                                       f.type.includes('covered') || f.type.includes('overwrite') ? 'text-yellow-400' :
                                       f.type.includes('premium') ? 'text-purple-400' : 'text-gray-400';
                     return `<div class="flex justify-between items-center text-xs">
-                        <span class="${colorClass}">${f.label}</span>
+                        <span class="${colorClass}">${safeHTML(f.label)}</span>
                         <span class="text-gray-300 font-mono">${f.count} <span class="text-gray-500">(${pct}%)</span></span>
                     </div>`;
                 }).join('');

@@ -1,8 +1,10 @@
 # Trades and wind analysis services
+import logging
 from typing import Dict, Any, List
-import requests
 import re
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 def generate_wind_sentiment(summary: Dict, spot: float) -> str:
@@ -41,7 +43,8 @@ def fetch_deribit_summaries(currency: str = "BTC") -> List[Dict]:
         mon = _get_deribit_monitor()
         summaries = mon._get_book_summaries(currency)
         return summaries if summaries else []
-    except Exception:
+    except (ImportError, RuntimeError, ConnectionError) as e:
+        logger.warning("Deribit summaries fetch failed: %s", e)
         return []
 
 
@@ -59,5 +62,6 @@ def fetch_large_trades(currency: str = "BTC", days: int = 7, limit: int = 50) ->
         col_names = ['timestamp', 'currency', 'source', 'title', 'message', 'direction', 'strike',
                      'volume', 'option_type', 'flow_label', 'notional_usd', 'delta', 'instrument_name']
         return [{col_names[i]: val for i, val in enumerate(row) if i < len(col_names)} for row in rows]
-    except Exception:
+    except Exception as e:
+        logger.warning("Large trades fetch failed: %s", e)
         return []

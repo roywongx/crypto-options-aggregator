@@ -1,5 +1,6 @@
 """仪表盘聚合 API"""
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Query
 
@@ -7,6 +8,7 @@ from services.spot_price import get_spot_price
 from services.risk_framework import RiskFramework
 from db.connection import execute_read
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
@@ -101,7 +103,8 @@ def _fetch_wind_analysis(currency: str, days: int = 30):
     
     try:
         spot = get_spot_price(currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Dashboard wind spot price failed: %s", e)
         spot = 0
     
     return {
@@ -116,15 +119,65 @@ def _fetch_wind_analysis(currency: str, days: int = 30):
 
 def _fetch_term_structure(currency: str):
     """获取 IV 期限结构"""
-    from services.dvol_analyzer import get_dvol_from_deribit
-    
-    dvol = get_dvol_from_deribit(currency)
-    if not dvol:
-        return {"error": "无法获取 DVOL 数据"}
-    
+    from services.iv_term_structure import IVTermStructureAnalyzer
+
+    try:
+        spot = get_spot_price(currency)
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Term structure spot price failed: %s, using fallback", e)
+        spot = 70000 if currency == "BTC" else 3000
+
+    # 从数据库获取最近的 scan_records 中的合约数据
+    try:
+        rows = execute_read("""
+            SELECT contracts_data FROM scan_records
+            WHERE currency = ? AND contracts_data IS NOT NULL
+            ORDER BY timestamp DESC LIMIT 1
+        """, (currency,))
+    except Exception as e:
+        logger.warning("Term structure DB query failed: %s", e)
+        rows = []
+
+    import json
+    term_data = []
+    if rows and rows[0][0]:
+        try:
+            contracts = json.loads(rows[0][0])
+            # 按到期日分组，计算每个到期日的平均 IV
+            expiry_ivs = {}
+            for c in contracts:
+                iv = c.get("mark_iv") or c.get("iv") or 0
+                dte = c.get("dte", 0)
+                if iv > 0 and dte > 0:
+                    key = int(dte)
+                    if key not in expiry_ivs:
+                        expiry_ivs[key] = []
+                    expiry_ivs[key].append(float(iv))
+
+            for dte, ivs in sorted(expiry_ivs.items()):
+                avg_iv = sum(ivs) / len(ivs)
+                term_data.append({"dte": dte, "avg_iv": round(avg_iv, 2)})
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Term structure JSON parse failed: %s", e)
+
+    if len(term_data) < 2:
+        return {"error": "数据不足，至少需要 2 个期限点", "term_structure": [], "backwardation": False}
+
+    # 使用 IVTermStructureAnalyzer 进行分析
+    analysis = IVTermStructureAnalyzer.analyze_term_structure(term_data, spot)
+
+    backwardation = False
+    if len(term_data) >= 2:
+        front_iv = term_data[0]["avg_iv"]
+        back_iv = term_data[-1]["avg_iv"]
+        if front_iv and back_iv:
+            backwardation = front_iv > back_iv * 1.05
+
     return {
         "currency": currency,
-        "dvol": dvol,
+        "term_structure": term_data,
+        "backwardation": backwardation,
+        "analysis": analysis,
         "timestamp": datetime.utcnow().isoformat()
     }
 

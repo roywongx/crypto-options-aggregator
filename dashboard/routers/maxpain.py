@@ -1,7 +1,9 @@
 # Max Pain and GEX calculation routes
+import logging
 from fastapi import APIRouter, Query
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 
@@ -10,7 +12,8 @@ def _fetch_deribit_summaries(currency="BTC"):
         from main import _get_deribit_monitor
         mon = _get_deribit_monitor()
         return mon._get_book_summaries(currency)
-    except Exception:
+    except (ImportError, RuntimeError, ConnectionError) as e:
+        logger.debug("Deribit summaries fetch failed: %s", e)
         return []
 
 
@@ -50,7 +53,8 @@ async def _calc_max_pain_internal(currency: str):
 
     try:
         spot = get_spot_price(currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Max pain spot price failed: %s, using fallback", e)
         db_spot = _get_spot_from_scan()
         spot = db_spot if db_spot > 1000 else (strikes[len(strikes)//2] if strikes else 0)
 

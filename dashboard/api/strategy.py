@@ -1,9 +1,11 @@
 """策略计算 API"""
+import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["strategy"])
 
 
@@ -31,7 +33,8 @@ async def strategy_calc(params: StrategyCalcRequest):
 
     try:
         spot = await run_in_threadpool(get_spot_price, params.currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Strategy calc spot price failed: %s", e)
         spot = 0
     
     if spot <= 0:

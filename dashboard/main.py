@@ -14,7 +14,7 @@ import logging
 import subprocess
 import math
 from concurrent.futures import ThreadPoolExecutor
-import requests
+import httpx
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -111,6 +111,7 @@ AUTO_SCAN_ENABLED = True
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global logger
     init_database()
 
     # 初始化模拟盘数据库（只执行一次）
@@ -184,8 +185,8 @@ async def lifespan(app: FastAPI):
             try:
                 from services.datahub import datahub
                 datahub.stop()
-            except Exception:
-                pass
+            except (ImportError, RuntimeError) as e:
+                logger.debug("DataHub stop failed: %s", e)
             logger.info("DataHub 已停止")
 
         # 关闭异步 HTTP 客户端连接池
@@ -193,8 +194,8 @@ async def lifespan(app: FastAPI):
             from services.async_http import close_async_client
             await close_async_client()
             logger.info("异步 HTTP 客户端已关闭")
-        except Exception:
-            pass
+        except (ImportError, RuntimeError) as e:
+            logger.debug("Async HTTP client close failed: %s", e)
 
         # 关闭 Deribit monitor session
         try:
@@ -202,8 +203,8 @@ async def lifespan(app: FastAPI):
             if mon and hasattr(mon, '_session'):
                 mon._session.close()
                 logger.info("Deribit session 已关闭")
-        except Exception:
-            pass
+        except (AttributeError, RuntimeError) as e:
+            logger.debug("Deribit session close failed: %s", e)
 
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)

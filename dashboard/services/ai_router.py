@@ -86,8 +86,8 @@ def ai_chat(
             api_key=api_key,
         )
         return response.choices[0].message.content
-        
-    except Exception as e:
+
+    except (ImportError, RuntimeError, ConnectionError, TimeoutError) as e:
         # 尝试 fallback
         for fallback_model in fallbacks:
             try:
@@ -99,10 +99,11 @@ def ai_chat(
                     api_key=api_key,
                 )
                 return response.choices[0].message.content
-            except Exception:
+            except (ImportError, RuntimeError, ConnectionError, TimeoutError) as fb_e:
+                logger.debug("AI fallback %s failed: %s", fallback_model, fb_e)
                 continue
-        
-        logger.warning("AI 回复失败 (所有模型): %s", str(e))
+
+        logger.warning("AI 回复失败 (所有模型): %s", e)
         return None
 
 

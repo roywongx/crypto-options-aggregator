@@ -1,7 +1,10 @@
+import logging
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 import re
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class InstrumentInfo:
@@ -47,7 +50,7 @@ def _parse_inst_name(inst: str) -> Optional[InstrumentInfo]:
             option_type=ot,
             dte=meta.dte
         )
-    except Exception:
+    except (ValueError, IndexError, AttributeError):
         pass
 
     m = re.match(r'([A-Z]+)-(\d+[A-Z]{3}\d+)-(\d+)-([PC])', inst)
@@ -57,7 +60,8 @@ def _parse_inst_name(inst: str) -> Optional[InstrumentInfo]:
     try:
         exp_date = datetime.strptime(expiry_str, '%d%b%y')
         dte = max(1, (exp_date - datetime.utcnow()).days)
-    except Exception:
+    except (ValueError, TypeError):
+        logger.debug("DTE parse fallback for %s", expiry_str)
         dte = 30
     return InstrumentInfo(
         currency=currency,

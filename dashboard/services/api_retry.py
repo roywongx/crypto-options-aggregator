@@ -3,14 +3,14 @@ API重试工具
 为外部API调用提供指数退避重试机制
 """
 import time
-import requests
+import httpx
 import logging
 from functools import wraps
 from typing import Callable, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-def retry_api(max_retries: int = 3, backoff_base: float = 1.0, exceptions: tuple = (requests.RequestException,)):
+def retry_api(max_retries: int = 3, backoff_base: float = 1.0, exceptions: tuple = (httpx.HTTPError,)):
     """
     API重试装饰器
     
@@ -31,22 +31,23 @@ def retry_api(max_retries: int = 3, backoff_base: float = 1.0, exceptions: tuple
                     if attempt < max_retries - 1:
                         wait_time = backoff_base * (2 ** attempt)
                         logger.warning(
-                            f"API调用失败 (attempt {attempt + 1}/{max_retries}): {func.__name__} - {e}. "
-                            f"将在 {wait_time:.1f}s 后重试..."
+                            "API调用失败 (attempt %d/%d): %s - %s. 将在 %.1fs 后重试...",
+                            attempt + 1, max_retries, func.__name__, e, wait_time
                         )
                         time.sleep(wait_time)
                     else:
                         logger.error(
-                            f"API调用最终失败 ({max_retries} attempts): {func.__name__} - {e}"
+                            "API调用最终失败 (%d attempts): %s - %s",
+                            max_retries, func.__name__, e
                         )
             raise last_exception
         return wrapper
     return decorator
 
-def request_with_retry(url: str, params: dict = None, timeout: int = 10, 
-                       max_retries: int = 3, verify: bool = True) -> requests.Response:
+def request_with_retry(url: str, params: dict = None, timeout: int = 10,
+                       max_retries: int = 3, verify: bool = True) -> httpx.Response:
     """
-    带重试的requests.get封装
+    带重试的HTTP GET封装（使用httpx）
     
     Args:
         url: 请求URL
@@ -56,23 +57,24 @@ def request_with_retry(url: str, params: dict = None, timeout: int = 10,
         verify: 是否验证SSL
     
     Returns:
-        requests.Response
+        httpx.Response
     
     Raises:
-        requests.RequestException: 所有重试失败后抛出
+        httpx.HTTPError: 所有重试失败后抛出
     """
+    from services.http_client import http_get
     last_exception = None
     for attempt in range(max_retries):
         try:
-            resp = requests.get(url, params=params, timeout=timeout, verify=verify)
+            resp = http_get(url, params=params, timeout=float(timeout))
             resp.raise_for_status()
             return resp
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             last_exception = e
             if attempt < max_retries - 1:
                 wait_time = 1.0 * (2 ** attempt)
-                logger.warning(f"Request failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time:.1f}s...")
+                logger.warning("Request failed (attempt %d/%d): %s. Retrying in %.1fs...", attempt + 1, max_retries, e, wait_time)
                 time.sleep(wait_time)
             else:
-                logger.error(f"Request failed after {max_retries} attempts: {e}")
+                logger.error("Request failed after %d attempts: %s", max_retries, e)
     raise last_exception

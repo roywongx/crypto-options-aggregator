@@ -453,11 +453,12 @@ def _estimate_current_premium(pos: Dict, spot: float) -> float:
     try:
         entry_date = datetime.strptime(pos["timestamp"], "%Y-%m-%d %H:%M:%S")
         days_held = (datetime.utcnow() - entry_date).days
-    except Exception:
+    except (ValueError, TypeError, KeyError) as e:
+        logger.debug("Time decay calc fallback: %s", e)
         days_held = 1
-    
+
     time_value = max(0, entry_premium - intrinsic) * max(0, 1 - 0.02 * days_held)
-    
+
     return intrinsic + time_value
 
 
@@ -468,5 +469,6 @@ def _get_dte(expiry: str) -> int:
     try:
         exp_date = datetime.strptime(expiry, "%Y-%m-%d")
         return max(0, (exp_date - datetime.utcnow()).days)
-    except Exception:
+    except (ValueError, TypeError) as e:
+        logger.debug("DTE parse fallback for %s: %s", expiry, e)
         return 30

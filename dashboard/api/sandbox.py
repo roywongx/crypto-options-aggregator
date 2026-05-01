@@ -1,7 +1,9 @@
 """沙盘推演 API"""
+import logging
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["sandbox"])
 
 
@@ -29,9 +31,10 @@ async def sandbox_simulate(params: SandboxParams):
 
     try:
         spot = get_spot_price(params.currency)
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        logger.warning("Sandbox spot price failed: %s", e)
         spot = 0
-    
+
     if spot < 1000:
         spot = params.crash_price * 1.5
 
@@ -53,7 +56,8 @@ async def sandbox_simulate(params: SandboxParams):
         from db.repository import ContractRepository
         repo = ContractRepository()
         all_contracts = repo.get_all_contracts(params.currency)
-    except Exception:
+    except (ImportError, RuntimeError) as e:
+        logger.debug("Sandbox contract repo failed: %s", e)
         all_contracts = []
 
     candidates = MartingaleSandboxEngine.search_recovery_candidates(
