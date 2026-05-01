@@ -45,23 +45,38 @@
 
 ---
 
-## 🔍 遗留问题 (需要下一步处理)
+## ✅ 遗留问题已修复 (本次提交)
 
 ### MEDIUM
 
-| ID | 文件 | 问题 | 建议 |
-|----|------|------|------|
-| M-3 | services/exchange_abstraction.py:413 | 每次 `get_options_chain()` 新建 DeribitOptionsMonitor | 复用单例 |
-| M-5 | services/scan_engine.py + main.py | 两处各自维护 `_get_deribit_monitor()` 单例 | 统一到共享模块 |
-| M-7 | api/strategy.py:84 | 只支持BTC/ETH，SOL会走错误逻辑 | 添加currency验证 |
+| ID | 文件 | 问题 | 修复方式 |
+|----|------|------|----------|
+| M-3 | services/exchange_abstraction.py:413 | 每次 `get_options_chain()` 新建 DeribitOptionsMonitor | 改用 `services.monitors.get_deribit_monitor()` 单例 |
+| M-5 | services/scan_engine.py + main.py | 两处各自维护 `_get_deribit_monitor()` 单例 | 统一迁移到 `services/monitors.py` 共享模块 |
+| M-7 | api/strategy.py:84 | 只支持BTC/ETH，SOL会走错误逻辑 | 添加多币种支持：BTC/ETH/SOL + 通用 `_get_book_summaries()` 回退 |
 
 ### LOW
 
-| ID | 问题 |
-|----|------|
-| L-3 | grid-strategy.js `setTimeout(initGridStrategy, 1500)` 魔法数字 |
-| L-4 | grid-strategy.js URL参数拼接未用 URLSearchParams |
-| L-5 | 测试文件散落在根目录，无正式pytest结构 |
+| ID | 问题 | 修复方式 |
+|----|------|----------|
+| L-3 | grid-strategy.js `setTimeout(initGridStrategy, 1500)` 魔法数字 | 改为 `MutationObserver` 监听 DOM 加载，5秒超时保护 |
+| L-4 | grid-strategy.js URL参数拼接未用 URLSearchParams | 改用 `URLSearchParams` 对象构建查询参数 |
+| L-5 | 测试文件散落在根目录，无正式pytest结构 | 创建 `tests/` 目录 + `conftest.py` + 3个测试文件 |
+
+**修复详情:**
+- 新增 `services/monitors.py`: 统一单例管理器，集中管理 DeribitOptionsMonitor 创建和复用
+- 更新 `exchange_abstraction.py`: 移除重复实例化，复用单例
+- 更新 `scan_engine.py`: 委托到共享模块
+- 更新 `main.py`: 委托到共享模块
+- 更新 `strategy.py`: 支持 BTC/ETH/SOL 及更多币种
+- 更新 `grid-strategy.js`: MutationObserver + URLSearchParams
+- 新增测试: `tests/test_margin_calculator.py`, `tests/test_grid_engine.py`, `tests/test_spot_price.py`
+
+---
+
+## 🔍 遗留问题 (需要下一步处理)
+
+无 🎉 所有遗留问题已修复！
 
 ---
 

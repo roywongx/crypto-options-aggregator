@@ -80,9 +80,21 @@ async def strategy_calc(params: StrategyCalcRequest):
         )
         # 获取合约数据
         from services.exchange_abstraction import registry, ExchangeType
-        from services.scan_engine import _get_deribit_monitor
-        mon = _get_deribit_monitor()
-        summaries = mon.get_btc_option_summaries() if params.currency == "BTC" else mon.get_eth_option_summaries()
+        from services.monitors import get_deribit_monitor
+        mon = get_deribit_monitor()
+        
+        # 支持 BTC/ETH/SOL 等多种币种
+        currency = params.currency.upper()
+        if currency == "BTC":
+            summaries = mon.get_btc_option_summaries()
+        elif currency == "ETH":
+            summaries = mon.get_eth_option_summaries()
+        elif hasattr(mon, f'get_{currency.lower()}_option_summaries'):
+            summaries = getattr(mon, f'get_{currency.lower()}_option_summaries')()
+        else:
+            # 通用方式：通过 _get_book_summaries 获取
+            summaries = mon._get_book_summaries(currency)
+        
         contracts = [mon._enrich_contract(s) for s in summaries if s]
         contracts = [c for c in contracts if c]
         result = engine.execute(contracts, strategy_params, spot)

@@ -405,14 +405,9 @@ class DeribitExchange(BaseExchange):
         max_spread_pct: float = 20.0,
         strike_range: Optional[tuple] = None
     ) -> List[OptionContract]:
-        import sys
-        import os
-        
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'deribit-options-monitor'))
-
         def _fetch():
-            from deribit_options_monitor import DeribitOptionsMonitor
-            mon = DeribitOptionsMonitor()
+            from services.monitors import get_deribit_monitor
+            mon = get_deribit_monitor()
             try:
                 return mon._get_book_summaries(currency)
             except (RuntimeError, ConnectionError, TimeoutError) as e:

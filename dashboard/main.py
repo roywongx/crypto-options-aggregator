@@ -53,18 +53,13 @@ def get_db_connection(read_only: bool = True):
     return _db_conn(read_only=read_only)
 
 
-_deribit_monitor_cache = {}
-
 DB_PATH = Path(__file__).parent / "data" / "monitor.db"
 
 
 def _get_deribit_monitor():
-    """获取 DeribitOptionsMonitor 单例（单进程安全，多 worker 各自独立）"""
-    if 'mon' not in _deribit_monitor_cache:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
-        from deribit_options_monitor import DeribitOptionsMonitor
-        _deribit_monitor_cache['mon'] = DeribitOptionsMonitor()
-    return _deribit_monitor_cache['mon']
+    """获取 DeribitOptionsMonitor 单例（统一到 services.monitors）"""
+    from services.monitors import get_deribit_monitor
+    return get_deribit_monitor()
 
 
 def _get_cached_contracts_count(currency: str = "BTC") -> int:

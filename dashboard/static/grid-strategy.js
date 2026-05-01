@@ -128,8 +128,16 @@ async function loadGridStrategy() {
         const loadingEl = document.getElementById('gridLoading');
         if (loadingEl) loadingEl.classList.remove('hidden');
         
+        const params = new URLSearchParams({
+            currency: currency,
+            put_count: putCount,
+            call_count: callCount,
+            min_dte: minDte,
+            max_dte: maxDte,
+            min_apr: minApr
+        });
         const response = await _gsSafeFetch()(
-            `${_gsAPIBase()}/api/grid/recommend?currency=${currency}&put_count=${putCount}&call_count=${callCount}&min_dte=${minDte}&max_dte=${maxDte}&min_apr=${minApr}`
+            `${_gsAPIBase()}/api/grid/recommend?${params.toString()}`
         );
         
         gridData = await response.json();
@@ -375,5 +383,34 @@ function getSignalColor(signal) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(initGridStrategy, 1500);
+    // 使用 MutationObserver 等待 gridStrategyContainer 出现
+    const containerId = 'gridStrategyContainer';
+    const container = document.getElementById(containerId);
+    
+    if (container) {
+        initGridStrategy();
+        return;
+    }
+    
+    // 如果容器还未加载，使用 MutationObserver 等待
+    const observer = new MutationObserver(function(mutations, obs) {
+        const el = document.getElementById(containerId);
+        if (el) {
+            obs.disconnect();
+            initGridStrategy();
+        }
+    });
+    
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    // 5秒超时保护，防止无限等待
+    setTimeout(function() {
+        observer.disconnect();
+        if (!document.getElementById(containerId)) {
+            console.warn('[GridStrategy] 容器未找到，初始化失败');
+        }
+    }, 5000);
 });

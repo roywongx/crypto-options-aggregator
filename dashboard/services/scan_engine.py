@@ -100,16 +100,9 @@ logger = logging.getLogger(__name__)
 
 
 def _get_deribit_monitor():
-    """获取 DeribitOptionsMonitor 单例"""
-    cache = getattr(_get_deribit_monitor, '_cache', None)
-    if cache is None:
-        cache = {}
-        setattr(_get_deribit_monitor, '_cache', cache)
-    if 'mon' not in cache:
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'deribit-options-monitor'))
-        from deribit_options_monitor import DeribitOptionsMonitor
-        cache['mon'] = DeribitOptionsMonitor()
-    return cache['mon']
+    """获取 DeribitOptionsMonitor 单例（统一到 services.monitors）"""
+    from services.monitors import get_deribit_monitor
+    return get_deribit_monitor()
 
 
 def _format_scan_report(currency: str, dvol_res: Any, trades_res: Any, der_res: Any) -> Dict[str, Any]:
