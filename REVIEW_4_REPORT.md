@@ -56,7 +56,7 @@
 | M-7 | api/strategy.py | 多币种支持 (使用 _get_book_summaries) | ✅ 已修复 (Hermes修正) |
 | L-3 | grid-strategy.js | setTimeout → MutationObserver | ✅ 已修复 |
 | L-4 | grid-strategy.js | URLSearchParams | ✅ 已修复 |
-| L-5 | tests/ | pytest 测试 | ⚠️ 仅骨架，无实际测试 |
+| L-5 | tests/ | pytest 测试 | ✅ 已完成 (41个测试全部通过) |
 
 ### 验证中发现并修复的新问题 (commit d31fa25)
 
@@ -66,11 +66,18 @@
 | NEW-2 | monitors.py | 声称线程安全但无锁 | 添加 threading.Lock 双重检查锁 |
 | NEW-3 | strategy.py:88-98 | 调用不存在的方法 (get_btc_option_summaries 等) | 统一用 _get_book_summaries(currency) |
 
-### 仍需处理
+### 测试完成情况
 
-| ID | 问题 | 优先级 |
-|----|------|--------|
-| L-5 | tests/ 目录只有 conftest.py 骨架，需要写实际测试 | LOW |
+**pytest 测试套件 (41个测试全部通过)**
+
+| 测试文件 | 测试数量 | 覆盖内容 |
+|----------|----------|----------|
+| test_margin_calculator.py | 15 | PUT/CALL 保证金计算、边界条件、异常处理 |
+| test_monitors.py | 7 | 单例模式、线程安全、缓存清除 |
+| test_grid_engine.py | 10 | 网格策略计算、delta 过滤、DTE/APR 过滤 |
+| test_spot_price.py | 9 | 缓存逻辑、多数据源 fallback、线程安全 |
+
+运行命令: `python -m pytest tests/ -v`
 
 **修复详情:**
 - 新增 `services/monitors.py`: 统一单例管理器，集中管理 DeribitOptionsMonitor 创建和复用

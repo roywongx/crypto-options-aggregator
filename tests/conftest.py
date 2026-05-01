@@ -23,3 +23,53 @@ def test_currency():
 def test_spot_price():
     """测试用现货价格"""
     return 80000.0
+
+
+@pytest.fixture
+def mock_contracts():
+    """模拟期权合约数据"""
+    return [
+        {
+            'symbol': 'BTC-80000-P',
+            'strike': 80000,
+            'option_type': 'PUT',
+            'mark_price': 1000,
+            'delta': -0.3,
+            'apr': 50.0,
+            'dte': 30,
+            'oi': 100
+        },
+        {
+            'symbol': 'BTC-85000-C',
+            'strike': 85000,
+            'option_type': 'CALL',
+            'mark_price': 800,
+            'delta': 0.3,
+            'apr': 40.0,
+            'dte': 30,
+            'oi': 100
+        },
+        {
+            'symbol': 'BTC-70000-P',
+            'strike': 70000,
+            'option_type': 'PUT',
+            'mark_price': 500,
+            'delta': -0.1,
+            'apr': 60.0,
+            'dte': 30,
+            'oi': 100
+        }
+    ]
+
+
+@pytest.fixture
+def grid_params():
+    """网格策略默认参数"""
+    return {
+        'spot': 80000,
+        'put_count': 3,
+        'call_count': 2,
+        'min_dte': 7,
+        'max_dte': 45,
+        'min_apr': 0.3
+    }
