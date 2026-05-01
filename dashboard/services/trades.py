@@ -39,8 +39,8 @@ def generate_wind_sentiment(summary: Dict, spot: float) -> str:
 
 def fetch_deribit_summaries(currency: str = "BTC") -> List[Dict]:
     try:
-        from main import _get_deribit_monitor
-        mon = _get_deribit_monitor()
+        from services.deribit_monitor import get_deribit_monitor
+        mon = get_deribit_monitor()
         summaries = mon._get_book_summaries(currency)
         return summaries if summaries else []
     except (ImportError, RuntimeError, ConnectionError) as e:

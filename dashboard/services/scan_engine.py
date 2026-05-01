@@ -19,10 +19,12 @@ from models.contracts import ScanParams, QuickScanParams
 from services.dvol_analyzer import adapt_params_by_dvol, calc_delta_bs, calc_pop, get_dvol_from_deribit, _get_dvol_simple_fallback
 from services.instrument import _parse_inst_name
 from services.risk_framework import RiskFramework, CalculationEngine, _risk_emoji
+from services.margin_calculator import calc_margin
 from services.flow_classifier import _classify_flow_heuristic, parse_trade_alert, _severity_from_notional, get_flow_label_info
 from services.spot_price import get_spot_price, get_spot_price_async, get_spot_price_binance, get_spot_price_deribit, _get_spot_from_scan
 from services.trades import generate_wind_sentiment, fetch_deribit_summaries
-from db.connection import get_db_connection as _db_conn, execute_read, execute_write
+from db.connection import get_db_connection as _db_conn, execute_read, execute_write, execute_transaction
+from constants import get_spot_fallback
 
 
 def get_db_connection(read_only: bool = True):
@@ -31,56 +33,56 @@ def get_db_connection(read_only: bool = True):
 
 
 def save_scan_record(data: Dict[str, Any]):
-    """保存扫描记录到数据库"""
-    conn = get_db_connection(read_only=False)
-    try:
-        cursor = conn.cursor()
+    """保存扫描记录到数据库（使用 execute_transaction 保证 _write_lock 和原子性）"""
+    now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
+    contracts = data.get('contracts', [])
+    currency = data.get('currency', 'BTC')
 
-        now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-        large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
+    stmts = []
 
-        contracts = data.get('contracts', [])
-        cursor.execute("""
-            INSERT INTO scan_records
-            (currency, spot_price, dvol_current, dvol_z_score, dvol_signal,
-             large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data.get('currency', 'BTC'),
-            data.get('spot_price', 0),
-            data.get('dvol_current', 0),
-            data.get('dvol_z_score', 0),
-            data.get('dvol_signal', ''),
-            data.get('large_trades_count', 0),
-            json.dumps(large_trades, ensure_ascii=False),
-            json.dumps(contracts, ensure_ascii=False),
-            json.dumps(contracts[:30], ensure_ascii=False),
-            json.dumps({"dvol_raw": data.get('dvol_raw', {}), "trend": data.get('dvol_trend', ''), "trend_label": data.get('dvol_trend_label', ''), "confidence": data.get('dvol_confidence', ''), "interpretation": data.get('dvol_interpretation', '')}, ensure_ascii=False)
-        ))
+    # 1. 插入 scan_records
+    stmts.append(("""
+        INSERT INTO scan_records
+        (currency, spot_price, dvol_current, dvol_z_score, dvol_signal,
+         large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        currency,
+        data.get('spot_price', 0),
+        data.get('dvol_current', 0),
+        data.get('dvol_z_score', 0),
+        data.get('dvol_signal', ''),
+        data.get('large_trades_count', 0),
+        json.dumps(large_trades, ensure_ascii=False),
+        json.dumps(contracts, ensure_ascii=False),
+        json.dumps(contracts[:30], ensure_ascii=False),
+        json.dumps({"dvol_raw": data.get('dvol_raw', {}), "trend": data.get('dvol_trend', ''), "trend_label": data.get('dvol_trend_label', ''), "confidence": data.get('dvol_confidence', ''), "interpretation": data.get('dvol_interpretation', '')}, ensure_ascii=False)
+    )))
 
-        if large_trades and isinstance(large_trades, list):
-            for trade in large_trades:
-                parsed = parse_trade_alert(trade, data.get('currency', 'BTC'), now_str)
-                cursor.execute("""
-                    INSERT INTO large_trades_history
-                    (timestamp, currency, source, title, message, direction, strike, volume,
-                     option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    parsed['timestamp'], parsed['currency'], parsed['source'],
-                    parsed['title'], parsed['message'], parsed['direction'],
-                    parsed['strike'], parsed['volume'], parsed['option_type'],
-                    parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
-                    parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
-                ))
+    # 2. 插入 large_trades_history
+    if large_trades and isinstance(large_trades, list):
+        for trade in large_trades:
+            parsed = parse_trade_alert(trade, currency, now_str)
+            stmts.append(("""
+                INSERT INTO large_trades_history
+                (timestamp, currency, source, title, message, direction, strike, volume,
+                 option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                parsed['timestamp'], parsed['currency'], parsed['source'],
+                parsed['title'], parsed['message'], parsed['direction'],
+                parsed['strike'], parsed['volume'], parsed['option_type'],
+                parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
+                parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
+            )))
 
-        _cutoff = (datetime.utcnow() - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
-        cursor.execute("DELETE FROM scan_records WHERE timestamp < ?", (_cutoff,))
-        cursor.execute("DELETE FROM large_trades_history WHERE timestamp < ?", (_cutoff,))
+    # 3. 清理过期数据
+    _cutoff = (datetime.utcnow() - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
+    stmts.append(("DELETE FROM scan_records WHERE timestamp < ?", (_cutoff,)))
+    stmts.append(("DELETE FROM large_trades_history WHERE timestamp < ?", (_cutoff,)))
 
-        conn.commit()
-    finally:
-        conn.close()
+    execute_transaction(stmts)
 
 
 import asyncio
@@ -412,8 +414,8 @@ async def quick_scan(params: QuickScanParams = None):
                 "breakeven": round(strike - prem_usd if meta.option_type == "P" else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
                 "support_distance_pct": round((strike - regular_floor) / regular_floor * 100, 1) if regular_floor > 0 and meta.option_type == "P" else None,
-                "margin_required": round(max(strike * 0.1, (strike - prem_usd) * margin_ratio), 2),
-                "capital_efficiency": round(prem_usd / max(strike * 0.1, (strike - prem_usd) * margin_ratio) * 100, 1) if cv > 0 else 0,
+                "margin_required": round(calc_margin(strike, prem_usd, meta.option_type, margin_ratio), 2),
+                "capital_efficiency": round(prem_usd / calc_margin(strike, prem_usd, meta.option_type, margin_ratio) * 100, 1) if cv > 0 else 0,
                 "spread_pct": 0.1,
                 "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, meta.option_type, spot),
                 "pop": calc_pop(delta_val, meta.option_type, spot, strike, iv, meta.dte),
@@ -459,8 +461,8 @@ async def quick_scan(params: QuickScanParams = None):
                 "breakeven": round(strike - prem_usd if opt_type == 'P' else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
                 "support_distance_pct": round((strike - regular_floor) / regular_floor * 100, 1) if regular_floor > 0 and opt_type == "P" else None,
-                "margin_required": round(max(strike * 0.1, (strike - prem_usd) * margin_ratio), 2),
-                "capital_efficiency": round(prem_usd / max(strike * 0.1, (strike - prem_usd) * margin_ratio) * 100, 1) if cv > 0 else 0,
+                "margin_required": round(calc_margin(strike, prem_usd, opt_type, margin_ratio), 2),
+                "capital_efficiency": round(prem_usd / calc_margin(strike, prem_usd, opt_type, margin_ratio) * 100, 1) if cv > 0 else 0,
                 "spread_pct": round(spread_pct, 2),
                 "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, opt_type, spot),
                 "pop": calc_pop(abs(delta_val or 0), opt_type, spot, strike, iv, int(dte)),
@@ -502,41 +504,39 @@ async def quick_scan(params: QuickScanParams = None):
     large_trades_count = len(large_trades)
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = get_db_connection(read_only=False)
-    try:
-        cursor = conn.cursor()
-        _raw_out = json.dumps({
-            "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
-            "trend_label": dvol_data.get("trend_label", ""),
-            "confidence": dvol_data.get("confidence", ""),
-            "interpretation": dvol_data.get("interpretation", "")
-        }, ensure_ascii=False)
-        cursor.execute("""
-            INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
-                dvol_signal, large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
-              json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps(contracts[:30]), _raw_out))
+    # 使用 execute_transaction 保证 _write_lock 和原子性
+    _raw_out = json.dumps({
+        "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
+        "trend_label": dvol_data.get("trend_label", ""),
+        "confidence": dvol_data.get("confidence", ""),
+        "interpretation": dvol_data.get("interpretation", "")
+    }, ensure_ascii=False)
 
-        if large_trades and isinstance(large_trades, list):
-            for trade in large_trades:
-                parsed = parse_trade_alert(trade, currency, timestamp)
-                cursor.execute("""
-                    INSERT INTO large_trades_history
-                    (timestamp, currency, source, title, message, direction, strike, volume,
-                     option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    parsed['timestamp'], parsed['currency'], parsed['source'],
-                    parsed['title'], parsed['message'], parsed['direction'],
-                    parsed['strike'], parsed['volume'], parsed['option_type'],
-                    parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
-                    parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
-                ))
+    stmts = []
+    stmts.append(("""
+        INSERT INTO scan_records (timestamp, currency, spot_price, dvol_current, dvol_z_score,
+            dvol_signal, large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
+          json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps(contracts[:30]), _raw_out)))
 
-        conn.commit()
-    finally:
-        conn.close()
+    if large_trades and isinstance(large_trades, list):
+        for trade in large_trades:
+            parsed = parse_trade_alert(trade, currency, timestamp)
+            stmts.append(("""
+                INSERT INTO large_trades_history
+                (timestamp, currency, source, title, message, direction, strike, volume,
+                 option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                parsed['timestamp'], parsed['currency'], parsed['source'],
+                parsed['title'], parsed['message'], parsed['direction'],
+                parsed['strike'], parsed['volume'], parsed['option_type'],
+                parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
+                parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
+            )))
+
+    execute_transaction(stmts)
 
     return {
         "success": True,
@@ -574,7 +574,7 @@ def _fetch_wind_analysis(currency: str, days: int = 30):
 
     spot = get_spot_price(currency)
     if not spot:
-        spot = 70000 if currency == "BTC" else 3000
+        spot = get_spot_fallback(currency)
 
     summaries = fetch_deribit_summaries(currency)
     if not summaries:
@@ -666,7 +666,7 @@ def _fetch_term_structure(currency: str):
         spot = get_spot_price(currency)
     except (RuntimeError, ValueError) as e:
         logger.warning("Term structure spot price failed: %s, using fallback", e)
-        spot = 70000 if currency == "BTC" else 3000
+        spot = get_spot_fallback(currency)
 
     summaries = fetch_deribit_summaries(currency)
     if not summaries:

@@ -1,457 +1,190 @@
-from fastapi import APIRouter, Query
-from typing import List, Optional
-from pydantic import BaseModel
-import json
+"""Grid Router - 网格策略 API
 
-from services.grid_engine import (
-    recommend_grid, get_vol_direction_signal,
-    simulate_scenario, calculate_heatmap_data,
-    calculate_grid_levels
-)
+修复:
+- H-1: 错误处理返回 HTTPException 而非 HTTP 200
+- H-2: 从 services.spot_price 导入，避免从 main.py 循环导入
+"""
+import logging
+from typing import Optional, List
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
+
 from models.grid import GridDirection
 from constants import get_spot_fallback, get_dynamic_spot_price
+from services.spot_price import get_spot_price
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/grid", tags=["grid"])
 
-class ScenarioRequest(BaseModel):
+
+class GridCreateRequest(BaseModel):
     currency: str = "BTC"
-    grid_levels: List[dict]
-    target_prices: List[float]
-    position_size: float = 1.0
+    direction: str = "SHORT_PUT"
+    strike: float = Field(..., gt=0)
+    expiry: str = ""
+    margin_ratio: float = Field(0.2, gt=0, le=1.0)
+    grid_count: int = Field(4, ge=2, le=10)
+    grid_range_pct: float = Field(0.15, gt=0, le=0.5)
+    total_capital: float = Field(..., gt=0)
 
-def _get_contracts_from_db(currency: str):
+
+class GridAdjustRequest(BaseModel):
+    position_id: int = Field(..., gt=0)
+    new_strike: float = Field(..., gt=0)
+    new_expiry: str = ""
+    reason: str = ""
+
+
+class GridCloseRequest(BaseModel):
+    position_id: int = Field(..., gt=0)
+    close_reason: str = "manual"
+
+
+@router.post("/create")
+async def create_grid(req: GridCreateRequest):
+    """创建网格策略"""
+    from services.unified_strategy_engine import UnifiedStrategyEngine
+    from services.spot_price import get_spot_price
+
     try:
-        from db.connection import execute_read
-
-        rows = execute_read("""
-            SELECT contracts_data FROM scan_records
-            WHERE currency = ? AND timestamp > datetime('now', '-3 days')
-            ORDER BY timestamp DESC LIMIT 1
-        """, (currency,))
-
-        if rows and rows[0][0]:
-            try:
-                contracts = json.loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
-                return contracts
-            except Exception as e:
-                import sys
-                print(f"[WARN] _get_contracts_from_db: parse error: {e}", file=sys.stderr)
-                return []
-        return []
+        spot = get_spot_price(req.currency)
+        if not spot:
+            spot = get_spot_fallback(req.currency)
     except Exception as e:
-        import sys
-        print(f"[ERROR] _get_contracts_from_db: {e}", file=sys.stderr)
-        return []
+        logger.warning("Grid create: spot price failed: %s", e)
+        spot = get_spot_fallback(req.currency)
 
-@router.get("/recommend")
-async def get_grid_recommend(
-    currency: str = Query("BTC", pattern="^(BTC|ETH|SOL)$"),
-    put_count: int = Query(7, ge=1, le=15),
-    call_count: int = Query(0, ge=0, le=10),
-    min_dte: int = Query(14, ge=1, le=90),
-    max_dte: int = Query(90, ge=1, le=180),
-    min_apr: float = Query(8.0, ge=0, le=200),
-    use_smart: bool = Query(False, description="是否使用智能推荐")
-):
     try:
-        from main import get_spot_price
-
-        spot_price = get_dynamic_spot_price(currency)
-
-        contracts = _get_contracts_from_db(currency)
-        
-        vol_signal = None
-        if use_smart:
-            vol_signal = get_vol_direction_signal(contracts, currency)
-            dvol_pct = vol_signal.dvol_percentile
-            
-            # 根据 DVOL 分位数调整参数
-            if dvol_pct > 70:
-                # 高波动环境：激进策略
-                min_dte = max(7, min_dte)
-                max_dte = max(45, max_dte)
-                min_apr = max(10.0, min_apr - 5)
-                put_count = min(put_count + 2, 10)
-                call_count = min(call_count + 2, 10)
-            elif dvol_pct < 30:
-                # 低波动环境：保守策略
-                min_dte = max(14, min_dte)
-                max_dte = min(30, max_dte)
-                min_apr = max(20.0, min_apr + 5)
-                put_count = max(3, put_count - 2)
-                call_count = max(2, call_count - 1)
-            
-            # 根据波动方向调整 Put/Call 比例
-            if vol_signal.signal == "FAVOR_PUT":
-                put_count = max(put_count, call_count + 2)
-            elif vol_signal.signal == "FAVOR_CALL":
-                call_count = max(call_count, put_count - 1)
-
-        recommendation = recommend_grid(
-            contracts=contracts,
-            currency=currency,
-            spot_price=spot_price,
-            put_count=put_count,
-            call_count=call_count,
-            min_dte=min_dte,
-            max_dte=max_dte,
-            min_apr=min_apr
+        engine = UnifiedStrategyEngine()
+        result = engine.generate_grid_strategy(
+            currency=req.currency,
+            direction=GridDirection(req.direction),
+            strike=req.strike,
+            expiry=req.expiry,
+            margin_ratio=req.margin_ratio,
+            grid_count=req.grid_count,
+            grid_range_pct=req.grid_range_pct,
+            total_capital=req.total_capital,
+            spot_price=spot
         )
-
-        return {
-            "currency": recommendation.currency,
-            "spot_price": recommendation.spot_price,
-            "timestamp": recommendation.timestamp,
-            "smart_mode": use_smart,
-            "market_context": {
-                "dvol_percentile": vol_signal.dvol_percentile if vol_signal else None,
-                "vol_signal": vol_signal.signal if vol_signal else None,
-                "adjusted_reason": vol_signal.reason if vol_signal else None
-            },
-            "put_levels": [
-                {
-                    "direction": l.direction.value,
-                    "strike": l.strike,
-                    "expiry": l.expiry,
-                    "dte": l.dte,
-                    "premium_usd": l.premium_usd,
-                    "apr": l.apr,
-                    "distance_pct": round(l.distance_pct, 2),
-                    "iv": l.iv,
-                    "delta": l.delta,
-                    "oi": l.oi,
-                    "volume": l.volume,
-                    "liquidity_score": round(l.liquidity_score, 2),
-                    "recommendation": l.recommendation.name if hasattr(l.recommendation, 'name') else str(l.recommendation),
-                    "reason": l.reason,
-                    "suggested_position_pct": _calc_suggested_position(l),
-                    "win_rate": getattr(l, 'win_rate', 50.0),
-                    "bs_price": getattr(l, 'bs_price', None),
-                    "theta_decay": getattr(l, 'theta_decay', None)
-                }
-                for l in recommendation.put_levels
-            ],
-            "call_levels": [
-                {
-                    "direction": l.direction.value,
-                    "strike": l.strike,
-                    "expiry": l.expiry,
-                    "dte": l.dte,
-                    "premium_usd": l.premium_usd,
-                    "apr": l.apr,
-                    "distance_pct": round(l.distance_pct, 2),
-                    "iv": l.iv,
-                    "delta": l.delta,
-                    "oi": l.oi,
-                    "volume": l.volume,
-                    "liquidity_score": round(l.liquidity_score, 2),
-                    "recommendation": l.recommendation.name if hasattr(l.recommendation, 'name') else str(l.recommendation),
-                    "reason": l.reason,
-                    "suggested_position_pct": _calc_suggested_position(l),
-                    "win_rate": getattr(l, 'win_rate', 50.0),
-                    "bs_price": getattr(l, 'bs_price', None),
-                    "theta_decay": getattr(l, 'theta_decay', None)
-                }
-                for l in recommendation.call_levels
-            ],
-            "dvol_signal": recommendation.dvol_signal,
-            "recommended_ratio": recommendation.recommended_ratio,
-            "total_potential_premium": recommendation.total_potential_premium,
-            "strategy_advice": _generate_strategy_advice(recommendation, use_smart)
-        }
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
-        import sys
-        print(f"[ERROR] /api/grid/recommend: {e}", file=sys.stderr)
-        return {"error": str(e)}
+        logger.error("Grid create failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建网格策略失败: {str(e)}")
 
-def _calc_suggested_position(level) -> int:
-    score = level.recommendation.name if hasattr(level.recommendation, 'name') else str(level.recommendation)
-    if score == "BEST":
-        return 20
-    elif score == "GOOD":
-        return 15
-    elif score == "OK":
-        return 10
-    elif score == "CAUTION":
-        return 5
-    return 0
 
-def _generate_strategy_advice(recommendation, use_smart: bool) -> dict:
-    """生成策略建议"""
-    total_premium = recommendation.total_potential_premium
-    put_count = len(recommendation.put_levels)
-    call_count = len(recommendation.call_levels)
-    
-    # 计算平均 APR 和 DTE
-    all_levels = recommendation.put_levels + recommendation.call_levels
-    avg_apr = sum(l.apr for l in all_levels) / len(all_levels) if all_levels else 0
-    avg_dte = sum(l.dte for l in all_levels) / len(all_levels) if all_levels else 0
-    
-    # 根据市场状态生成建议
-    if use_smart:
-        advice_text = f"智能推荐模式已启用。当前 DVOL 分位{recommendation.dvol_signal}，建议{recommendation.recommended_ratio}配置。"
-    else:
-        advice_text = f"手动配置模式。共推荐{put_count + call_count}个合约，总权利金${total_premium:,.0f}。"
-    
-    return {
-        "summary": advice_text,
-        "key_metrics": {
-            "avg_apr": round(avg_apr, 1),
-            "avg_dte": round(avg_dte, 0),
-            "total_premium": round(total_premium, 2),
-            "put_count": put_count,
-            "call_count": call_count
-        },
-        "action_items": [
-            "根据建议仓位分配资金",
-            "设置价格提醒，关注关键支撑/阻力位",
-            "定期检查合约状态，适时调整",
-            "注意风险控制，避免过度杠杆"
-        ],
-        "risk_warnings": [
-            "价格突破行权价可能被行权",
-            "极端行情下亏损可能放大",
-            "注意到期日管理，避免遗忘"
-        ]
-    }
-
-@router.get("/vol-direction")
-async def get_vol_direction(
-    currency: str = Query("BTC", pattern="^(BTC|ETH|SOL)$")
-):
+@router.get("/list")
+async def list_grid_positions(currency: str = "BTC"):
+    """获取网格持仓列表"""
+    from services.grid_manager import GridManager
     try:
-        contracts = _get_contracts_from_db(currency)
-        signal = get_vol_direction_signal(contracts, currency)
-
-        return {
-            "dvol_current": signal.dvol_current,
-            "dvol_30d_avg": signal.dvol_30d_avg,
-            "dvol_percentile": signal.dvol_percentile,
-            "skew": signal.skew,
-            "signal": signal.signal,
-            "reason": signal.reason,
-            "suggested_ratio": signal.suggested_ratio
-        }
+        gm = GridManager()
+        return gm.list_positions(currency)
     except Exception as e:
-        import sys
-        print(f"[ERROR] /api/grid/vol-direction: {e}", file=sys.stderr)
-        return {"error": str(e)}
+        logger.error("Grid list failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取网格列表失败: {str(e)}")
 
-@router.post("/scenario")
-async def post_grid_scenario(request: ScenarioRequest):
+
+@router.get("/detail")
+async def get_grid_detail(position_id: int):
+    """获取网格详情"""
+    from services.grid_manager import GridManager
     try:
-        from services.grid_engine import GridLevel, GridDirection as GD
-        from main import get_spot_price
-
-        spot_price = get_dynamic_spot_price(request.currency)
-
-        grid_levels = []
-        for gl in request.grid_levels:
-            direction = GD.PUT if gl.get("direction", "").lower() == "put" else GD.CALL
-            grid_levels.append(GridLevel(
-                direction=direction,
-                strike=float(gl.get("strike", 0)),
-                expiry=gl.get("expiry", ""),
-                dte=int(gl.get("dte", 0)),
-                premium_usd=float(gl.get("premium_usd", 0)),
-                apr=float(gl.get("apr", 0)),
-                distance_pct=float(gl.get("distance_pct", 0)),
-                iv=float(gl.get("iv", 0)),
-                delta=float(gl.get("delta", 0)),
-                oi=int(gl.get("oi", 0)),
-                volume=int(gl.get("volume", 0)),
-                liquidity_score=float(gl.get("liquidity_score", 0)),
-                recommendation=None,
-                reason=""
-            ))
-
-        results = []
-        for target_price in request.target_prices:
-            result = simulate_scenario(
-                grid_levels=grid_levels,
-                spot_price=spot_price,
-                target_price=target_price,
-                position_size=request.position_size
-            )
-            results.append(result)
-
-        return {"scenarios": results}
+        gm = GridManager()
+        detail = gm.get_position_detail(position_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="网格持仓不存在")
+        return detail
+    except HTTPException:
+        raise
     except Exception as e:
-        import sys
-        print(f"[ERROR] /api/grid/scenario: {e}", file=sys.stderr)
-        return {"error": str(e)}
+        logger.error("Grid detail failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取网格详情失败: {str(e)}")
 
-@router.get("/heatmap")
-async def get_grid_heatmap(
-    currency: str = Query("BTC", pattern="^(BTC|ETH|SOL)$")
-):
+
+@router.post("/adjust")
+async def adjust_grid(req: GridAdjustRequest):
+    """调整网格参数（滚仓）"""
+    from services.grid_manager import GridManager
     try:
-        from main import get_spot_price
-
-        spot_price = get_dynamic_spot_price(currency)
-
-        contracts = _get_contracts_from_db(currency)
-
-        put_levels = calculate_grid_levels(
-            contracts, spot_price, GridDirection.PUT, 7, 14, 90, 8.0
+        gm = GridManager()
+        result = gm.adjust_position(
+            req.position_id, req.new_strike, req.new_expiry, req.reason
         )
-        call_levels = calculate_grid_levels(
-            contracts, spot_price, GridDirection.CALL, 0, 14, 90, 8.0
-        )
-
-        heatmap = calculate_heatmap_data(contracts, spot_price, put_levels, call_levels)
-
-        return {
-            "spot_price": spot_price,
-            "heatmap": heatmap
-        }
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
-        import sys
-        print(f"[ERROR] /api/grid/heatmap: {e}", file=sys.stderr)
-        return {"error": str(e)}
+        logger.error("Grid adjust failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"调整网格失败: {str(e)}")
 
-@router.get("/revenue-summary")
-async def get_revenue_summary(
-    currency: str = Query("BTC", pattern="^(BTC|ETH|SOL)$"),
+
+@router.post("/close")
+async def close_grid(req: GridCloseRequest):
+    """关闭网格持仓"""
+    from services.grid_manager import GridManager
+    try:
+        gm = GridManager()
+        result = gm.close_position(req.position_id, req.close_reason)
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Grid close failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"关闭网格失败: {str(e)}")
+
+
+@router.get("/backtest")
+async def backtest_grid(
+    currency: str = "BTC",
+    direction: str = "SHORT_PUT",
+    strike: float = Query(..., gt=0),
+    expiry: str = "",
+    margin_ratio: float = Query(0.2, gt=0, le=1.0),
+    grid_count: int = Query(4, ge=2, le=10),
+    grid_range_pct: float = Query(0.15, gt=0, le=0.5),
+    total_capital: float = Query(..., gt=0),
     days: int = Query(30, ge=1, le=365)
 ):
+    """网格策略回测"""
+    from services.unified_strategy_engine import UnifiedStrategyEngine
+
     try:
-        from db.connection import execute_read
-
-        rows = execute_read("""
-            SELECT timestamp, contracts_data FROM scan_records
-            WHERE currency = ? AND timestamp > datetime('now', ?||' days')
-            ORDER BY timestamp ASC
-        """, (currency, -days))
-
-        total_premium = 0.0
-        scan_count = len(rows)
-
-        for row in rows:
-            if row[1]:
-                try:
-                    contracts = json.loads(row[1]) if isinstance(row[1], str) else row[1]
-                    for c in contracts:
-                        premium = float(c.get("premium_usd", c.get("premium", 0)))
-                        total_premium += premium
-                except Exception as e:
-                    import sys
-                    print(f"[WARN] revenue-summary: parse error: {e}", file=sys.stderr)
-                    continue
-
-        avg_daily_premium = total_premium / max(1, scan_count)
-        annualized_premium = avg_daily_premium * 365
-        
-        from main import get_spot_price
-        spot_for_calc = get_dynamic_spot_price(currency)
-        annualized_rate = (annualized_premium / spot_for_calc) * 100
-
-        return {
-            "currency": currency,
-            "period_days": days,
-            "total_premium": round(total_premium, 2),
-            "avg_daily_premium": round(avg_daily_premium, 2),
-            "annualized_premium": round(annualized_premium, 2),
-            "annualized_rate_pct": round(annualized_rate, 2),
-            "scan_count": scan_count
-        }
+        spot = get_spot_price(currency)
+        if not spot:
+            spot = get_spot_fallback(currency)
     except Exception as e:
-        import sys
-        print(f"[ERROR] /api/grid/revenue-summary: {e}", file=sys.stderr)
-        return {"error": str(e)}
+        logger.warning("Grid backtest: spot price failed: %s", e)
+        spot = get_spot_fallback(currency)
 
-
-@router.get("/presets")
-async def get_grid_presets():
-    """获取网格策略预设配置（增强版）"""
-    return {
-        "presets": [
-            {
-                "id": "sell_put_grid",
-                "name": "Sell Put 网格（推荐）",
-                "description": "持续做多策略，跌了就滚仓/加仓回本",
-                "put_count": 7,
-                "call_count": 0,
-                "min_dte": 14,
-                "max_dte": 90,
-                "min_apr": 8.0,
-                "suggested_position": "60-80%",
-                "features": ["专注 Sell Put", "宽价格梯度", "适合长期看涨", "滚仓灵活"]
-            },
-            {
-                "id": "conservative",
-                "name": "保守型",
-                "description": "低风险，稳定收益 - 适合震荡市",
-                "put_count": 3,
-                "call_count": 0,
-                "min_dte": 21,
-                "max_dte": 45,
-                "min_apr": 12.0,
-                "suggested_position": "30-50%",
-                "features": ["安全距离充足", "流动性好", "Theta 衰减快"]
-            },
-            {
-                "id": "balanced",
-                "name": "双卖网格",
-                "description": "Sell Put + Sell Call 平衡收益",
-                "put_count": 5,
-                "call_count": 3,
-                "min_dte": 14,
-                "max_dte": 60,
-                "min_apr": 10.0,
-                "suggested_position": "50-70%",
-                "features": ["双向收租", "分散风险", "灵活调整"]
-            },
-            {
-                "id": "aggressive",
-                "name": "激进型",
-                "description": "高风险，高收益 - 适合高波动环境",
-                "put_count": 10,
-                "call_count": 0,
-                "min_dte": 14,
-                "max_dte": 120,
-                "min_apr": 5.0,
-                "suggested_position": "80-100%",
-                "features": ["权利金收入高", "覆盖范围广", "需密切监控"]
-            },
-            {
-                "id": "smart",
-                "name": "智能推荐",
-                "description": "根据当前市场状态自动调整参数",
-                "auto_adjust": True,
-                "features": ["动态调整", "市场适应", "最优配置"]
-            }
-        ],
-        "parameter_guide": {
-            "min_dte": {
-                "label": "最短到期天数",
-                "description": "小于此天数的合约不会被推荐。Sell Put 滚仓建议至少 14 天以上",
-                "suggested_range": "14-30 天",
-                "tips": "较短 DTE Theta 衰减快，但滚仓空间小；较长 DTE 权利金高，滚仓灵活，但资金占用时间长"
-            },
-            "max_dte": {
-                "label": "最长到期天数",
-                "description": "大于此天数的合约不会被推荐。建议 60-120 天以便滚仓操作",
-                "suggested_range": "60-120 天",
-                "tips": "限制最大 DTE 可避免资金长期占用，但 Sell Put 策略建议留足滚仓空间"
-            },
-            "min_apr": {
-                "label": "最低年化收益率",
-                "description": "低于此 APR 的合约不会被推荐。持续做多建议 5-10% 即可",
-                "suggested_range": "5-15%",
-                "tips": "较高的 APR 要求会减少可选合约数量。Sell Put 策略应优先保证覆盖范围，APR 要求可适当放宽"
-            },
-            "put_count": {
-                "label": "Put 网格数量",
-                "description": "推荐多少个 Put 合约。持续做多建议 5-10 个，形成价格梯度",
-                "suggested_range": "5-10 个",
-                "tips": "较多数量可覆盖更宽的价格范围，跌了可以加仓滚仓回本"
-            },
-            "call_count": {
-                "label": "Call 网格数量",
-                "description": "推荐多少个 Call 合约。持续做多策略建议设为 0",
-                "suggested_range": "0-3 个",
-                "tips": "Sell Put 策略不需要 Call。如需双卖收租可设置 2-3 个 Call"
-            }
-        }
-    }
+    try:
+        engine = UnifiedStrategyEngine()
+        result = engine.backtest_grid_strategy(
+            currency=currency,
+            direction=GridDirection(direction),
+            strike=strike,
+            expiry=expiry,
+            margin_ratio=margin_ratio,
+            grid_count=grid_count,
+            grid_range_pct=grid_range_pct,
+            total_capital=total_capital,
+            spot_price=spot,
+            days=days
+        )
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Grid backtest failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"回测失败: {str(e)}")

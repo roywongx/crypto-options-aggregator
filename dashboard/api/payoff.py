@@ -1,4 +1,7 @@
-"""Payoff 计算 API"""
+"""Payoff 计算 API
+
+修复 H-4: 所有端点使用 Pydantic 输入验证
+"""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -10,6 +13,37 @@ class PayoffCalcRequest(BaseModel):
     spot: float = Field(gt=0)
     pct_range: float = Field(default=0.3, ge=0.1, le=1.0)
     steps: int = Field(default=100, ge=1, le=1000)
+
+
+class PayoffScoreRequest(BaseModel):
+    legs: list
+    spot: float = Field(gt=0)
+    dte: int = Field(default=30, ge=1)
+    iv: float = Field(default=50, gt=0)
+
+
+class PayoffEstimateRequest(BaseModel):
+    option_type: str = "P"
+    strike: float = Field(gt=0)
+    spot: float = Field(gt=0)
+    dte: int = Field(default=30, ge=1)
+    iv: float = Field(default=50, gt=0)
+
+
+class PayoffCompareRequest(BaseModel):
+    strategies: list
+    spot: float = Field(gt=0)
+
+
+class PayoffWheelRequest(BaseModel):
+    put_strike: float = Field(gt=0)
+    put_premium: float = Field(ge=0)
+    call_strike: float = Field(gt=0)
+    call_premium: float = Field(ge=0)
+    spot: float = Field(gt=0)
+    quantity: int = Field(default=1, ge=1)
+    put_dte: int = Field(default=30, ge=1)
+    call_dte: int = Field(default=30, ge=1)
 
 
 @router.post("/payoff/calc")
@@ -26,21 +60,13 @@ async def calc_payoff(data: PayoffCalcRequest):
 
 
 @router.post("/payoff/score")
-async def calc_strategy_score(data: dict):
+async def calc_strategy_score(data: PayoffScoreRequest):
     """策略评分和实操建议"""
     from services.payoff_calculator import PayoffCalculator
 
     calc = PayoffCalculator()
-    legs = data.get("legs", [])
-    spot = data.get("spot", 0)
-    dte = data.get("dte", 30)
-    iv = data.get("iv", 50)
-
-    if not legs or not spot:
-        return {"error": "缺少 legs 或 spot 参数"}
-
-    score_data = calc.calc_strategy_score(legs, spot, dte, iv)
-    advice_data = calc.generate_strategy_advice(score_data, legs, spot)
+    score_data = calc.calc_strategy_score(data.legs, data.spot, data.dte, data.iv)
+    advice_data = calc.generate_strategy_advice(score_data, data.legs, data.spot)
 
     return {
         "score": score_data,
@@ -49,54 +75,30 @@ async def calc_strategy_score(data: dict):
 
 
 @router.post("/payoff/estimate")
-async def estimate_premium(data: dict):
+async def estimate_premium(data: PayoffEstimateRequest):
     """智能估算权利金"""
     from services.payoff_calculator import PayoffCalculator
 
     calc = PayoffCalculator()
-    option_type = data.get("option_type", "P")
-    strike = data.get("strike", 0)
-    spot = data.get("spot", 0)
-    dte = data.get("dte", 30)
-    iv = data.get("iv", 50)
-
-    if not strike or not spot:
-        return {"error": "缺少 strike 或 spot 参数"}
-
-    return calc.estimate_premium(option_type, strike, spot, dte, iv)
+    return calc.estimate_premium(data.option_type, data.strike, data.spot, data.dte, data.iv)
 
 
 @router.post("/payoff/compare")
-async def compare_strategies(data: dict):
+async def compare_strategies(data: PayoffCompareRequest):
     """对比多个策略（最多 5 个）"""
     from services.payoff_calculator import PayoffCalculator
 
     calc = PayoffCalculator()
-    strategies = data.get("strategies", [])
-    spot = data.get("spot", 0)
-
-    if not strategies or not spot:
-        return {"error": "缺少 strategies 或 spot 参数"}
-
-    return calc.compare_strategies(strategies, spot)
+    return calc.compare_strategies(data.strategies, data.spot)
 
 
 @router.post("/payoff/wheel")
-async def calc_wheel_roi(data: dict):
+async def calc_wheel_roi(data: PayoffWheelRequest):
     """计算 Wheel 策略 ROI（增强版）"""
     from services.payoff_calculator import PayoffCalculator
 
     calc = PayoffCalculator()
-    put_strike = data.get("put_strike", 0)
-    put_premium = data.get("put_premium", 0)
-    call_strike = data.get("call_strike", 0)
-    call_premium = data.get("call_premium", 0)
-    spot = data.get("spot", 0)
-    quantity = data.get("quantity", 1)
-    put_dte = data.get("put_dte", 30)
-    call_dte = data.get("call_dte", 30)
-
-    if not put_strike or not spot:
-        return {"error": "缺少 put_strike 或 spot 参数"}
-
-    return calc.calc_wheel_roi(put_strike, put_premium, call_strike, call_premium, spot, quantity, put_dte, call_dte)
+    return calc.calc_wheel_roi(
+        data.put_strike, data.put_premium, data.call_strike, data.call_premium,
+        data.spot, data.quantity, data.put_dte, data.call_dte
+    )

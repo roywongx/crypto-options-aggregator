@@ -36,7 +36,7 @@ def cleanup_old_records(conn: sqlite3.Connection, days: int = 30) -> dict:
     scans_deleted = cursor.rowcount
 
     cursor.execute("DELETE FROM large_trades_history WHERE timestamp < ?", (cutoff_date,))
-    trades_deleted = cursor.fetchone()[0] if cursor.rowcount else 0
+    trades_deleted = cursor.rowcount
 
     conn.commit()
 

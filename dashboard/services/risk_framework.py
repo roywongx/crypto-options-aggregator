@@ -104,35 +104,15 @@ class CalculationEngine:
 
     @staticmethod
     def calc_margin_put(strike: float, spot: float, premium_usd: float, margin_ratio: float = 0.2) -> float:
-        """
-        修正后的 Put 保证金计算
-        基于：最大潜在亏损 * 风险系数
-        """
-        # 计算最大潜在亏损 (假设价格跌到0)
-        max_loss = strike - premium_usd
-        
-        # 基础保证金 = 最大亏损 * 保证金比例
-        base_margin = max_loss * margin_ratio
-        
-        # 最小保证金要求 = 行权价 * 10%
-        min_margin = strike * 0.1
-        
-        # 取较大值，确保保证金为正数
-        return max(min_margin, base_margin)
+        """Put 保证金计算（委托给统一实现）"""
+        from services.margin_calculator import calc_margin_put
+        return calc_margin_put(strike, premium_usd, margin_ratio)
 
     @staticmethod
     def calc_margin_call(strike: float, spot: float, premium_usd: float, margin_ratio: float = 0.2) -> float:
-        """
-        修正后的 Call 保证金计算
-        """
-        # Call 的最大亏损理论上无限，使用行权价作为基准
-        base_margin = strike * margin_ratio - premium_usd
-        
-        # 最小保证金要求
-        min_margin = strike * 0.1
-        
-        # 确保为正数
-        return max(min_margin, base_margin)
+        """Call 保证金计算（委托给统一实现）"""
+        from services.margin_calculator import calc_margin_call
+        return calc_margin_call(strike, premium_usd, margin_ratio)
 
     @staticmethod
     def calc_breakeven_pct(strike: float, premium_usd: float, option_type: str, spot: float) -> float:

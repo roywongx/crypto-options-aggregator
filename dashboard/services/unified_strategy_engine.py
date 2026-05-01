@@ -269,11 +269,9 @@ class UnifiedStrategyEngine:
         }
 
     def _calculate_margin(self, strike: float, premium: float, option_type: str, margin_ratio: float) -> float:
-        """计算保证金要求"""
-        if option_type.upper() == "PUT":
-            return strike * margin_ratio
-        else:
-            return premium * 10
+        """计算保证金要求（委托给统一实现）"""
+        from services.margin_calculator import calc_margin
+        return calc_margin(strike, premium, option_type, margin_ratio)
 
     def recommend_roll(
         self,

@@ -1,7 +1,28 @@
-"""模拟盘交易 API"""
+"""模拟盘交易 API
+
+修复 H-5: 添加 Pydantic 输入约束 (gt=0 等)
+"""
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/paper", tags=["paper_trading"])
+
+
+class PaperOpenRequest(BaseModel):
+    currency: str = "BTC"
+    option_type: str = "PUT"
+    strike: float = Field(gt=0)
+    qty: float = Field(gt=0)
+    premium: float = Field(gt=0)
+    expiry: str = ""
+    margin_ratio: float = Field(default=0.2, gt=0, le=1.0)
+    notes: str = ""
+
+
+class PaperCloseRequest(BaseModel):
+    position_id: int = Field(gt=0)
+    close_premium: float = Field(gt=0)
+    notes: str = ""
 
 
 @router.get("/portfolio")
@@ -19,26 +40,20 @@ async def get_paper_trades(currency: str = "BTC", limit: int = 50):
 
 
 @router.post("/open")
-async def paper_open(
-    currency: str = "BTC",
-    option_type: str = "PUT",
-    strike: float = 55000,
-    qty: float = 1,
-    premium: float = 1000,
-    expiry: str = "",
-    margin_ratio: float = 0.2,
-    notes: str = ""
-):
+async def paper_open(req: PaperOpenRequest):
     """模拟开仓"""
     from services.paper_trading import paper_open_position
-    return paper_open_position(currency, option_type, strike, qty, premium, expiry, margin_ratio, notes)
+    return paper_open_position(
+        req.currency, req.option_type, req.strike, req.qty,
+        req.premium, req.expiry, req.margin_ratio, req.notes
+    )
 
 
 @router.post("/close")
-async def paper_close(position_id: int, close_premium: float, notes: str = ""):
+async def paper_close(req: PaperCloseRequest):
     """模拟平仓"""
     from services.paper_trading import paper_close_position
-    return paper_close_position(position_id, close_premium, notes)
+    return paper_close_position(req.position_id, req.close_premium, req.notes)
 
 
 @router.get("/roll-suggestion")

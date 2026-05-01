@@ -76,8 +76,8 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
         return _dvol_cache.get("data", {})
     
     try:
-        from main import _get_deribit_monitor
-        mon = _get_deribit_monitor()
+        from services.deribit_monitor import get_deribit_monitor
+        mon = get_deribit_monitor()
         result = mon.get_dvol_signal(currency)
         if not result:
             return {}

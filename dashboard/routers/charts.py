@@ -126,7 +126,8 @@ async def get_vol_surface(currency: str = "BTC"):
         spot = get_spot_price(currency)
     except (RuntimeError, ValueError) as e:
         logger.warning("Vol surface spot price failed: %s, using fallback", e)
-        spot = 70000 if currency == "BTC" else 3000
+        from constants import get_spot_fallback
+        spot = get_spot_fallback(currency)
 
     # 优先从数据库获取最近的 scan_records 中的合约数据
     try:
