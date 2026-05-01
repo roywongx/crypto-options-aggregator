@@ -1,7 +1,7 @@
 # Database Maintenance
 import sqlite3
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ def get_db_maintenance_stats(conn: sqlite3.Connection) -> dict:
 def cleanup_old_records(conn: sqlite3.Connection, days: int = 30) -> dict:
     """清理指定天数之前的旧记录"""
     cursor = conn.cursor()
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     cursor.execute("DELETE FROM scan_records WHERE timestamp < ?", (cutoff_date,))
     scans_deleted = cursor.rowcount

@@ -12,7 +12,7 @@ import math
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 from services.shared_calculations import (
     calc_grid_score, score_to_recommendation_level,
@@ -512,7 +512,7 @@ class UnifiedStrategyEngine:
         return {
             "currency": params.currency,
             "spot_price": spot,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "put_levels": put_recs,
             "call_levels": call_recs,
             "dvol_signal": vol_signal.signal,

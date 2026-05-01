@@ -37,6 +37,8 @@ async def health_check():
     
     # 检查后台扫描状态
     try:
+        conn = get_db_connection(read_only=True)
+        cursor = conn.cursor()
         cursor.execute("SELECT MAX(timestamp) FROM scan_records")
         row = cursor.fetchone()
         if row and row[0]:

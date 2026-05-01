@@ -1,5 +1,5 @@
 """DataHub & EventBus API"""
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api", tags=["datahub"])
@@ -28,7 +28,7 @@ async def get_datahub_status():
             "btc_count": len(options_snapshot) if options_snapshot else 0,
             "age_seconds": round(datahub.get_snapshot_age(TOPIC_BTC_OPTIONS), 1)
         },
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -83,7 +83,7 @@ async def get_eventbus_snapshot():
     from services.event_bus import event_bus
     return {
         "snapshots": event_bus.get_all_snapshots(),
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 

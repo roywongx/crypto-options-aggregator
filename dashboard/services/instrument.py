@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def _parse_inst_name(inst: str) -> Optional[InstrumentInfo]:
     currency, expiry_str, strike_str, opt_type = m.groups()
     try:
         exp_date = datetime.strptime(expiry_str, '%d%b%y')
-        dte = max(1, (exp_date - datetime.utcnow()).days)
+        dte = max(1, (exp_date - datetime.now(timezone.utc)).days)
     except (ValueError, TypeError):
         logger.debug("DTE parse fallback for %s", expiry_str)
         dte = 30

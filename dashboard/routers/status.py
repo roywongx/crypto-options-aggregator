@@ -2,7 +2,7 @@
 import json
 import logging
 from fastapi import APIRouter, Query, HTTPException
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import sqlite3
 import httpx
 import os
@@ -27,7 +27,7 @@ async def get_stats():
         from db.connection import execute_read
         rows = execute_read("SELECT COUNT(*) FROM scan_records")
         total_scans = rows[0][0] if rows else 0
-        _today = datetime.utcnow().strftime('%Y-%m-%d')
+        _today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         rows = execute_read("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (_today,))
         today_scans = rows[0][0] if rows else 0
         rows = execute_read("SELECT COUNT(*) FROM large_trades_history")

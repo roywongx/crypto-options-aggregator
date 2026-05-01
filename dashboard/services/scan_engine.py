@@ -8,7 +8,7 @@ import sys
 import json
 import sqlite3
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any
 
@@ -34,7 +34,7 @@ def get_db_connection(read_only: bool = True):
 
 def save_scan_record(data: Dict[str, Any]):
     """保存扫描记录到数据库（使用 execute_transaction 保证 _write_lock 和原子性）"""
-    now_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
     contracts = data.get('contracts', [])
     currency = data.get('currency', 'BTC')
@@ -78,7 +78,7 @@ def save_scan_record(data: Dict[str, Any]):
             )))
 
     # 3. 清理过期数据
-    _cutoff = (datetime.utcnow() - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
+    _cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
     stmts.append(("DELETE FROM scan_records WHERE timestamp < ?", (_cutoff,)))
     stmts.append(("DELETE FROM large_trades_history WHERE timestamp < ?", (_cutoff,)))
 
@@ -199,7 +199,7 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         parsed['success'] = True
         if spot_price:
             parsed['spot_price'] = spot_price
-        if dvol_data.get('current'):
+        if isinstance(dvol_data, dict) and dvol_data.get('current'):
             parsed['dvol_current'] = dvol_data['current']
             parsed['dvol_z_score'] = dvol_data['z_score']
             parsed['dvol_signal'] = dvol_data['signal']
@@ -227,7 +227,7 @@ async def quick_scan(params: QuickScanParams = None):
     """
     快速扫描（DataHub 优化版）
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     _p = params or QuickScanParams()
     currency = _p.currency
 
@@ -524,7 +524,7 @@ async def quick_scan(params: QuickScanParams = None):
         if i < len(binance_list): contracts.append(binance_list[i])
 
     large_trades_count = len(large_trades)
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # 使用 execute_transaction 保证 _write_lock 和原子性
     _raw_out = json.dumps({

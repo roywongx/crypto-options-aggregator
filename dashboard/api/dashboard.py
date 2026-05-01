@@ -1,7 +1,7 @@
 """仪表盘聚合 API"""
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Query
 
 from services.spot_price import get_spot_price
@@ -52,7 +52,7 @@ async def dashboard_init(currency: str = Query(default="BTC")):
         "derivative_metrics": derivative_data,
         "pressure_test": pressure_test_data,
         "ai_sentiment": ai_sentiment_data,
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     }
 
 
@@ -106,7 +106,7 @@ def _fetch_ai_sentiment(currency: str):
         from db.connection import execute_read
         
         # 获取最近的大宗交易数据
-        since = datetime.utcnow() - timedelta(days=7)
+        since = datetime.now(timezone.utc) - timedelta(days=7)
         since_str = since.strftime('%Y-%m-%d %H:%M:%S')
         rows = execute_read("""
             SELECT direction, option_type, strike, volume, delta, notional_usd, timestamp

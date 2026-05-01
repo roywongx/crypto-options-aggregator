@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Query
 
 logger = logging.getLogger(__name__)
@@ -37,12 +37,12 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
     nearest_exp = min(by_expiry.keys(), key=lambda e: by_expiry[e]["dte"])
     ne = by_expiry[nearest_exp]
     current_pcr = ne["put_oi"] / ne["call_oi"] if ne["call_oi"] > 0 else 0
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     if hours <= 24:
         return [{"time": now, "pcr": round(current_pcr, 3), "puts": round(ne["put_oi"], 0), "calls": round(ne["call_oi"], 0)}]
 
-    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
     rows = execute_read("""
         SELECT timestamp, large_trades_details, spot_price FROM scan_records
         WHERE currency = ? AND timestamp >= ? AND large_trades_details IS NOT NULL AND large_trades_details != ''
@@ -88,7 +88,7 @@ async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
     from db.connection import execute_read
     from services.dvol_analyzer import get_dvol_from_deribit
 
-    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
     rows = execute_read("""
         SELECT timestamp, dvol_current FROM scan_records
         WHERE currency = ? AND timestamp >= ? AND dvol_current IS NOT NULL
@@ -108,7 +108,7 @@ async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
         try:
             dvol_data = get_dvol_from_deribit(currency)
             if dvol_data and dvol_data.get("current"):
-                now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 result.append({"time": now, "dvol": dvol_data["current"]})
         except (RuntimeError, ConnectionError, TimeoutError) as e:
             logger.debug("DVOL fallback failed: %s", e)

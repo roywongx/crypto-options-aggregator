@@ -2,7 +2,7 @@
 大单交易获取服务 - 从 scan_engine.py 提取，消除 async/sync 双版本重复代码
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from db.connection import get_db_connection
 
@@ -13,7 +13,7 @@ MIN_NOTIONAL = 100000
 
 def _build_large_trades_query(currency: str, days: int, limit: int):
     """构建大单查询 SQL 和参数"""
-    since = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     sql = """
         SELECT instrument_name, direction, notional_usd, volume, strike,
                option_type, flow_label, delta, premium_usd, severity

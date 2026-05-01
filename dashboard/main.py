@@ -101,14 +101,12 @@ def init_database():
 
 from services.scan_engine import run_options_scan, quick_scan, save_scan_record
 
-from config import config
 SCAN_INTERVAL_SECONDS = config.SCAN_INTERVAL_SECONDS
 AUTO_SCAN_ENABLED = True
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global logger
     init_database()
 
     # 初始化模拟盘数据库（只执行一次）
@@ -132,8 +130,6 @@ async def lifespan(app: FastAPI):
 
     # 启动后台定时扫描任务
     if AUTO_SCAN_ENABLED:
-        import logging
-        logger = logging.getLogger(__name__)
 
         async def background_scan():
             logger.info("启动后台定时扫描任务，间隔 %d 秒", SCAN_INTERVAL_SECONDS)

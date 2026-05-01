@@ -100,7 +100,7 @@ class DerivativeMetrics:
             
             return sharpe_7d, sharpe_30d
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning(f"Sharpe Ratio计算失败: {e}")
+            logger.warning("Sharpe Ratio计算失败: {e}")
         
         return None, None
     
@@ -182,7 +182,7 @@ class DerivativeMetrics:
             
             return funding_rate, signal
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning(f"资金费率获取失败: {e}")
+            logger.warning("资金费率获取失败: {e}")
         
         return None, None
     
@@ -238,7 +238,7 @@ class DerivativeMetrics:
             
             return round(ratio, 2), signal
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning(f"期货/现货比率获取失败: {e}")
+            logger.warning("期货/现货比率获取失败: {e}")
         
         return None, None
     

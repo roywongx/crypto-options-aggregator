@@ -4,16 +4,21 @@ Grid Manager - 网格持仓管理服务
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 from db.connection import execute_read, execute_write, execute_transaction
 
 logger = logging.getLogger(__name__)
 
+_grid_table_initialized = False
+
 
 def _ensure_grid_table():
     """确保 grid_positions 表存在"""
+    global _grid_table_initialized
+    if _grid_table_initialized:
+        return
     try:
         execute_write("""
             CREATE TABLE IF NOT EXISTS grid_positions (
@@ -39,6 +44,7 @@ def _ensure_grid_table():
             CREATE INDEX IF NOT EXISTS idx_grid_currency_status 
             ON grid_positions(currency, status)
         """)
+        _grid_table_initialized = True
     except (RuntimeError, ValueError, TypeError) as e:
         logger.warning("Grid table init failed: %s", e)
 
@@ -127,7 +133,7 @@ class GridManager:
         if not detail:
             return {"error": "网格持仓不存在"}
 
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         execute_write("""
             UPDATE grid_positions 
             SET strike = ?, expiry = ?, updated_at = ?, notes = ?
@@ -151,7 +157,7 @@ class GridManager:
         if detail["status"] != "active":
             return {"error": f"网格已处于 {detail['status']} 状态"}
 
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         execute_write("""
             UPDATE grid_positions
             SET status = 'closed', closed_at = ?, close_reason = ?, updated_at = ?
@@ -171,7 +177,7 @@ class GridManager:
         total_capital: float = 0, config: dict = None
     ) -> Dict[str, Any]:
         """创建网格持仓"""
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         config_json = json.dumps(config or {}, ensure_ascii=False)
 
         row_id = execute_write("""

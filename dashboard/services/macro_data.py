@@ -8,7 +8,7 @@
 import logging
 import httpx
 from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from services.http_client import http_get
 
@@ -253,7 +253,7 @@ def get_all_macro_data() -> Dict[str, Any]:
         "macro": get_macro_data(),
         "funding_rate": get_funding_rate(),
         "risk_free_rate": get_risk_free_rate(),
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     }
     
     # 综合风险判断

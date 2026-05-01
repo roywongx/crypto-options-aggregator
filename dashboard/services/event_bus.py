@@ -13,7 +13,7 @@ import time
 from typing import Dict, List, Callable, Any, Optional, Set
 from enum import Enum
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,7 @@ class EventBus:
                     if spot:
                         await self.publish(
                             EventType.SPOT_PRICE,
-                            {"currency": currency, "price": spot, "timestamp": datetime.utcnow().isoformat()},
+                            {"currency": currency, "price": spot, "timestamp": datetime.now(timezone.utc).isoformat()},
                             source="spot_price_service"
                         )
                 await asyncio.sleep(3)
@@ -223,7 +223,7 @@ class EventBus:
                     if dvol:
                         await self.publish(
                             EventType.DVOL,
-                            {"currency": currency, "dvol": dvol, "timestamp": datetime.utcnow().isoformat()},
+                            {"currency": currency, "dvol": dvol, "timestamp": datetime.now(timezone.utc).isoformat()},
                             source="dvol_service"
                         )
                 await asyncio.sleep(30)
@@ -243,7 +243,7 @@ class EventBus:
                             {
                                 "currency": currency,
                                 "rate": fr["current_rate"],
-                                "timestamp": datetime.utcnow().isoformat()
+                                "timestamp": datetime.now(timezone.utc).isoformat()
                             },
                             source="funding_rate_service"
                         )

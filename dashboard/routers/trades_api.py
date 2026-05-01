@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, Query
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/trades", tags=["trades"])
@@ -14,7 +14,7 @@ async def get_trades_history(
 ):
     from db.connection import execute_read
 
-    since_str = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    since_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
     query = "SELECT * FROM large_trades_history WHERE timestamp > ?"
     params = [since_str]
@@ -43,7 +43,7 @@ async def get_strike_distribution(
 ):
     from db.connection import execute_read
 
-    since_str = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    since_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
     rows = execute_read("""
         SELECT strike, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
@@ -65,7 +65,7 @@ async def get_wind_analysis(
     from services.risk_framework import RiskFramework
     from db.connection import execute_read
 
-    since_str = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    since_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
     grouped = execute_read("""
         SELECT direction, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count

@@ -1,6 +1,6 @@
 import math
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from models.grid import (
     GridLevel, GridRecommendation, GridScenario,
     GridDirection, RecommendationLevel, VolDirectionSignal
@@ -293,7 +293,7 @@ def recommend_grid(
     return GridRecommendation(
         currency=currency,
         spot_price=spot_price,
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(timezone.utc).isoformat(),
         put_levels=put_levels,
         call_levels=call_levels,
         dvol_signal=vol_signal.signal,

@@ -153,8 +153,9 @@ async def export_csv(currency: str = Query(default="BTC"), hours: int = Query(de
     """导出 CSV"""
     rows = execute_read("""
         SELECT contracts_data FROM scan_records
-        WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
-    """, (currency,))
+        WHERE currency = ? AND timestamp > datetime('now', ? || ' hours')
+        ORDER BY timestamp DESC
+    """, (currency, str(-hours)))
     
     if not rows or not rows[0][0]:
         return JSONResponse(content={"error": "No data available"}, status_code=404)

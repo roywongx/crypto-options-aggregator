@@ -123,7 +123,7 @@ def get_risk_overview_sync(currency: str = "BTC"):
     from services.pressure_test import PressureTestEngine
     from services.ai_sentiment import AISentimentAnalyzer
     from db.connection import execute_read
-    from datetime import datetime, timedelta
+    from datetime import datetime, timezone, timedelta
 
     spot = get_spot_price(currency)
     status = RiskFramework.get_status(spot)
@@ -235,7 +235,7 @@ def get_risk_overview_sync(currency: str = "BTC"):
 
     # 获取 AI 情绪分析数据
     try:
-        since = datetime.utcnow() - timedelta(days=7)
+        since = datetime.now(timezone.utc) - timedelta(days=7)
         since_str = since.strftime('%Y-%m-%d %H:%M:%S')
         rows = execute_read("""
             SELECT direction, option_type, strike, volume, delta, notional_usd, timestamp

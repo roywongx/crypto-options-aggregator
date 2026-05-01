@@ -37,7 +37,7 @@ class DynamicSupportCalculator:
                 "timestamp": datetime.now().isoformat()
             }
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.error(f"计算动态支撑位失败: {e}")
+            logger.error("计算动态支撑位失败: {e}")
             fallback = get_spot_fallback(self.currency)
             return {
                 "regular": fallback * 0.75,
@@ -52,7 +52,7 @@ class DynamicSupportCalculator:
         try:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
-                params={"symbol": "BTCUSDT", "interval": "1d", "limit": 200},
+                params={"symbol": f"{self.currency}USDT", "interval": "1d", "limit": 200},
                 timeout=10, verify=True, max_retries=3
             )
             klines = resp.json()
@@ -60,7 +60,7 @@ class DynamicSupportCalculator:
             if closes:
                 return sum(closes) / len(closes)
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning(f"获取200日均线失败: {e}")
+            logger.warning("获取200日均线失败: %s", e)
 
         fallback = get_spot_fallback(self.currency)
         return fallback * 0.85
@@ -70,7 +70,7 @@ class DynamicSupportCalculator:
         try:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
-                params={"symbol": "BTCUSDT", "interval": "1d", "limit": 90},
+                params={"symbol": f"{self.currency}USDT", "interval": "1d", "limit": 90},
                 timeout=10, verify=True, max_retries=3
             )
             klines = resp.json()
@@ -90,7 +90,7 @@ class DynamicSupportCalculator:
                     "low": low
                 }
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning(f"计算斐波那契回撤位失败: {e}")
+            logger.warning("计算斐波那契回撤位失败: {e}")
 
         spot = get_spot_fallback(self.currency)
         high, low = spot * 1.15, spot * 0.65
@@ -134,7 +134,7 @@ class DynamicSupportCalculator:
                         realized = price / mvrv
                         return round(realized, 2)
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.warning(f"获取链上价格失败: {e}")
+            logger.warning("获取链上价格失败: {e}")
 
         fallback = get_spot_fallback(self.currency)
         return fallback * 0.5  # Realized Price 通常远低于现价

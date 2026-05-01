@@ -3,14 +3,16 @@ import httpx
 import sys
 import math
 import logging
+import threading
 from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from services.http_client import http_get
 
 logger = logging.getLogger(__name__)
 
-# 缓存机制
+# 缓存机制 (线程安全)
+_dvol_lock = threading.Lock()
 _dvol_cache = {}
 _dvol_cache_time = None
 _dvol_cache_ttl = 300  # 5分钟缓存
@@ -68,12 +70,13 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
     """从 Deribit 获取 DVOL 数据（带5分钟缓存）"""
     global _dvol_cache, _dvol_cache_time
     
-    # 检查缓存
-    now = datetime.now()
-    if (_dvol_cache_time and 
-        (now - _dvol_cache_time).total_seconds() < _dvol_cache_ttl and
-        _dvol_cache.get("currency") == currency):
-        return _dvol_cache.get("data", {})
+    # 检查缓存 (线程安全)
+    with _dvol_lock:
+        now = datetime.now()
+        if (_dvol_cache_time and 
+            (now - _dvol_cache_time).total_seconds() < _dvol_cache_ttl and
+            _dvol_cache.get("currency") == currency):
+            return _dvol_cache.get("data", {})
     
     try:
         from services.instrument import _get_deribit_monitor
@@ -93,12 +96,13 @@ def get_dvol_from_deribit(currency: str = "BTC") -> Dict[str, Any]:
             "data_points": result.get("history_points", 0),
             "percentile_7d": result.get("iv_percentile_7d", 50.0),
         }
-        # 更新缓存
-        _dvol_cache = {"currency": currency, "data": data}
-        _dvol_cache_time = now
+        # 更新缓存 (线程安全)
+        with _dvol_lock:
+            _dvol_cache = {"currency": currency, "data": data}
+            _dvol_cache_time = now
         return data
     except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-        logger.warning(f"获取DVOL失败(高级版): {e}, 回退简单版")
+        logger.warning("获取DVOL失败(高级版): %s, 回退简单版", e)
         return _get_dvol_simple_fallback(currency)
 
 def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
@@ -107,8 +111,8 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
         from config import config
         base_params = {
             "currency": currency,
-            "start_timestamp": int((datetime.utcnow() - timedelta(days=7)).timestamp() * 1000),
-            "end_timestamp": int(datetime.utcnow().timestamp() * 1000)
+            "start_timestamp": int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp() * 1000),
+            "end_timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)
         }
         response = http_get(
             "https://www.deribit.com/api/v2/public/get_volatility_index_data",
@@ -143,7 +147,7 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
                 }
         return {}
     except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-        logger.warning(f"获取DVOL失败(简单版): {e}")
+        logger.warning("获取DVOL失败(简单版): {e}")
         return {}
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:

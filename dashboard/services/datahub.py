@@ -12,7 +12,7 @@ import logging
 import time
 import websockets
 from typing import Dict, Any, Optional, List, Set
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,7 @@ class DeribitWSConnector:
                 "best_ask": float(tick_data.get("best_ask_amount", 0)),
                 "volume": float(tick_data.get("stats", {}).get("volume", 0)),
                 "open_interest": float(tick_data.get("open_interest", 0)),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
             if "ticker" in channel:
@@ -211,7 +211,7 @@ class DeribitWSConnector:
                 spot_data = {
                     "currency": currency,
                     "price": float(tick_data.get("last_price", 0)),
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 await self._hub.publish(TOPIC_SPOT, currency, spot_data)
 
@@ -282,7 +282,7 @@ class BinanceWSConnector:
             "symbol": symbol,
             "mark_price": mark_price,
             "iv": iv,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
         topic = TOPIC_BTC_OPTIONS if currency == "BTC" else TOPIC_ETH_OPTIONS
@@ -331,7 +331,7 @@ class DvolCalculator:
             {
                 "currency": "BTC",
                 "current": round(dvol, 2),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "sample_count": len(iv_values)
             }
         )

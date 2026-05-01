@@ -46,7 +46,7 @@ class OnChainMetrics:
                 cls._cache_time = datetime.now()
                 return metrics
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.error(f"获取链上指标失败: {e}")
+            logger.error("获取链上指标失败: {e}")
         
         return cls._cache if cls._cache else cls._get_fallback_data()
     
@@ -176,7 +176,7 @@ class OnChainMetrics:
             elif "value" in data:
                 return float(data["value"])
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning(f"MVRV获取失败: {e}")
+            logger.warning("MVRV获取失败: {e}")
         
         return None
     
@@ -200,7 +200,7 @@ class OnChainMetrics:
             elif "value" in data:
                 return float(data["value"])
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning(f"Balanced Price获取失败: {e}")
+            logger.warning("Balanced Price获取失败: {e}")
         
         return None
     
@@ -224,7 +224,7 @@ class OnChainMetrics:
                 ratio = current_price / wma_200 if wma_200 else None
                 return wma_200, ratio
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.warning(f"200WMA计算失败: {e}")
+            logger.warning("200WMA计算失败: {e}")
         
         return None, None
     
@@ -242,7 +242,7 @@ class OnChainMetrics:
             days_remaining = int(blocks_remaining * 10 / (60 * 24))
             return max(0, days_remaining)
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning(f"减半倒计时失败: {e}")
+            logger.warning("减半倒计时失败: {e}")
         
         # 估算
         from datetime import datetime
@@ -314,7 +314,7 @@ class OnChainMetrics:
             
             return round(puell, 2), signal
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning(f"Puell Multiple计算失败: {e}")
+            logger.warning("Puell Multiple计算失败: {e}")
         
         return None, None
     
@@ -394,7 +394,7 @@ class OnChainMetrics:
                 mayer = current_price / dma_200 if dma_200 > 0 else None
                 return dma_200, round(mayer, 3) if mayer else None
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning(f"200DMA/Mayer计算失败: {e}")
+            logger.warning("200DMA/Mayer计算失败: {e}")
         
         return None, None
     
@@ -415,7 +415,7 @@ class OnChainMetrics:
             elif "values" in data and data["values"]:
                 return [float(item.get("value", 0)) for item in data["values"] if item.get("value")]
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning(f"MVRV历史获取失败: {e}")
+            logger.warning("MVRV历史获取失败: {e}")
         
         return []
     
@@ -511,7 +511,7 @@ class OnChainMetrics:
             }
             
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning(f"MVRV Z-Score计算失败: {e}")
+            logger.warning("MVRV Z-Score计算失败: {e}")
         
         return result
     
@@ -534,7 +534,7 @@ class OnChainMetrics:
             nupl = (mvrv - 1) / mvrv
             return round(nupl, 3)
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning(f"NUPL计算失败: {e}")
+            logger.warning("NUPL计算失败: {e}")
             return None
     
     @classmethod

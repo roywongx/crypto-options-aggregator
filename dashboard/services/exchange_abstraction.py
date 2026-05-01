@@ -11,7 +11,7 @@ import httpx
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +81,16 @@ class OptionContract:
     @property
     def dte(self) -> int:
         """计算到期天数"""
-        from datetime import datetime
+        from datetime import datetime, timezone
         try:
             # 尝试解析 Deribit 格式: 15MAY26
             exp_date = datetime.strptime(self.expiry, '%d%b%y')
-            return max(1, (exp_date - datetime.utcnow()).days)
+            return max(1, (exp_date - datetime.now(timezone.utc)).days)
         except (ValueError, TypeError):
             try:
                 # 尝试解析标准格式: 2025-06-27
                 exp_date = datetime.strptime(self.expiry, '%Y-%m-%d')
-                return max(1, (exp_date - datetime.utcnow()).days)
+                return max(1, (exp_date - datetime.now(timezone.utc)).days)
             except (ValueError, TypeError):
                 return 30
 
@@ -294,7 +294,7 @@ class BinanceExchange(BaseExchange):
             return []
 
         contracts = []
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for r in results:
             contracts.append(OptionContract(
                 symbol=r["symbol"],
@@ -372,7 +372,7 @@ class BinanceExchange(BaseExchange):
 
     def _calculate_expiry(self, dte: float) -> str:
         from datetime import timedelta
-        expiry = datetime.utcnow() + timedelta(days=dte)
+        expiry = datetime.now(timezone.utc) + timedelta(days=dte)
         return expiry.strftime("%Y-%m-%d")
 
 
@@ -581,7 +581,7 @@ class ExchangeRegistry:
                 )
                 summary[ex_type.value] = [c.to_dict() for c in chain]
             except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-                logger.error(f"{ex_type.value} chain error: {str(e)}")
+                logger.error("{ex_type.value} chain error: {str(e)}")
                 summary[ex_type.value] = []
         return summary
 

@@ -10,11 +10,13 @@ Paper Trading Engine - 连续模拟盘引擎
 """
 import json
 import logging
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from db.connection import execute_read, execute_write, execute_transaction
 from services.spot_price import get_spot_price
 from services.quant_engine import bs_put_price, bs_call_price, bs_delta
+from services.margin_calculator import calc_margin
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +123,7 @@ def paper_open_position(
             return {"error": "账户未初始化"}
 
         premium_total = premium * qty
-        margin_required = strike * qty * margin_ratio
+        margin_required = calc_margin(option_type, strike, premium, qty, currency=currency)
 
         # 计算已占用保证金（open positions）
         locked_margin = _get_locked_margin()
@@ -169,7 +171,7 @@ def paper_open_position(
             "margin_required": margin_required,
             "locked_margin": locked_margin + margin_required,
             "new_cash": new_cash,
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         }
 
     except (sqlite3.Error, sqlite3.OperationalError, RuntimeError) as e:
@@ -243,7 +245,7 @@ def paper_close_position(
             "position_id": position_id,
             "pnl": pnl,
             "new_cash": new_cash,
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         }
 
     except (sqlite3.Error, sqlite3.OperationalError, RuntimeError) as e:
@@ -313,7 +315,7 @@ def get_portfolio_summary(currency: str = "BTC") -> Dict[str, Any]:
         "spot_price": spot,
         "positions_count": len(positions),
         "positions": position_details,
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     }
 
 
@@ -452,7 +454,7 @@ def _estimate_current_premium(pos: Dict, spot: float) -> float:
     # 简化时间衰减: 假设每天衰减 2%
     try:
         entry_date = datetime.strptime(pos["timestamp"], "%Y-%m-%d %H:%M:%S")
-        days_held = (datetime.utcnow() - entry_date).days
+        days_held = (datetime.now(timezone.utc) - entry_date).days
     except (ValueError, TypeError, KeyError) as e:
         logger.debug("Time decay calc fallback: %s", e)
         days_held = 1
@@ -468,7 +470,7 @@ def _get_dte(expiry: str) -> int:
         return 30  # 默认
     try:
         exp_date = datetime.strptime(expiry, "%Y-%m-%d")
-        return max(0, (exp_date - datetime.utcnow()).days)
+        return max(0, (exp_date - datetime.now(timezone.utc)).days)
     except (ValueError, TypeError) as e:
         logger.debug("DTE parse fallback for %s: %s", expiry, e)
         return 30

@@ -8,7 +8,7 @@ MCP Server - 模型上下文协议服务器
 import logging
 import inspect
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ class MCPToolRegistry:
             result["funding_rate_error"] = str(e)
         
         result["currency"] = currency
-        result["timestamp"] = datetime.utcnow().isoformat()
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
         return result
     
     async def _calculate_greeks(self, params: Dict) -> Dict:
@@ -196,7 +196,7 @@ class MCPToolRegistry:
             result["error"] = str(e)
         
         result["currency"] = currency
-        result["timestamp"] = datetime.utcnow().isoformat()
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
         return result
     
     async def _get_highest_apr_put(self, params: Dict) -> Dict:

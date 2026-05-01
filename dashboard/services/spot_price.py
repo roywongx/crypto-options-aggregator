@@ -216,7 +216,7 @@ def get_spot_price(currency: str = "BTC", source: str = "auto") -> float:
                 with _cache_lock:
                     _spot_cache[currency] = (spot, now)
                 return spot
-        except (ImportError, Exception) as e:
+        except (ImportError, RuntimeError, ValueError, TimeoutError, ConnectionError) as e:
             logger.warning("CCXT failed for %s: %s", currency, e)
 
     # 最后 fallback

@@ -10,14 +10,14 @@ async def refresh_dvol(currency: str = Query(default="BTC")):
     from services.dvol_analyzer import get_dvol_from_deribit
     from db.connection import execute_write
     import json
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     dvol_data = get_dvol_from_deribit(currency)
     execute_write("""
         INSERT INTO dvol_history (timestamp, currency, current, z_score, signal, trend)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (
-        datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+        datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
         currency,
         dvol_data.get('current', 0),
         dvol_data.get('z_score', 0),
