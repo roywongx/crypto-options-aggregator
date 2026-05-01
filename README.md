@@ -340,6 +340,7 @@ python test_e2e.py
 - **IV 单位标准化**: `vol-surface` API 自动检测并统一 IV 单位（小数 0.42 → 百分比 42%）
 - **SQLite 兼容性**: 修复 `ALTER TABLE ADD COLUMN IF NOT EXISTS` 语法错误（SQLite 不支持），改用 try/except 处理重复列
 - **生命周期修复**: 修复 `lifespan` 中 `UnboundLocalError: logger` 错误，确保服务正常启动
+- **DVOL 异常值过滤**: 修复 DVOL 趋势图表中异常值 50 的显示问题，增加 `d.dvol < 49` 过滤条件
 
 #### 依赖更新
 - `requirements.txt`: 移除 `requests`，统一使用 `httpx>=0.27.0`
