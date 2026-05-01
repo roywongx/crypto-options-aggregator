@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v5.3-Production%20Ready-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v5.4-Production%20Ready-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator Pro</h1>
@@ -201,6 +201,19 @@ python main.py
 
 浏览器打开 → **http://localhost:8000**
 
+### AI Co-Pilot 配置（可选）
+
+系统内置 AI 交易助手，支持任意 OpenAI 兼容 API：
+
+1. 点击右下角 **🤖 AI 交易助手** → **⚙️ 设置按钮**
+2. 填写您的 API 信息：
+   - **API Key**: 您的 OpenAI / DeepSeek / Claude / 小米米莫 等 API Key
+   - **Base URL** (可选): 自定义 API 地址，如 `https://token-plan-sgp.xiaomimimo.com/v1`
+   - **模型**: 模型名称，如 `gpt-4o-mini`、`deepseek-chat`、`mimo-v2.5-pro`
+3. 点击保存，立即开始对话
+
+> 💡 **提示**: 配置会自动保存到浏览器本地存储，刷新页面后无需重新输入。
+
 ### Docker 部署 (待实现)
 
 > ⚠️ Dockerfile 尚未创建，以下命令待后续补充。
@@ -221,7 +234,7 @@ python main.py
 | **大宗异动** | 实时追踪大额成交，机构行为分析 | 流分类器，自动识别多空意图 |
 | **策略引擎** | Roll / New / Grid 三种模式 | 异步计算，支持复杂滚仓逻辑 |
 | **Paper Trading** | 连续模拟盘，5 万 U 虚拟本金 | SQLite 持久化，实时 UPnL，保证金冻结 |
-| **AI Co-Pilot** | 内嵌智能投顾，实时对话 | 自动注入市场上下文，多模型路由 |
+| **AI Co-Pilot** | 内嵌智能投顾，实时对话 | 自动注入市场上下文，多模型路由，支持自定义 API Key |
 | **MCP Server** | 8 个工具，外部 AI 直连 | 自主决策，AI 可直接调用本地数据 |
 | **风险框架** | 价格/波动率/情绪/流动性四维评估 | 并行计算，综合风险评分 |
 
@@ -332,7 +345,23 @@ python -m pytest tests/test_core.py -v
 
 ## 📝 更新日志
 
-### v5.3 — 架构债务清理与 HTTP 库统一（当前）
+### v5.4 — AI 配置增强与交互优化（当前）
+
+#### AI Co-Pilot 增强
+- **自定义 API Key 支持**: 前端新增 AI 配置面板，支持输入任意 OpenAI 兼容 API Key（OpenAI / DeepSeek / Claude / Gemini / 小米米莫等）
+- **自定义 Base URL**: 支持自建 API 代理或第三方兼容服务
+- **自定义模型**: 从下拉选择改为自由输入 + 智能提示，支持任意模型名称
+- **配置持久化**: API 配置自动保存到 localStorage，刷新页面不丢失
+- **CORS 修复**: 添加 `X-AI-API-Key`、`X-AI-Base-URL`、`X-AI-Model` 到 CORS 允许列表，跨域预检请求不再 405
+- **异常处理完善**: 捕获 `AuthenticationError`、`BadRequestError`、`RateLimitError` 等 LiteLLM 异常，避免 500 错误
+- **模型前缀自动补全**: 自定义 API 自动添加 `openai/` 前缀，兼容更多服务商
+
+#### 前端优化
+- **AI 聊天窗口放大**: 宽度从 320px 增至 480px，高度从 320px 增至 500px
+- **字体放大**: 消息字体从 12px 增至 14px，阅读更舒适
+- **调试日志**: 前端添加 `[AI Debug]` 日志，方便排查连接问题
+
+### v5.3 — 架构债务清理与 HTTP 库统一
 
 #### 架构优化
 - **HTTP 库统一**: 全代码库从 `requests` 迁移到 `httpx`，新增 `services/http_client.py` 统一封装同步/异步客户端，复用 TCP 连接

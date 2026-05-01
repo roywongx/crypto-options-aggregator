@@ -1,6 +1,6 @@
 """AI Co-Pilot API"""
 import logging
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from fastapi.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
@@ -11,9 +11,9 @@ router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 async def copilot_chat(
     message: str,
     currency: str = "BTC",
-    x_ai_api_key: str = "",
-    x_ai_base_url: str = "",
-    x_ai_model: str = ""
+    x_ai_api_key: str = Header(default="", alias="X-AI-API-Key"),
+    x_ai_base_url: str = Header(default="", alias="X-AI-Base-URL"),
+    x_ai_model: str = Header(default="", alias="X-AI-Model")
 ):
     """
     AI Copilot 对话接口
@@ -65,10 +65,16 @@ async def copilot_chat(
     ai_config = {}
     if x_ai_api_key:
         ai_config["api_key"] = x_ai_api_key
+        logger.info("使用自定义 AI API Key (长度: %d)", len(x_ai_api_key))
     if x_ai_base_url:
         ai_config["base_url"] = x_ai_base_url
+        logger.info("使用自定义 AI Base URL: %s", x_ai_base_url)
     if x_ai_model:
         ai_config["model"] = x_ai_model
+        logger.info("使用自定义 AI 模型: %s", x_ai_model)
+
+    if not ai_config.get("api_key"):
+        logger.warning("未收到自定义 AI API Key，将尝试使用环境变量")
 
     response = await run_in_threadpool(
         ai_chat_with_config,

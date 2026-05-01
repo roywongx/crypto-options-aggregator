@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from litellm import completion
+    from litellm.exceptions import AuthenticationError, BadRequestError, RateLimitError
     LITELLM_AVAILABLE = True
 except ImportError:
     LITELLM_AVAILABLE = False
@@ -103,6 +104,9 @@ def ai_chat_with_config(
         if custom_config.get("model"):
             model = custom_config["model"]
             fallbacks = []  # 自定义模型不使用 fallback
+            # 对于自定义 OpenAI 兼容 API，如果模型名不包含 /，添加 openai/ 前缀
+            if base_url and "/" not in model:
+                model = f"openai/{model}"
     
     # 回退到环境变量
     if not api_key:
@@ -122,10 +126,12 @@ def ai_chat_with_config(
         if base_url:
             kwargs["api_base"] = base_url
         
+        logger.info("AI 请求参数: model=%s, base_url=%s, messages_count=%d", model, base_url, len(messages))
         response = completion(**kwargs)
+        logger.info("AI 响应成功: %s", response)
         return response.choices[0].message.content
 
-    except (ImportError, RuntimeError, ConnectionError, TimeoutError) as e:
+    except Exception as e:
         # 尝试 fallback（仅当未指定自定义模型时）
         if not custom_config or not custom_config.get("model"):
             for fallback_model in fallbacks:
@@ -133,11 +139,11 @@ def ai_chat_with_config(
                     kwargs["model"] = fallback_model
                     response = completion(**kwargs)
                     return response.choices[0].message.content
-                except (ImportError, RuntimeError, ConnectionError, TimeoutError) as fb_e:
+                except Exception as fb_e:
                     logger.debug("AI fallback %s failed: %s", fallback_model, fb_e)
                     continue
 
-        logger.warning("AI 回复失败 (所有模型): %s", e)
+        logger.warning("AI 回复失败 (%s): %s", type(e).__name__, e)
         return None
 
 

@@ -2372,8 +2372,8 @@ function addCopilotMessage(content, isUser = false) {
 
     const bubble = document.createElement('div');
     bubble.className = isUser
-        ? 'bg-blue-600/30 rounded-lg p-2 text-xs text-gray-200 max-w-[85%]'
-        : 'bg-gray-800/50 rounded-lg p-2 text-xs text-gray-300 max-w-[85%]';
+        ? 'bg-blue-600/30 rounded-lg p-3 text-sm text-gray-200 max-w-[90%]'
+        : 'bg-gray-800/50 rounded-lg p-3 text-sm text-gray-300 max-w-[90%]';
 
     // 安全处理：将内容按换行拆分，使用 textContent 避免 XSS
     const lines = String(content).split('\n');
@@ -2404,7 +2404,7 @@ async function sendCopilotMessage(event) {
     // 显示加载中
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'flex items-start gap-2';
-    loadingDiv.innerHTML = '<i class="fas fa-robot text-blue-400 mt-1 text-xs"></i><div class="bg-gray-800/50 rounded-lg p-2 text-xs text-gray-500 max-w-[85%]">思考中...</div>';
+    loadingDiv.innerHTML = '<i class="fas fa-robot text-blue-400 mt-1 text-sm"></i><div class="bg-gray-800/50 rounded-lg p-3 text-sm text-gray-500 max-w-[90%]">思考中...</div>';
     document.getElementById('copilotMessages').appendChild(loadingDiv);
     
     try {
@@ -2414,15 +2414,23 @@ async function sendCopilotMessage(event) {
         if (aiCfg.api_key) headers['X-AI-API-Key'] = aiCfg.api_key;
         if (aiCfg.base_url) headers['X-AI-Base-URL'] = aiCfg.base_url;
         if (aiCfg.model) headers['X-AI-Model'] = aiCfg.model;
+
+        // 调试日志
+        console.log('[AI Debug] 配置:', { hasKey: !!aiCfg.api_key, model: aiCfg.model, baseUrl: aiCfg.base_url });
+        console.log('[AI Debug] 请求 Headers:', Object.keys(headers));
+
         const response = await fetch(`${API_BASE}/api/copilot/chat?message=${encodeURIComponent(message)}&currency=${currency}`, {
             method: 'POST',
             headers: headers
         });
         const data = await response.json();
-        
+
+        // 调试日志
+        console.log('[AI Debug] 响应:', data);
+
         // 移除加载中
         loadingDiv.remove();
-        
+
         if (data.response) {
             addCopilotMessage(data.response);
         } else {
@@ -2430,6 +2438,7 @@ async function sendCopilotMessage(event) {
         }
     } catch (e) {
         loadingDiv.remove();
+        console.error('[AI Debug] 请求异常:', e);
         addCopilotMessage('请求失败，请检查网络连接。');
     }
 }
