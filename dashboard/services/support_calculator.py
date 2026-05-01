@@ -3,9 +3,11 @@
 基于Binance真实K线数据和链上数据计算动态支撑位
 """
 import httpx
+import json
 import logging
 from datetime import datetime, timedelta
 from services.api_retry import request_with_retry
+from constants import get_spot_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +38,10 @@ class DynamicSupportCalculator:
             }
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.error(f"计算动态支撑位失败: {e}")
+            fallback = get_spot_fallback(self.currency)
             return {
-                "regular": 55000.0,
-                "extreme": 45000.0,
+                "regular": fallback * 0.75,
+                "extreme": fallback * 0.55,
                 "components": {},
                 "timestamp": datetime.now().isoformat(),
                 "fallback": True
@@ -50,7 +53,7 @@ class DynamicSupportCalculator:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1d", "limit": 200},
-                timeout=10, verify=False, max_retries=3
+                timeout=10, verify=True, max_retries=3
             )
             klines = resp.json()
             closes = [float(k[4]) for k in klines]
@@ -59,7 +62,8 @@ class DynamicSupportCalculator:
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.warning(f"获取200日均线失败: {e}")
 
-        return 85000.0 if self.currency == "BTC" else 3000.0
+        fallback = get_spot_fallback(self.currency)
+        return fallback * 0.85
 
     def _get_fibonacci_levels(self) -> dict:
         """计算斐波那契回撤位 - 使用Binance真实高低点"""
@@ -67,7 +71,7 @@ class DynamicSupportCalculator:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1d", "limit": 90},
-                timeout=10, verify=False, max_retries=3
+                timeout=10, verify=True, max_retries=3
             )
             klines = resp.json()
             highs = [float(k[2]) for k in klines]
@@ -88,10 +92,8 @@ class DynamicSupportCalculator:
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning(f"计算斐波那契回撤位失败: {e}")
 
-        if self.currency == "BTC":
-            high, low = 108000, 60000  # 更新为最近的市场高低点
-        else:
-            high, low = 4000, 2000
+        spot = get_spot_fallback(self.currency)
+        high, low = spot * 1.15, spot * 0.65
 
         diff = high - low
         return {
@@ -109,7 +111,7 @@ class DynamicSupportCalculator:
         try:
             resp = request_with_retry(
                 "https://looknode-proxy.corms-cushier-0l.workers.dev/balancedPrice",
-                timeout=10, verify=False, max_retries=3
+                timeout=10, verify=True, max_retries=3
             )
             data = resp.json()
             if "data" in data and data["data"]:
@@ -123,7 +125,7 @@ class DynamicSupportCalculator:
             if price:
                 resp2 = request_with_retry(
                     "https://looknode-proxy.corms-cushier-0l.workers.dev/mCapRealizedRatio",
-                    timeout=10, verify=False, max_retries=3
+                    timeout=10, verify=True, max_retries=3
                 )
                 d = resp2.json()
                 if "data" in d and d["data"]:
@@ -134,7 +136,8 @@ class DynamicSupportCalculator:
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             logger.warning(f"获取链上价格失败: {e}")
 
-        return 40000.0 if self.currency == "BTC" else 2500.0  # 接近真实Realized Price
+        fallback = get_spot_fallback(self.currency)
+        return fallback * 0.5  # Realized Price 通常远低于现价
 
     def _calculate_regular_floor(self, ma200: float, fib_levels: dict, on_chain: float) -> float:
         """计算常规支撑位 - 加权平均，链上数据权重最大"""

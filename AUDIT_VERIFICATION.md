@@ -7,8 +7,8 @@
 |----------|------------|--------------|------|
 | `grid_engine.py` 中 `math.random()` | ❌ 崩溃 | ✅ 不存在 | 该错误代码在当前版本中不存在，可能已在之前清理中移除 |
 | `main.py` 重复定义 `get_spot_price` | ⚠️ 冗余 | ✅ 无重复 | 当前代码只使用 `services/spot_price.py` 中的单一实现 |
-| `binance_options.py` 同步获取 OI | ⚠️ 效率低 | ✅ 已删除 | 该文件已在本次清理中删除 |
-| `options_aggregator.py` 子进程调用 | ⚠️ 架构问题 | ✅ 已删除 | 该文件已在本次清理中删除 |
+| `binance_options.py` 同步获取 OI | ⚠️ 效率低 | ⚠️ 仍存在 | 该文件仍存在，但 `scan_engine.py` 已移除对其依赖，建议后续清理 |
+| `options_aggregator.py` 子进程调用 | ⚠️ 架构问题 | ⚠️ 仍存在 | 该文件仍存在，但 `scan_engine.py` 已内联 `format_report` 逻辑并移除依赖，建议后续清理 |
 
 **结论**: 报告中提到的 4 个核心 Bug 在当前代码中均不存在，均已通过之前的清理和重构修复。
 

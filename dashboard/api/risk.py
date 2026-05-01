@@ -172,7 +172,7 @@ def get_risk_overview_sync(currency: str = "BTC"):
                     }
                     break
     except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-        print(f"获取最大痛点数据失败: {e}")
+        logger.warning("获取最大痛点数据失败: %s", e)
 
     advice = []
     actions = []

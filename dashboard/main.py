@@ -78,6 +78,7 @@ def _get_cached_contracts_count(currency: str = "BTC") -> int:
     row = cursor.fetchone()
     if row and row[0]:
         try:
+            import json
             return len(json.loads(row[0]))
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.debug("_get_cached_contracts_count parse error: %s", str(e))
@@ -100,7 +101,8 @@ def init_database():
 
 from services.scan_engine import run_options_scan, quick_scan, save_scan_record
 
-SCAN_INTERVAL_SECONDS = 300  # 5分钟
+from config import config
+SCAN_INTERVAL_SECONDS = config.SCAN_INTERVAL_SECONDS
 AUTO_SCAN_ENABLED = True
 
 

@@ -165,7 +165,7 @@ class OnChainMetrics:
         try:
             resp = request_with_retry(
                 "https://looknode-proxy.corms-cushier-0l.workers.dev/mCapRealizedRatio",
-                timeout=10, verify=False, max_retries=3
+                timeout=10, verify=True, max_retries=3
             )
             data = resp.json()
             # API返回格式: {"code": 100, "data": [{"t": timestamp, "v": value}, ...]}
@@ -189,7 +189,7 @@ class OnChainMetrics:
         try:
             resp = request_with_retry(
                 "https://looknode-proxy.corms-cushier-0l.workers.dev/balancedPrice",
-                timeout=10, verify=False, max_retries=3
+                timeout=10, verify=True, max_retries=3
             )
             data = resp.json()
             # API返回格式: {"code": 100, "data": [{"t": timestamp, "v": value}, ...]}
@@ -214,7 +214,7 @@ class OnChainMetrics:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1w", "limit": 200},
-                timeout=15, verify=False, max_retries=3
+                timeout=15, verify=True, max_retries=3
             )
             klines = resp.json()
             closes = [float(k[4]) for k in klines]  # 收盘价
@@ -234,7 +234,7 @@ class OnChainMetrics:
         try:
             resp = request_with_retry(
                 "https://blockchain.info/q/getblockcount",
-                timeout=10, verify=False, max_retries=3
+                timeout=10, verify=True, max_retries=3
             )
             current_block = int(resp.text)
             next_halving_block = 1050000
@@ -384,7 +384,7 @@ class OnChainMetrics:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1d", "limit": 200},
-                timeout=15, verify=False, max_retries=3
+                timeout=15, verify=True, max_retries=3
             )
             klines = resp.json()
             closes = [float(k[4]) for k in klines]
@@ -407,7 +407,7 @@ class OnChainMetrics:
         try:
             resp = request_with_retry(
                 "https://looknode-proxy.corms-cushier-0l.workers.dev/mCapRealizedRatio",
-                timeout=10, verify=False, max_retries=2
+                timeout=10, verify=True, max_retries=2
             )
             data = resp.json()
             if "data" in data and data["data"]:

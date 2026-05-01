@@ -201,11 +201,13 @@ python main.py
 
 浏览器打开 → **http://localhost:8000**
 
-### 3.3 Docker 部署
+### 3.3 Docker 部署 (待实现)
+
+> ⚠️ Dockerfile 尚未创建，以下命令待后续补充。
 
 ```bash
-docker build -t crypto-options-aggregator .
-docker run -p 8000:8000 --env-file .env crypto-options-aggregator
+# docker build -t crypto-options-aggregator .
+# docker run -p 8000:8000 --env-file .env crypto-options-aggregator
 ```
 
 ---
@@ -293,7 +295,7 @@ crypto-options-aggregator/
 │   │   ├── app.js                # 主应用逻辑
 │   │   └── grid-strategy.js      # 网格策略
 │   ├── templates/                # HTML 模板
-│   └── test_e2e.py               # E2E 测试
+│   └── test_e2e.py               # E2E 测试 (待实现)
 ├── README.md                     # 项目文档
 ├── requirements.txt              # Python 依赖
 └── LICENSE                       # MIT 许可证
@@ -303,11 +305,13 @@ crypto-options-aggregator/
 
 ## 七、测试
 
-### 7.1 运行 E2E 测试
+### 7.1 运行 E2E 测试 (待实现)
+
+> ⚠️ `test_e2e.py` 尚未创建，以下命令待后续补充。
 
 ```bash
-cd dashboard
-python test_e2e.py
+# cd dashboard
+# python test_e2e.py
 ```
 
 ### 7.2 测试覆盖
@@ -374,7 +378,7 @@ python test_e2e.py
 - **参数校验**: `trades_api` 添加 `days` (le=90) 和 `limit` (le=500) 上限，防止大范围扫描导致响应膨胀
 
 #### E2E 测试
-- 新增 `test_e2e.py`，覆盖 CORS、认证、健康检查、DataHub、交易 API、模拟盘、IV 计算、扫描引擎、事务管理等 9 个测试用例
+- 新增 `test_e2e.py`（待实现），计划覆盖 CORS、认证、健康检查、DataHub、交易 API、模拟盘、IV 计算、扫描引擎、事务管理等 9 个测试用例
 
 ### v5.1 — Bug 修复与稳定性提升
 

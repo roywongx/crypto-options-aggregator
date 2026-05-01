@@ -200,12 +200,28 @@ def get_vol_direction_signal(
     dvol_30d_avg = total_iv / dte_30_count if dte_30_count > 0 else dvol_current
 
     dvol_percentile = 50.0
-    if dvol_30d_avg > 0:
-        ratio = dvol_current / dvol_30d_avg
-        if ratio > 1.0:
-            dvol_percentile = min(100, 50 + (ratio - 1.0) * 100)
-        else:
-            dvol_percentile = max(0, 50 - (1.0 - ratio) * 100)
+    # 尝试从数据库获取历史 DVOL 数据计算真实分位数
+    try:
+        from db.connection import execute_read
+        rows = execute_read("""
+            SELECT current FROM dvol_history 
+            WHERE currency = ? AND timestamp >= datetime('now', '-30 days')
+            ORDER BY timestamp DESC
+        """, (currency,))
+        if rows and len(rows) >= 10:
+            historical = sorted([r[0] for r in rows if r[0] and r[0] > 0])
+            if historical:
+                below = sum(1 for v in historical if v <= dvol_current)
+                dvol_percentile = round(below / len(historical) * 100, 1)
+    except (RuntimeError, ValueError, TypeError) as e:
+        logger.debug("DVOL percentile from DB failed, using ratio method: %s", e)
+        # 保留现有 ratio 方法作为 fallback
+        if dvol_30d_avg > 0:
+            ratio = dvol_current / dvol_30d_avg
+            if ratio > 1.0:
+                dvol_percentile = min(100, 50 + (ratio - 1.0) * 100)
+            else:
+                dvol_percentile = max(0, 50 - (1.0 - ratio) * 100)
 
     put_iv_avg = sum(put_ivs) / len(put_ivs) if put_ivs else 50.0
     call_iv_avg = sum(call_ivs) / len(call_ivs) if call_ivs else 50.0
@@ -355,7 +371,8 @@ def calculate_heatmap_data(
 
     for level in put_levels:
         distance_pct = (level.strike - spot_price) / spot_price * 100
-        risk_score = max(0, min(100, 50 + distance_pct * 2))
+        # 距离越近（绝对值越小）风险越高
+        risk_score = max(0, min(100, 100 - abs(distance_pct) * 5))
 
         heatmap.append({
             "strike": level.strike,
@@ -368,8 +385,9 @@ def calculate_heatmap_data(
         })
 
     for level in call_levels:
-        distance_pct = (spot_price - level.strike) / spot_price * 100
-        risk_score = max(0, min(100, 50 + distance_pct * 2))
+        distance_pct = (level.strike - spot_price) / spot_price * 100
+        # 距离越近（绝对值越小）风险越高
+        risk_score = max(0, min(100, 100 - abs(distance_pct) * 5))
 
         heatmap.append({
             "strike": level.strike,

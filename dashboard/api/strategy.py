@@ -68,7 +68,24 @@ async def strategy_calc(params: StrategyCalcRequest):
             option_type=params.option_type
         )
     elif mode == "grid":
-        result = {"mode": "grid", "message": "网格策略计算待实现", "spot": spot}
+        from services.unified_strategy_engine import UnifiedStrategyEngine, StrategyMode, OptionType, StrategyParams
+        engine = UnifiedStrategyEngine()
+        strategy_params = StrategyParams(
+            currency=params.currency,
+            mode=StrategyMode.GRID,
+            option_type=OptionType.PUT if params.option_type == "PUT" else OptionType.CALL,
+            margin_ratio=params.margin_ratio,
+            min_dte=params.min_dte,
+            max_dte=params.max_dte,
+        )
+        # 获取合约数据
+        from services.exchange_abstraction import registry, ExchangeType
+        from services.scan_engine import _get_deribit_monitor
+        mon = _get_deribit_monitor()
+        summaries = mon.get_btc_option_summaries() if params.currency == "BTC" else mon.get_eth_option_summaries()
+        contracts = [mon._enrich_contract(s) for s in summaries if s]
+        contracts = [c for c in contracts if c]
+        result = engine.execute(contracts, strategy_params, spot)
     else:
         raise HTTPException(status_code=400, detail=f"不支持的模式: {mode}")
 

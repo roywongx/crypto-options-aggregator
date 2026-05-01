@@ -112,6 +112,41 @@ def _get_deribit_monitor():
     return cache['mon']
 
 
+def _format_scan_report(currency: str, dvol_res: Any, trades_res: Any, der_res: Any) -> Dict[str, Any]:
+    """内联 format_report 逻辑，替代 options_aggregator 依赖"""
+    contracts = []
+    if isinstance(der_res, dict):
+        contracts = der_res.get('contracts', []) or der_res.get('opportunities', [])
+    elif isinstance(der_res, list):
+        contracts = der_res
+
+    large_trades = []
+    if isinstance(trades_res, list):
+        large_trades = trades_res
+    elif isinstance(trades_res, dict):
+        large_trades = trades_res.get('alerts', []) or trades_res.get('trades', [])
+
+    dvol_current = 50.0
+    dvol_z_score = 0.0
+    dvol_signal = "NEUTRAL"
+    if isinstance(dvol_res, dict):
+        dvol_current = dvol_res.get('current', 50.0)
+        dvol_z_score = dvol_res.get('z_score', 0.0)
+        dvol_signal = dvol_res.get('signal', 'NEUTRAL')
+
+    return {
+        "currency": currency,
+        "contracts": contracts,
+        "contracts_count": len(contracts),
+        "large_trades_count": len(large_trades),
+        "large_trades_details": large_trades,
+        "dvol_current": dvol_current,
+        "dvol_z_score": dvol_z_score,
+        "dvol_signal": dvol_signal,
+        "dvol_raw": dvol_res if isinstance(dvol_res, dict) else {},
+    }
+
+
 def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     import warnings
     warnings.warn(
@@ -139,29 +174,14 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
     use_margin = adapted.get('margin_ratio', params.margin_ratio)
 
     try:
-        from options_aggregator import format_report
-        from binance_options import scan_binance_options
-    except ImportError as e:
-        return {"success": False, "error": f"Module import failed: {e}"}
-
-    try:
         mon = _get_deribit_monitor()
 
         executor = _scan_executor
         f_dvol = executor.submit(mon.get_dvol_signal, params.currency)
         f_trades = executor.submit(mon.get_large_trade_alerts, currency=params.currency, min_usd_value=200000)
 
-        def _run_binance():
-            kw = {"currency": params.currency, "min_dte": use_min_dte,
-                  "max_dte": use_max_dte, "max_delta": use_delta,
-                  "margin_ratio": use_margin, "option_type": params.option_type}
-            return scan_binance_options(**kw)
-
-        f_bin = executor.submit(_run_binance)
-
         dvol_res = f_dvol.result(timeout=60)
         trades_res = f_trades.result(timeout=60)
-        bin_res = f_bin.result(timeout=60)
 
         def _run_deribit():
             return mon.scan_options(
@@ -173,9 +193,8 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         f_der = executor.submit(_run_deribit)
         der_res = f_der.result(timeout=60)
 
-        parsed = format_report(params.currency, dvol_res, trades_res, bin_res, der_res, json_output=True)
-        if not isinstance(parsed, dict):
-            parsed = {"raw_output": str(parsed), "contracts": []}
+        # 内联 format_report 逻辑
+        parsed = _format_scan_report(params.currency, dvol_res, trades_res, der_res)
 
         parsed['success'] = True
         if spot_price:

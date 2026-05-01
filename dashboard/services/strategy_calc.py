@@ -2,6 +2,7 @@
 from typing import Dict, Any, List
 import logging
 import asyncio
+from services.margin_calculator import calc_margin
 
 logger = logging.getLogger(__name__)
 
@@ -74,16 +75,25 @@ async def calc_roll_plan(current_strike: float, current_qty: float, target_strik
         # 为保持风险中性，新合约数量应与原持仓相近
         new_qty = max(1, int(current_qty))
         
-        # 检查是否有足够的净信用（权利金收入 > 平仓成本）
-        # 简化：假设当前持仓的平仓成本约为 current_qty * current_premium
-        # 这里用目标合约的权利金作为参考
-        current_premium_estimate = prem_usd * 0.8  # 假设当前持仓权利金略低于新合约
+        # 改进 current_premium_estimate：从 contracts 中查找当前持仓的 mark_price
+        current_premium_estimate = prem_usd * 0.8  # 默认回退
+        if current_strike > 0:
+            current_mark = None
+            for cc in contracts:
+                if abs(cc.get('strike', 0) - current_strike) < 1 and cc.get('dte', 0) > 0:
+                    mp = cc.get('mark_price', 0)
+                    if mp and mp > 0:
+                        current_mark = mp * spot  # BTC -> USD
+                        break
+            if current_mark and current_mark > 0:
+                current_premium_estimate = current_mark
+
         close_cost = current_qty * current_premium_estimate
         open_credit = new_qty * effective_prem_usd
         net_credit = open_credit - close_cost
 
         strike = c['strike']
-        margin_req = new_qty * strike * margin_ratio if c_type == 'PUT' else new_qty * prem_usd * 10
+        margin_req = new_qty * calc_margin(strike, effective_prem_usd, c_type, margin_ratio)
 
         if net_credit < MIN_NET_CREDIT_USD:
             filtered_by_negative_nc += 1
@@ -164,7 +174,7 @@ async def calc_new_plan(currency: str, spot: float, min_dte: int, max_dte: int, 
             continue
 
         strike = c['strike']
-        margin_req = strike * margin_ratio if option_type == 'PUT' else prem_usd * 10
+        margin_req = calc_margin(strike, prem_usd, option_type, margin_ratio)
 
         gross_credit = prem_usd
         apr_val = c.get('apr', 0)
