@@ -1,6 +1,7 @@
 # Status and utility API routes
 import json
 import logging
+from typing import Dict
 from fastapi import APIRouter, Query, HTTPException
 from datetime import datetime, timezone, timedelta
 import sqlite3
@@ -24,13 +25,13 @@ def get_db_connection(read_only: bool = True):
 @router.get("/api/stats")
 async def get_stats():
     try:
-        from db.connection import execute_read
-        rows = execute_read("SELECT COUNT(*) FROM scan_records")
+        from db.async_connection import execute_read_async
+        rows = await execute_read_async("SELECT COUNT(*) FROM scan_records")
         total_scans = rows[0][0] if rows else 0
         _today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        rows = execute_read("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (_today,))
+        rows = await execute_read_async("SELECT COUNT(*) FROM scan_records WHERE date(timestamp) = ?", (_today,))
         today_scans = rows[0][0] if rows else 0
-        rows = execute_read("SELECT COUNT(*) FROM large_trades_history")
+        rows = await execute_read_async("SELECT COUNT(*) FROM large_trades_history")
         total_trades = rows[0][0] if rows else 0
         db_size = os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
         return {
@@ -44,15 +45,37 @@ async def get_stats():
         return {"total_scans": 0, "today_scans": 0, "total_large_trades": 0, "db_size_mb": 0, "error": str(e)}
 
 
+# 内存缓存: {currency: (data_dict, timestamp)}
+_latest_scan_cache: Dict[str, tuple] = {}
+_LATEST_SCAN_CACHE_TTL = 3  # 3秒缓存，减少高频轮询下的 JSON 反序列化开销
+
+
 @router.get("/api/latest")
 async def get_latest_scan(currency: str = Query(default="BTC")):
     import json
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
+
+    # 检查内存缓存
+    now = datetime.now(timezone.utc).timestamp()
+    cached = _latest_scan_cache.get(currency)
+    if cached:
+        cached_data, cached_time = cached
+        if now - cached_time < _LATEST_SCAN_CACHE_TTL:
+            return cached_data
+
     try:
-        rows = execute_read("SELECT * FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
+        # 只查询需要的字段，避免 SELECT *
+        rows = await execute_read_async(
+            """SELECT timestamp, currency, spot_price, dvol_current, dvol_z_score,
+                      dvol_signal, raw_output, large_trades_count,
+                      large_trades_details, contracts_data
+               FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1""",
+            (currency,)
+        )
     except sqlite3.OperationalError as e:
         logger.warning("Latest scan query failed: %s", e)
         rows = []
+
     if not rows:
         return {
             "success": False,
@@ -64,19 +87,32 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
             "timestamp": None,
             "message": "暂无扫描数据，请先执行扫描"
         }
+
     row = rows[0]
     rd = dict(row) if hasattr(row, 'keys') else {}
     _dvol_raw = {}
     if rd.get('raw_output'):
-        try: _dvol_raw = json.loads(rd['raw_output'])
-        except json.JSONDecodeError as e: logger.debug("raw_output parse failed: %s", e)
+        try:
+            _dvol_raw = json.loads(rd['raw_output'])
+        except json.JSONDecodeError as e:
+            logger.debug("raw_output parse failed: %s", e)
+
+    # 限制大单数量，减少 JSON 反序列化开销
+    MAX_TRADES = 50
     try:
         large_trades = json.loads(rd.get('large_trades_details', '')) if rd.get('large_trades_details') else []
+        if isinstance(large_trades, list) and len(large_trades) > MAX_TRADES:
+            large_trades = large_trades[:MAX_TRADES]
     except json.JSONDecodeError:
-        large_trades = rd.get('large_trades_details', []) if isinstance(rd.get('large_trades_details'), list) else []
+        large_trades = []
 
+    # 限制合约数量，减少 JSON 反序列化开销
+    MAX_CONTRACTS = 100
     try:
         contracts = json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else []
+        if isinstance(contracts, list) and len(contracts) > MAX_CONTRACTS:
+            # 保留最优合约（按 APR 排序）
+            contracts = sorted(contracts, key=lambda x: x.get('apr', 0), reverse=True)[:MAX_CONTRACTS]
     except json.JSONDecodeError:
         contracts = []
 
@@ -99,7 +135,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     except (ImportError, ValueError, KeyError) as e:
         logger.warning("Margin enrichment failed: %s", e)
 
-    return {
+    result = {
         "success": True,
         "timestamp": rd.get('timestamp'),
         "currency": rd.get('currency'),
@@ -118,13 +154,17 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
         "dvol_raw": _dvol_raw
     }
 
+    # 写入内存缓存
+    _latest_scan_cache[currency] = (result, now)
+    return result
+
 
 @router.get("/api/health")
 async def health_check():
     checks = {}
     try:
-        from db.connection import execute_read
-        rows = execute_read("SELECT COUNT(*) FROM scan_records")
+        from db.async_connection import execute_read_async
+        rows = await execute_read_async("SELECT COUNT(*) FROM scan_records")
         count = rows[0][0] if rows else 0
         checks["database"] = {"status": "ok", "mode": "wal", "records": count}
     except sqlite3.OperationalError as e:
@@ -148,9 +188,9 @@ async def health_check():
 async def get_dvol_advice(currency: str = Query(default="BTC")):
     import json
     from services.dvol_analyzer import adapt_params_by_dvol
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
     try:
-        rows = execute_read("SELECT raw_output FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
+        rows = await execute_read_async("SELECT raw_output FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1", (currency,))
     except sqlite3.OperationalError as e:
         logger.warning("DVOL advice query failed: %s", e)
         rows = []

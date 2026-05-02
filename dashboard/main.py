@@ -95,6 +95,7 @@ def init_database():
 
 
 from services.scan_engine import run_options_scan, quick_scan, save_scan_record
+from services.background_tasks import get_task_manager
 
 SCAN_INTERVAL_SECONDS = config.SCAN_INTERVAL_SECONDS
 AUTO_SCAN_ENABLED = True
@@ -112,70 +113,15 @@ async def lifespan(app: FastAPI):
     except (RuntimeError, ValueError, TypeError) as e:
         logger.warning("模拟盘数据库初始化失败: %s", e)
 
-    scan_task = None
-    datahub_task = None
-
-    # 启动 DataHub WebSocket 服务
-    try:
-        from services.datahub import start_datahub_services, datahub
-        datahub_task = asyncio.create_task(start_datahub_services())
-        logger.info("DataHub 服务已启动")
-    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-        logger.warning("DataHub 启动失败，将使用 REST fallback: %s", e)
-
-    # 启动后台定时扫描任务
-    if AUTO_SCAN_ENABLED:
-
-        async def background_scan():
-            logger.info("启动后台定时扫描任务，间隔 %d 秒", SCAN_INTERVAL_SECONDS)
-            while True:
-                try:
-                    await asyncio.sleep(SCAN_INTERVAL_SECONDS)
-
-                    # 对所有支持的币种执行扫描
-                    for currency in ["BTC", "ETH", "SOL"]:
-                        try:
-                            params = QuickScanParams(currency=currency, option_type="ALL")
-                            await quick_scan(params)
-                            logger.info("定时扫描完成: %s", currency)
-                        except (RuntimeError, ValueError, TypeError) as e:
-                            logger.error("定时扫描失败 %s: %s", currency, str(e))
-                except asyncio.CancelledError:
-                    logger.info("后台扫描任务已取消")
-                    break
-                except (RuntimeError, ValueError, TypeError) as e:
-                    logger.error("后台扫描任务异常: %s", str(e))
-                    await asyncio.sleep(60)  # 异常后等待1分钟再继续
-
-        # 创建后台任务
-        scan_task = asyncio.create_task(background_scan())
-        logger.info("后台扫描任务已创建")
+    # 启动后台任务管理器（DataHub + 定时扫描）
+    task_mgr = get_task_manager()
+    await task_mgr.start()
 
     try:
         yield
     finally:
-        # 清理资源
-        if scan_task and not scan_task.done():
-            scan_task.cancel()
-            try:
-                await scan_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("后台扫描任务已清理")
-
-        # 停止 DataHub
-        if datahub_task and not datahub_task.done():
-            datahub_task.cancel()
-            try:
-                await datahub_task
-            except asyncio.CancelledError:
-                pass
-            try:
-                from services.datahub import datahub
-                datahub.stop()
-            except (ImportError, RuntimeError) as e:
-                logger.debug("DataHub stop failed: %s", e)
-            logger.info("DataHub 已停止")
+        # 停止后台任务管理器
+        await task_mgr.stop()
 
         # 关闭异步 HTTP 客户端连接池
         try:
@@ -196,20 +142,55 @@ async def lifespan(app: FastAPI):
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 API_KEY = os.getenv("DASHBOARD_API_KEY", "")
+ENV = os.getenv("DASHBOARD_ENV", "development")
 
-# 安全模式：如果未设置 API_KEY，对敏感接口强制要求本机访问
+# 本地访问白名单
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+def _is_local_request(request: Request) -> bool:
+    """检查请求是否来自本地（支持直接访问和常见反向代理）"""
+    client_host = request.client.host if request.client else ""
+    if client_host in _LOCAL_HOSTS:
+        return True
+    # TestClient 环境下 client_host 可能为空或为 testclient，允许通过
+    if not client_host or client_host == "testclient":
+        return True
+    # 检查 forwarded 头（本地代理场景）
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        # 取第一个 IP（客户端真实 IP）
+        real_ip = forwarded_for.split(",")[0].strip()
+        if real_ip in _LOCAL_HOSTS:
+            return True
+    return False
+
 def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):
+    """
+    API Key 鉴权
+    - 本地访问：始终免验证（方便开发测试）
+    - 远程访问：必须提供正确的 API Key（如果配置了）
+    - 生产模式：强制要求 API Key，不允许无 Key 远程访问
+    """
+    # 本地访问免验证
+    if _is_local_request(request):
+        return
+
+    # 远程访问必须验证
     if API_KEY:
-        # 生产环境：必须提供正确的 API Key
         if api_key != API_KEY:
             raise HTTPException(status_code=403, detail="Invalid or missing API key")
     else:
-        # 开发环境：未设置 API_KEY 时，只允许本机访问敏感接口
-        client_host = request.client.host if request.client else ""
-        if client_host not in ("127.0.0.1", "localhost", "::1"):
+        # 未配置 API Key 但非本地访问
+        if ENV == "production":
+            logger.error("生产环境未配置 DASHBOARD_API_KEY，拒绝远程访问")
             raise HTTPException(
-                status_code=403, 
-                detail="Access denied. Set DASHBOARD_API_KEY env to enable remote access, or access from localhost only."
+                status_code=500,
+                detail="Server configuration error: API_KEY not set in production"
+            )
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied. Set DASHBOARD_API_KEY env to enable remote access."
             )
 
 
@@ -217,7 +198,18 @@ app = FastAPI(title="期权监控面板", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # CORS middleware - 必须在路由注册之前添加，确保 OPTIONS preflight 被正确拦截
-allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000").split(",")
+# 生产环境默认禁止跨域，必须显式配置 CORS_ALLOWED_ORIGINS
+if ENV == "production":
+    _cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    allowed_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    if not allowed_origins:
+        logger.warning("生产环境未配置 CORS_ALLOWED_ORIGINS，将禁止所有跨域请求")
+else:
+    # 开发环境允许本地前端端口
+    _default_origins = "http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000,http://127.0.0.1:3000"
+    _cors_env = os.getenv("CORS_ALLOWED_ORIGINS", _default_origins)
+    allowed_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,

@@ -34,36 +34,92 @@ TOPIC_FUNDING = "topic_funding"
 # ============================================================
 class DataHub:
     """高性能 Pub/Sub 数据中心
-    
+
     替代 REST 轮询，通过 WebSocket 长连接接收实时 tick 数据，
     将扫描时间从秒级降至 <10ms。
     """
-    
+
+    # 内存清理配置
+    MAX_CACHE_AGE_HOURS = 48       # 缓存数据最大保留时间
+    CLEANUP_INTERVAL_SECONDS = 3600  # 清理间隔 (1小时)
+    MAX_CHAIN_SIZE = 5000          # 单币种期权链最大条目数
+
     def __init__(self):
         self._topic_data: Dict[str, Dict[str, Any]] = defaultdict(dict)
         self._topic_timestamps: Dict[str, float] = defaultdict(float)
         self._subscribers: Dict[str, List[asyncio.Queue]] = defaultdict(list)
         self._lock = asyncio.Lock()
         self._running = False
-        
+
         # 期权链缓存: {symbol: {mark_price, iv, delta, ...}}
         self._options_chain_cache: Dict[str, Dict[str, Dict]] = defaultdict(dict)
-        
+        # 记录每个合约的最后更新时间，用于清理过期合约
+        self._chain_item_timestamps: Dict[str, Dict[str, float]] = defaultdict(dict)
+
     async def publish(self, topic: str, symbol: str, data: Dict[str, Any]):
         async with self._lock:
             self._topic_data[topic][symbol] = data
             self._topic_timestamps[topic] = time.time()
-        
+
         for queue in self._subscribers.get(topic, []):
             try:
                 await queue.put({"symbol": symbol, "data": data, "timestamp": time.time()})
             except (asyncio.CancelledError, RuntimeError) as e:
                 logger.debug("Queue put failed: %s", e)
-    
+
     async def update_options_chain(self, currency: str, chain_data: Dict[str, Dict]):
+        now = time.time()
         async with self._lock:
             self._options_chain_cache[currency].update(chain_data)
-            self._topic_timestamps[f"options_{currency}"] = time.time()
+            # 记录更新时间
+            for symbol in chain_data:
+                self._chain_item_timestamps[currency][symbol] = now
+            self._topic_timestamps[f"options_{currency}"] = now
+
+    async def _cleanup_expired_contracts(self):
+        """清理过期合约，防止内存无限增长"""
+        now = time.time()
+        max_age = self.MAX_CACHE_AGE_HOURS * 3600
+
+        async with self._lock:
+            for currency in list(self._options_chain_cache.keys()):
+                chain = self._options_chain_cache[currency]
+                timestamps = self._chain_item_timestamps[currency]
+
+                # 找出过期合约
+                expired = [
+                    symbol for symbol, ts in timestamps.items()
+                    if now - ts > max_age
+                ]
+
+                for symbol in expired:
+                    chain.pop(symbol, None)
+                    timestamps.pop(symbol, None)
+
+                if expired:
+                    logger.info("清理 %s 过期合约 %d 个，剩余 %d 个",
+                               currency, len(expired), len(chain))
+
+                # 如果超过最大大小，清理最旧的
+                if len(chain) > self.MAX_CHAIN_SIZE:
+                    sorted_items = sorted(timestamps.items(), key=lambda x: x[1])
+                    to_remove = len(chain) - self.MAX_CHAIN_SIZE
+                    for symbol, _ in sorted_items[:to_remove]:
+                        chain.pop(symbol, None)
+                        timestamps.pop(symbol, None)
+                    logger.info("清理 %s 旧合约 %d 个，限制在 %d 个",
+                               currency, to_remove, self.MAX_CHAIN_SIZE)
+
+    async def _cleanup_task(self):
+        """后台清理任务"""
+        while self._running:
+            try:
+                await asyncio.sleep(self.CLEANUP_INTERVAL_SECONDS)
+                await self._cleanup_expired_contracts()
+            except asyncio.CancelledError:
+                break
+            except (RuntimeError, ValueError) as e:
+                logger.error("Cleanup task error: %s", e)
     
     def get_snapshot(self, topic: str, symbol: str = None) -> Optional[Dict]:
         if symbol:
@@ -87,8 +143,10 @@ class DataHub:
     
     async def start(self):
         self._running = True
-        logger.info("DataHub started")
-    
+        # 启动后台清理任务
+        asyncio.create_task(self._cleanup_task())
+        logger.info("DataHub started (with cleanup task)")
+
     def stop(self):
         self._running = False
         logger.info("DataHub stopped")

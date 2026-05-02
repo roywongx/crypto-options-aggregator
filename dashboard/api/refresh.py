@@ -8,12 +8,12 @@ router = APIRouter(prefix="/api", tags=["refresh"])
 async def refresh_dvol(currency: str = Query(default="BTC")):
     """手动刷新 DVOL 数据"""
     from services.dvol_analyzer import get_dvol_from_deribit
-    from db.connection import execute_write
+    from db.async_connection import execute_write_async
     import json
     from datetime import datetime, timezone
 
     dvol_data = get_dvol_from_deribit(currency)
-    execute_write("""
+    await execute_write_async("""
         INSERT INTO dvol_history (timestamp, currency, current, z_score, signal, trend)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (

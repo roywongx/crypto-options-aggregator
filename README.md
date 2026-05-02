@@ -167,9 +167,10 @@
 | **缓存策略** | DataHub 内存缓存 + SQLite 持久化 | 热数据内存加速，历史数据本地存储 |
 | **并发模型** | asyncio + ThreadPoolExecutor | IO 密集型用 async，CPU 密集型用线程池 |
 | **AI 路由** | LiteLLM 多模型预设 | 不同任务匹配最优模型，成本与效果平衡 |
-| **数据库** | SQLite (读写分离) | 单机部署零配置，execute_read/write 避免并发冲突 |
-| **认证** | X-API-Key Header | 轻量级 API 保护，前端自动注入 |
-| **CORS** | FastAPI CORSMiddleware | 原生支持 preflight，跨域调用无 405 错误 |
+| **数据库** | SQLite (读写分离 + 异步线程池) | 单机部署零配置，异步查询避免阻塞事件循环 |
+| **认证** | X-API-Key Header + 本地免验证 | 轻量级 API 保护，开发测试无感知 |
+| **CORS** | FastAPI CORSMiddleware (环境感知) | 开发环境允许本地跨域，生产环境需显式配置 |
+| **进程模型** | 单进程单例 (Uvicorn --workers 1) | 避免多进程导致 WebSocket 连接重复、内存翻倍 |
 
 ---
 
@@ -195,11 +196,28 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env 文件，设置 API 密钥等
 
-# 4. 启动服务
+# 4. 启动服务（开发模式 - 单进程）
 python main.py
+
+# 或使用 Uvicorn（推荐）
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload --workers 1
 ```
 
+> ⚠️ **重要**: 必须使用 `--workers 1` 单进程模式启动。系统使用内存单例管理 WebSocket 连接和缓存，多进程会导致连接重复、内存翻倍，甚至触发交易所 API 频率限制。
+
 浏览器打开 → **http://localhost:8000**
+
+### 生产环境部署
+
+```bash
+# 设置生产环境变量
+export DASHBOARD_ENV=production
+export DASHBOARD_API_KEY=your-secure-api-key
+export CORS_ALLOWED_ORIGINS=https://your-domain.com
+
+# 启动（单进程）
+uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+```
 
 ### AI Co-Pilot 配置（可选）
 

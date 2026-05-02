@@ -131,7 +131,7 @@ def ai_chat_with_config(
         logger.info("AI 响应成功: %s", response)
         return response.choices[0].message.content
 
-    except Exception as e:
+    except (RuntimeError, ConnectionError, TimeoutError, ValueError) as e:
         # 尝试 fallback（仅当未指定自定义模型时）
         if not custom_config or not custom_config.get("model"):
             for fallback_model in fallbacks:
@@ -139,7 +139,7 @@ def ai_chat_with_config(
                     kwargs["model"] = fallback_model
                     response = completion(**kwargs)
                     return response.choices[0].message.content
-                except Exception as fb_e:
+                except (RuntimeError, ConnectionError, TimeoutError, ValueError) as fb_e:
                     logger.debug("AI fallback %s failed: %s", fallback_model, fb_e)
                     continue
 

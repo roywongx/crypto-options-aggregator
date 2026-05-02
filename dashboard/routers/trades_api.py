@@ -12,7 +12,7 @@ async def get_trades_history(
     direction: str = Query(default=""),
     source: str = Query(default="")
 ):
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
 
     since_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -27,7 +27,7 @@ async def get_trades_history(
         params.append(source)
 
     query += " ORDER BY timestamp DESC LIMIT 500"
-    rows = execute_read(query, tuple(params))
+    rows = await execute_read_async(query, tuple(params))
     
     col_names = ['id', 'timestamp', 'currency', 'source', 'title', 'message',
                  'direction', 'strike', 'volume', 'option_type', 'flow_label',
@@ -41,10 +41,10 @@ async def get_strike_distribution(
     currency: str = Query(default="BTC"),
     days: int = Query(default=7, ge=1, le=90)
 ):
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
 
     since_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
-    rows = execute_read("""
+    rows = await execute_read_async("""
         SELECT strike, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp > ?
@@ -63,18 +63,18 @@ async def get_wind_analysis(
 ):
     from services.trades import fetch_deribit_summaries
     from services.risk_framework import RiskFramework
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
 
     since_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
-    grouped = execute_read("""
+    grouped = await execute_read_async("""
         SELECT direction, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp >= ?
         GROUP BY direction, option_type
     """, (currency, since_str))
 
-    strike_rows = execute_read("""
+    strike_rows = await execute_read_async("""
         SELECT strike, option_type, SUM(volume) as total_volume, COUNT(*) as trade_count
         FROM large_trades_history
         WHERE currency = ? AND timestamp >= ?

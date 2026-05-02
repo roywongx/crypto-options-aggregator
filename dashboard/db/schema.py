@@ -63,6 +63,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_scan_currency_timestamp ON scan_records(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_scan_timestamp ON scan_records(timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_debate_currency_timestamp ON debate_results(currency, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_max_pain_currency_timestamp ON max_pain_history(currency, timestamp DESC)",
 ]
 
 SCHEMA_DEBATE_RESULTS = """
@@ -77,6 +78,15 @@ CREATE TABLE IF NOT EXISTS debate_results (
     reports_json TEXT,
     synthesis_json TEXT,
     timestamp DATETIME NOT NULL
+)
+"""
+
+SCHEMA_MAX_PAIN_HISTORY = """
+CREATE TABLE IF NOT EXISTS max_pain_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    currency TEXT NOT NULL,
+    max_pain_price REAL DEFAULT 0
 )
 """
 
@@ -98,6 +108,7 @@ def init_database_schema(conn: sqlite3.Connection):
     cursor.execute(SCHEMA_LARGE_TRADES_HISTORY)
     cursor.execute(SCHEMA_DVOL_HISTORY)
     cursor.execute(SCHEMA_DEBATE_RESULTS)
+    cursor.execute(SCHEMA_MAX_PAIN_HISTORY)
 
     for idx in INDEXES:
         cursor.execute(idx)

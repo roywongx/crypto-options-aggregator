@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import config
 from models.contracts import ScanParams, QuickScanParams
 from services.dvol_analyzer import adapt_params_by_dvol, calc_delta_bs, calc_pop, get_dvol_from_deribit, _get_dvol_simple_fallback
+from services.shared_calculations import black_scholes_price
 from services.instrument import _parse_inst_name
 from services.risk_framework import RiskFramework, CalculationEngine, _risk_emoji
 from services.margin_calculator import calc_margin
@@ -32,12 +33,34 @@ def get_db_connection(read_only: bool = True):
     return _db_conn(read_only=read_only)
 
 
+def _sanitize_raw_output(raw_data: dict) -> str:
+    """
+    对原始 API 响应进行脱敏处理
+    移除可能包含敏感信息的字段，限制存储大小
+    """
+    if not isinstance(raw_data, dict):
+        return ""
+    # 只保留必要的分析字段，过滤掉可能敏感的原始响应
+    safe_keys = {"trend", "trend_label", "confidence", "interpretation", "signal", "z_score"}
+    sanitized = {k: v for k, v in raw_data.items() if k in safe_keys}
+    output = json.dumps(sanitized, ensure_ascii=False, default=str)
+    # 限制大小 50KB
+    MAX_SIZE = 50000
+    if len(output) > MAX_SIZE:
+        output = output[:MAX_SIZE] + "...[truncated]"
+    return output
+
+
 def save_scan_record(data: Dict[str, Any]):
     """保存扫描记录到数据库（使用 execute_transaction 保证 _write_lock 和原子性）"""
     now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
     contracts = data.get('contracts', [])
     currency = data.get('currency', 'BTC')
+
+    # 脱敏 raw_output
+    dvol_raw = data.get('dvol_raw', {})
+    raw_output = _sanitize_raw_output(dvol_raw)
 
     stmts = []
 
@@ -57,7 +80,7 @@ def save_scan_record(data: Dict[str, Any]):
         json.dumps(large_trades, ensure_ascii=False),
         json.dumps(contracts, ensure_ascii=False),
         json.dumps(contracts[:30], ensure_ascii=False),
-        json.dumps({"dvol_raw": data.get('dvol_raw', {}), "trend": data.get('dvol_trend', ''), "trend_label": data.get('dvol_trend_label', ''), "confidence": data.get('dvol_confidence', ''), "interpretation": data.get('dvol_interpretation', '')}, ensure_ascii=False)
+        raw_output
     )))
 
     # 2. 插入 large_trades_history
@@ -307,7 +330,7 @@ async def quick_scan(params: QuickScanParams = None):
 
     if not large_trades:
         try:
-            large_trades = await _fetch_large_trades_async(currency, days=1, limit=40)
+            large_trades = await fetch_large_trades_async(currency, days=1, limit=40)
         except (RuntimeError, ConnectionError, TimeoutError) as e:
             logger.warning("Quick scan: Large trades fetch failed: %s", e)
             large_trades = []
@@ -410,6 +433,9 @@ async def quick_scan(params: QuickScanParams = None):
 
             dist = abs(strike - spot) / spot * 100
 
+            # 使用 BS 模型计算 Greeks（API 不返回 Greeks）
+            bs_greeks = black_scholes_price(meta.option_type, strike, underlying, meta.dte, iv)
+
             contracts.append({
                 "symbol": s.get("instrument_name", ""),
                 "platform": "Deribit",
@@ -420,9 +446,9 @@ async def quick_scan(params: QuickScanParams = None):
                 "apr": round(apr, 1),
                 "premium_usd": round(prem_usd, 2),
                 "delta": round(delta_val, 3),
-                "theta": round(float(s.get("theta", 0) or 0), 4),
-                "gamma": round(float(s.get("gamma", 0) or 0), 6),
-                "vega": round(float(s.get("vega", 0) or 0), 4),
+                "theta": round(bs_greeks["theta"], 4),
+                "gamma": round(bs_greeks["gamma"], 6),
+                "vega": round(bs_greeks["vega"], 4),
                 "iv": round(iv, 1),
                 "open_interest": round(oi, 0),
                 "loss_at_10pct": round(max(0, (strike - spot * 0.9) if meta.option_type == "P" else (spot * 1.1 - strike)), 2),
@@ -457,6 +483,9 @@ async def quick_scan(params: QuickScanParams = None):
             dist = abs(strike - spot) / spot * 100
             liq_score = s.get('liquidity_score', 50)
 
+            # 使用 BS 模型计算 Greeks
+            bs_greeks_binance = black_scholes_price(opt_type, strike, spot, int(dte), iv) if iv > 0 and dte > 0 else {"gamma": 0, "theta": 0, "vega": 0}
+
             contracts.append({
                 "symbol": s['symbol'],
                 "platform": "Binance",
@@ -467,9 +496,9 @@ async def quick_scan(params: QuickScanParams = None):
                 "apr": round(apr, 1),
                 "premium_usd": round(prem_usd, 2),
                 "delta": round(abs(delta_val), 3),
-                "gamma": round(s.get('gamma', 0), 6),
-                "theta": round(s.get('theta', 0), 4),
-                "vega": round(s.get('vega', 0), 4),
+                "gamma": round(bs_greeks_binance.get("gamma", 0), 6),
+                "theta": round(bs_greeks_binance.get("theta", 0), 4),
+                "vega": round(bs_greeks_binance.get("vega", 0), 4),
                 "iv": round(iv, 1),
                 "open_interest": round(oi, 0),
                 "loss_at_10pct": round(max(0, (strike - spot * 0.9) if opt_type == "P" else (spot * 1.1 - strike)), 2),
@@ -520,12 +549,7 @@ async def quick_scan(params: QuickScanParams = None):
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # 使用 execute_transaction 保证 _write_lock 和原子性
-    _raw_out = json.dumps({
-        "dvol_raw": dvol_data, "trend": dvol_data.get("trend", ""),
-        "trend_label": dvol_data.get("trend_label", ""),
-        "confidence": dvol_data.get("confidence", ""),
-        "interpretation": dvol_data.get("interpretation", "")
-    }, ensure_ascii=False)
+    _raw_out = _sanitize_raw_output(dvol_data)
 
     stmts = []
     stmts.append(("""
@@ -572,14 +596,7 @@ async def quick_scan(params: QuickScanParams = None):
     }
 
 
-async def _fetch_large_trades_async(currency: str, days: int = 7, limit: int = 50):
-    """异步获取大单交易：委托给 large_trades_fetcher"""
-    return await fetch_large_trades_async(currency, days, limit)
 
-
-def _fetch_large_trades(currency: str, days: int = 7, limit: int = 50):
-    """同步获取大单交易：委托给 large_trades_fetcher"""
-    return fetch_large_trades_sync(currency, days, limit)
 
 
 def _fetch_wind_analysis(currency: str, days: int = 30):

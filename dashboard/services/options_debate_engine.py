@@ -103,7 +103,7 @@ def _gather_market_data(currency: str) -> Dict[str, Any]:
             (currency,)
         )
         data["max_pain"] = float(mp_rows[0][0]) if mp_rows and mp_rows[0][0] else 0
-    except Exception:
+    except (RuntimeError, ValueError, TypeError, ConnectionError, TimeoutError):
         data["max_pain"] = 0
 
     return data

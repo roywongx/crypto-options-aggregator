@@ -35,7 +35,7 @@ class RiskFramework:
         with cls._cache_lock:
             # 缓存4小时
             if (cls._cached_floors and cls._cache_timestamp and
-                (now - cls._cache_timestamp).total_seconds() < 14400):
+                (now - cls._cache_timestamp).total_seconds() < config.RISK_CACHE_TTL_SECONDS):
                 return cls._cached_floors
 
         # 重新计算
@@ -61,8 +61,9 @@ class RiskFramework:
         floors = cls._get_floors()
         regular = floors["regular"]
         extreme = floors["extreme"]
-        
-        if spot > regular * 1.1:
+        multiplier = config.RISK_FLOOR_MULTIPLIER
+
+        if spot > regular * multiplier:
             return "NORMAL"
         elif spot > regular:
             return "NEAR_FLOOR"
@@ -76,13 +77,13 @@ class RiskFramework:
         floors = cls._get_floors()
         extreme = floors["extreme"]
         regular = floors["regular"]
-        
+
         if strike <= extreme:
-            return 1.2
+            return config.RISK_SCORE_EXTREME
         elif strike <= regular:
-            return 1.1
+            return config.RISK_SCORE_REGULAR
         elif strike > spot:
-            return 0.8
+            return config.RISK_SCORE_ABOVE_SPOT
         return 1.0
 
     @classmethod
@@ -136,14 +137,18 @@ class CalculationEngine:
     def weighted_score(apr: float, pop: float, breakeven_pct: float,
                        liquidity_score: float, iv_rank: float,
                        strike: float = 0, spot: float = 0) -> float:
-        a = min(max(apr, 0) / 200.0, 1.0)
-        p = min(max(pop, 0) / 100.0, 1.0)
-        b = min(max(breakeven_pct, 0) / 20.0, 1.0)
-        l = min(max(liquidity_score, 0) / 100.0, 1.0)
+        a = min(max(apr, 0) / config.CALC_APR_MAX, 1.0)
+        p = min(max(pop, 0) / config.CALC_POP_MAX, 1.0)
+        b = min(max(breakeven_pct, 0) / config.CALC_BREAKEVEN_MAX, 1.0)
+        l = min(max(liquidity_score, 0) / config.CALC_LIQUIDITY_MAX, 1.0)
         ir = max(iv_rank, 0)
         iv = 1.0 - abs(ir - 50) / 50.0
 
-        score = a * 0.25 + p * 0.25 + b * 0.20 + l * 0.15 + iv * 0.15
+        score = (a * config.CALC_WEIGHT_APR +
+                 p * config.CALC_WEIGHT_POP +
+                 b * config.CALC_WEIGHT_BREAKEVEN +
+                 l * config.CALC_WEIGHT_LIQUIDITY +
+                 iv * config.CALC_WEIGHT_IV)
 
         if spot > 0 and strike > 0:
             score *= RiskFramework.get_score_modifier(strike, spot)

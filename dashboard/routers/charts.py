@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/charts", tags=["charts"])
 async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
     from services.trades import fetch_deribit_summaries
     from services.instrument import _parse_inst_name
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
 
     summaries = fetch_deribit_summaries(currency)
     if not summaries:
@@ -43,7 +43,7 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
         return [{"time": now, "pcr": round(current_pcr, 3), "puts": round(ne["put_oi"], 0), "calls": round(ne["call_oi"], 0)}]
 
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
-    rows = execute_read("""
+    rows = await execute_read_async("""
         SELECT timestamp, large_trades_details, spot_price FROM scan_records
         WHERE currency = ? AND timestamp >= ? AND large_trades_details IS NOT NULL AND large_trades_details != ''
         ORDER BY timestamp ASC
@@ -85,11 +85,11 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
 
 @router.get("/dvol")
 async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
     from services.dvol_analyzer import get_dvol_from_deribit
 
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
-    rows = execute_read("""
+    rows = await execute_read_async("""
         SELECT timestamp, dvol_current FROM scan_records
         WHERE currency = ? AND timestamp >= ? AND dvol_current IS NOT NULL
         ORDER BY timestamp ASC
@@ -120,7 +120,7 @@ async def get_dvol_chart(currency: str = "BTC", hours: int = 168):
 async def get_vol_surface(currency: str = "BTC"):
     """获取 IV 期限结构数据"""
     from services.spot_price import get_spot_price
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
 
     try:
         spot = get_spot_price(currency)
@@ -131,7 +131,7 @@ async def get_vol_surface(currency: str = "BTC"):
 
     # 优先从数据库获取最近的 scan_records 中的合约数据
     try:
-        rows = execute_read("""
+        rows = await execute_read_async("""
             SELECT contracts_data FROM scan_records
             WHERE currency = ? AND contracts_data IS NOT NULL
             ORDER BY timestamp DESC LIMIT 1
@@ -242,7 +242,7 @@ async def get_iv_smile(currency: str = "BTC"):
     """获取波动率微笑数据 (strike vs IV，最近到期)"""
     from services.spot_price import get_spot_price
     from services.instrument import _parse_inst_name
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
 
     try:
         spot = get_spot_price(currency)
@@ -251,7 +251,7 @@ async def get_iv_smile(currency: str = "BTC"):
         spot = get_spot_fallback(currency)
 
     # 从 DB 获取最新合约数据
-    rows = execute_read("""
+    rows = await execute_read_async("""
         SELECT contracts_data FROM scan_records
         WHERE currency = ? AND contracts_data IS NOT NULL
         ORDER BY timestamp DESC LIMIT 1
@@ -272,21 +272,25 @@ async def get_iv_smile(currency: str = "BTC"):
         strike = c.get("strike", 0)
         dte = c.get("dte", 0)
         option_type = c.get("option_type", "")
-        oi = c.get("oi", 0) or c.get("open_interest", 0)
-        volume = c.get("volume", 0)
+        oi = c.get("oi") if c.get("oi") is not None else c.get("open_interest", 0)
+        volume = c.get("volume") if c.get("volume") is not None else 0
 
         iv_float = float(iv) if iv else 0
-        if iv_float > 0 and iv_float < 1.0:
-            iv_float *= 100  # 小数转百分比
+        # 统一 IV 格式: 如果 < 1.0 认为是小数，转换为百分比
+        if 0 < iv_float < 1.0:
+            iv_float *= 100
+        # 如果 > 100，可能是错误数据，过滤掉
+        elif iv_float > 200:
+            continue
 
         if iv_float <= 0 or strike <= 0 or dte <= 0:
             continue
 
-        # 过滤无效 IV (价差过大或无 OI)
-        if float(oi) < 5:
+        # 过滤无效数据 (无 OI 或 IV 异常)
+        if float(oi) < 1:
             continue
 
-        exp_key = int(dte)
+        exp_key = int(float(dte))
         if exp_key not in by_expiry:
             by_expiry[exp_key] = []
         by_expiry[exp_key].append({
@@ -322,10 +326,10 @@ async def get_iv_smile(currency: str = "BTC"):
 
 @router.get("/greeks-summary")
 async def get_greeks_summary(currency: str = "BTC"):
-    """获取持仓 Greeks 汇总 (风险矩阵)"""
+    """获取持仓 Greeks 汇总 (风险矩阵) - 使用 OI 加权计算"""
     from services.spot_price import get_spot_price
     from services.shared_calculations import black_scholes_price
-    from db.connection import execute_read
+    from db.async_connection import execute_read_async
 
     try:
         spot = get_spot_price(currency)
@@ -334,7 +338,7 @@ async def get_greeks_summary(currency: str = "BTC"):
         spot = get_spot_fallback(currency)
 
     # 从 DB 获取最新合约数据
-    rows = execute_read("""
+    rows = await execute_read_async("""
         SELECT contracts_data FROM scan_records
         WHERE currency = ? AND contracts_data IS NOT NULL
         ORDER BY timestamp DESC LIMIT 1
@@ -354,34 +358,41 @@ async def get_greeks_summary(currency: str = "BTC"):
     total_vega = 0.0
     total_premium = 0.0
     total_notional = 0.0
+    total_oi = 0.0
     contract_count = 0
     put_count = 0
     call_count = 0
 
     for c in contracts:
         strike = float(c.get("strike", 0))
-        dte = int(c.get("dte", 0))
+        dte = int(float(c.get("dte", 0)))
         iv_raw = c.get("mark_iv") or c.get("iv") or 0
         iv = float(iv_raw) if iv_raw else 0
-        if iv > 0 and iv < 1.0:
+        # 统一 IV 格式
+        if 0 < iv < 1.0:
             iv *= 100
+        elif iv > 200 or iv <= 0:
+            continue
         option_type = c.get("option_type", "")
         premium = float(c.get("premium_usd", c.get("premium", 0)) or 0)
-        oi = float(c.get("oi", 0) or c.get("open_interest", 0) or 0)
+        oi_raw = c.get("oi") if c.get("oi") is not None else c.get("open_interest", 0)
+        oi = float(oi_raw) if oi_raw else 0
 
-        if strike <= 0 or dte <= 0 or iv <= 0:
+        if strike <= 0 or dte <= 0:
             continue
 
         # 用 BS 模型计算 Greeks
         bs = black_scholes_price(option_type, strike, spot, dte, iv)
-        qty = max(oi, 1)  # 用 OI 作为权重
 
-        total_delta += bs["delta"] * qty
-        total_gamma += bs["gamma"] * qty
-        total_theta += bs["theta"] * qty
-        total_vega += bs["vega"] * qty
-        total_premium += premium * qty
-        total_notional += strike * qty
+        # OI 加权 Greeks（反映市场真实风险敞口）
+        weight = max(1.0, oi)  # 至少权重为1
+        total_delta += bs["delta"] * weight
+        total_gamma += bs["gamma"] * weight
+        total_theta += bs["theta"] * weight
+        total_vega += bs["vega"] * weight
+        total_premium += premium * weight
+        total_notional += strike * weight
+        total_oi += weight
         contract_count += 1
 
         if option_type.upper()[0] == "P":
@@ -389,9 +400,26 @@ async def get_greeks_summary(currency: str = "BTC"):
         elif option_type.upper()[0] == "C":
             call_count += 1
 
-    # 风险评级
-    abs_delta = abs(total_delta)
-    delta_risk = "🔴 高" if abs_delta > 1000 else "🟡 中" if abs_delta > 100 else "🟢 低"
+    if total_oi <= 0:
+        return {"error": "无有效 Greeks 数据", "greeks": {}, "currency": currency, "spot": spot}
+
+    # 归一化（每单位 OI 的平均 Greeks）
+    norm_delta = total_delta / total_oi
+    norm_gamma = total_gamma / total_oi
+    norm_theta = total_theta / total_oi
+    norm_vega = total_vega / total_oi
+
+    # 风险评级（基于归一化后的 Delta）
+    abs_delta = abs(norm_delta)
+    if abs_delta > 0.5:
+        delta_risk = "🔴 高"
+    elif abs_delta > 0.2:
+        delta_risk = "🟡 中"
+    else:
+        delta_risk = "🟢 低"
+
+    # 计算风险敞口（使用总 OI 作为乘数）
+    total_delta_exposure = norm_delta * total_oi
 
     return {
         "currency": currency,
@@ -399,16 +427,23 @@ async def get_greeks_summary(currency: str = "BTC"):
         "contract_count": contract_count,
         "put_count": put_count,
         "call_count": call_count,
-        "greeks": {
+        "total_oi": round(total_oi, 0),
+        "greeks_per_contract": {
+            "delta": round(norm_delta, 4),
+            "gamma": round(norm_gamma, 6),
+            "theta": round(norm_theta, 4),
+            "vega": round(norm_vega, 4),
+        },
+        "total_greeks_exposure": {
             "delta": round(total_delta, 2),
-            "gamma": round(total_gamma, 6),
+            "gamma": round(total_gamma, 4),
             "theta": round(total_theta, 2),
             "vega": round(total_vega, 2),
         },
         "risk_assessment": {
             "delta_risk": delta_risk,
-            "delta_pnl_if_down_10pct": round(total_delta * spot * -0.1, 0),
-            "delta_pnl_if_up_10pct": round(total_delta * spot * 0.1, 0),
+            "delta_pnl_if_down_10pct": round(total_delta_exposure * spot * -0.1, 0),
+            "delta_pnl_if_up_10pct": round(total_delta_exposure * spot * 0.1, 0),
             "theta_daily_decay": round(total_theta, 0),
             "vega_pnl_if_iv_up_5pct": round(total_vega * 5, 0),
         },

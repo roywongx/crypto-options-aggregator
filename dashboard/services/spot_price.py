@@ -14,8 +14,13 @@ logger = logging.getLogger(__name__)
 
 # 缓存：{currency: (price, timestamp)}
 _spot_cache: Dict[str, tuple] = {}
-_CACHE_TTL_SECONDS = 5  # 5秒缓存，确保所有组件使用相同的时间戳和价格
+_CACHE_TTL_SECONDS = 3  # 3秒缓存，平衡实时性和性能
 _cache_lock = threading.Lock()
+
+# 内存优先的定期更新队列
+_spot_update_queue: Dict[str, float] = {}  # {currency: last_update_time}
+_spot_update_interval = 2  # 每2秒更新一次
+_spot_update_lock = threading.Lock()
 
 
 async def get_spot_price_binance_async(currency: str = "BTC") -> Optional[float]:
@@ -96,7 +101,7 @@ def get_spot_price_deribit(currency: str = "BTC") -> Optional[float]:
 
 
 async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> float:
-    """异步统一入口获取现货价格
+    """异步统一入口获取现货价格（内存优先 + 定期更新队列）
 
     Args:
         currency: 币种 (BTC, ETH, SOL)
@@ -113,6 +118,8 @@ async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> f
         RuntimeError: 所有来源都失败时抛出
     """
     now = time.time()
+
+    # 1. 优先从内存缓存读取
     with _cache_lock:
         if currency in _spot_cache:
             cached_price, cached_time = _spot_cache[currency]
@@ -123,6 +130,17 @@ async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> f
         with _cache_lock:
             return _spot_cache.get(currency, (None, 0))[0] or 0.0
 
+    # 2. 检查更新队列，避免并发请求同一币种
+    with _spot_update_lock:
+        last_update = _spot_update_queue.get(currency, 0)
+        if now - last_update < _spot_update_interval:
+            # 其他请求正在更新，直接返回缓存（即使过期）
+            with _cache_lock:
+                cached = _spot_cache.get(currency)
+                if cached:
+                    return cached[0]
+        _spot_update_queue[currency] = now
+
     sources = []
 
     def _try(name: str, val) -> Optional[float]:
@@ -131,6 +149,7 @@ async def get_spot_price_async(currency: str = "BTC", source: str = "auto") -> f
             return float(val)
         return None
 
+    # 3. 按优先级获取（先 Binance 后 Deribit）
     if source in ("auto", "binance"):
         spot = _try("BinanceSpot", await get_spot_price_binance_async(currency))
         if spot:

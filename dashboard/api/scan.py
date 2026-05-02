@@ -68,18 +68,16 @@ async def quick_scan_endpoint(params: QuickScanParams = None):
 @router.get("/latest")
 async def get_latest(currency: str = Query(default="BTC")):
     """获取最新扫描数据"""
-    from db.connection import get_db_connection
+    from db.async_connection import execute_read_async
     
-    conn = get_db_connection(read_only=True)
-    cursor = conn.cursor()
-    cursor.execute("""
+    rows = await execute_read_async("""
         SELECT timestamp, spot_price, dvol_current, dvol_z_score, dvol_signal,
                large_trades_count, large_trades_details, 
                COALESCE(top_contracts_data, contracts_data) as fast_contracts,
                contracts_data, raw_output
         FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1
     """, (currency,))
-    row = cursor.fetchone()
+    row = rows[0] if rows else None
 
     if not row:
         return {
@@ -151,7 +149,8 @@ async def get_latest(currency: str = Query(default="BTC")):
 @router.get("/export/csv")
 async def export_csv(currency: str = Query(default="BTC"), hours: int = Query(default=168)):
     """导出 CSV"""
-    rows = execute_read("""
+    from db.async_connection import execute_read_async
+    rows = await execute_read_async("""
         SELECT contracts_data FROM scan_records
         WHERE currency = ? AND timestamp > datetime('now', ? || ' hours')
         ORDER BY timestamp DESC

@@ -262,6 +262,83 @@ def get_vol_direction_signal(
         suggested_ratio=suggested_ratio
     )
 
+def _calculate_portfolio_greeks(put_levels: List[GridLevel], call_levels: List[GridLevel]) -> Dict[str, float]:
+    """计算组合 Greeks"""
+    total_delta = 0.0
+    total_gamma = 0.0
+    total_theta = 0.0
+
+    # Put Delta 为负 (Sell Put 为正 Delta)
+    for level in put_levels:
+        # Sell Put: Delta ≈ +|delta| (因为卖出)
+        total_delta += abs(level.delta)
+        # 简化 Gamma 和 Theta 估算
+        total_gamma += level.delta * 0.01  # 近似
+        total_theta += level.theta_decay if level.theta_decay else 0
+
+    # Call Delta 为正 (Sell Call 为负 Delta)
+    for level in call_levels:
+        # Sell Call: Delta ≈ -|delta|
+        total_delta -= abs(level.delta)
+        total_gamma += level.delta * 0.01
+        total_theta += level.theta_decay if level.theta_decay else 0
+
+    return {
+        "delta": total_delta,
+        "gamma": total_gamma,
+        "theta": total_theta
+    }
+
+
+def _generate_hedge_suggestion(greeks: Dict[str, float], spot_price: float) -> str:
+    """生成动态对冲建议"""
+    delta = greeks["delta"]
+    gamma = greeks["gamma"]
+
+    # Delta 对冲阈值
+    DELTA_HEDGE_THRESHOLD = 0.3  # 总 Delta 超过 0.3 需要对冲
+    GAMMA_RISK_THRESHOLD = 0.05  # Gamma 风险阈值
+
+    if abs(delta) > DELTA_HEDGE_THRESHOLD:
+        if delta > 0:
+            return f"Delta 偏多 ({delta:.2f})，建议卖出 {delta:.2f} 份现货或买入 Put 对冲"
+        else:
+            return f"Delta 偏空 ({delta:.2f})，建议买入 {-delta:.2f} 份现货或买入 Call 对冲"
+
+    if abs(gamma) > GAMMA_RISK_THRESHOLD:
+        return f"Gamma 风险较高 ({gamma:.3f})，现货大幅波动时组合价值变化剧烈，建议减仓或调整行权价"
+
+    return "Delta 中性，无需对冲"
+
+
+def _check_rebalance_needed(
+    put_levels: List[GridLevel],
+    call_levels: List[GridLevel],
+    spot_price: float
+) -> bool:
+    """检查是否需要再平衡
+
+    触发条件:
+    1. 任一网格档位距离现货价格 < 2%
+    2. 组合 Delta 绝对值 > 0.5
+    """
+    REBALANCE_DISTANCE_PCT = 2.0
+    REBALANCE_DELTA_THRESHOLD = 0.5
+
+    # 检查距离
+    for level in put_levels + call_levels:
+        distance_pct = abs((level.strike - spot_price) / spot_price * 100)
+        if distance_pct < REBALANCE_DISTANCE_PCT:
+            return True
+
+    # 检查 Delta
+    greeks = _calculate_portfolio_greeks(put_levels, call_levels)
+    if abs(greeks["delta"]) > REBALANCE_DELTA_THRESHOLD:
+        return True
+
+    return False
+
+
 def recommend_grid(
     contracts: List[Dict[str, Any]],
     currency: str = "BTC",
@@ -290,6 +367,11 @@ def recommend_grid(
 
     total_premium = sum(p.premium_usd for p in put_levels) + sum(c.premium_usd for c in call_levels)
 
+    # v6.4: 计算组合 Greeks 和对冲建议
+    greeks = _calculate_portfolio_greeks(put_levels, call_levels)
+    hedge_suggestion = _generate_hedge_suggestion(greeks, spot_price)
+    rebalance_trigger = _check_rebalance_needed(put_levels, call_levels, spot_price)
+
     return GridRecommendation(
         currency=currency,
         spot_price=spot_price,
@@ -298,7 +380,12 @@ def recommend_grid(
         call_levels=call_levels,
         dvol_signal=vol_signal.signal,
         recommended_ratio=vol_signal.suggested_ratio,
-        total_potential_premium=round(total_premium, 2)
+        total_potential_premium=round(total_premium, 2),
+        total_delta=round(greeks["delta"], 3),
+        total_gamma=round(greeks["gamma"], 4),
+        total_theta=round(greeks["theta"], 2),
+        hedge_suggestion=hedge_suggestion,
+        rebalance_trigger=rebalance_trigger
     )
 
 def simulate_scenario(

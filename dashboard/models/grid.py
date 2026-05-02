@@ -43,6 +43,12 @@ class GridRecommendation:
     dvol_signal: str
     recommended_ratio: str
     total_potential_premium: float
+    # v6.4: 动态对冲信息
+    total_delta: float = 0.0           # 组合总 Delta
+    total_gamma: float = 0.0           # 组合总 Gamma
+    total_theta: float = 0.0           # 组合总 Theta (每日)
+    hedge_suggestion: str = ""         # 对冲建议
+    rebalance_trigger: bool = False    # 是否需要再平衡
 
 @dataclass
 class GridScenario:
@@ -52,6 +58,14 @@ class GridScenario:
     spot_pnl: float
     total_pnl: float
     vs_hold_pnl: float
+
+@dataclass
+class GridHedgeRecommendation:
+    """动态对冲建议"""
+    action: str                        # "hedge_delta" | "rebalance" | "hold"
+    suggested_instrument: str          # 建议对冲工具
+    quantity: float                    # 对冲数量
+    reason: str                        # 建议原因
 
 @dataclass
 class VolDirectionSignal:

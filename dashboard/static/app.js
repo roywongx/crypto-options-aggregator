@@ -4304,59 +4304,62 @@ async function loadIVSmile() {
     try {
         const currency = document.getElementById('ivSmileCurrency')?.value || 'BTC';
         const resp = await safeFetch(`${API_BASE}/api/charts/iv-smile?currency=${currency}`);
-        if (resp.error) {
-            container.innerHTML = `<div class="text-yellow-400 text-sm py-4">${safeHTML(resp.error)}</div>`;
+        const data = await resp.json();
+        if (data.error) {
+            container.innerHTML = `<div class="text-yellow-400 text-sm py-4">${safeHTML(data.error)}</div>`;
             return;
         }
 
-        const smiles = resp.smiles || {};
-        const spot = resp.spot || 0;
+        const smiles = data.smiles || {};
+        const spot = data.spot || 0;
         let html = '';
 
         for (const [key, smile] of Object.entries(smiles)) {
             const all = smile.all || [];
             if (all.length === 0) continue;
 
-            // 找到 ATM 附近
+            // 找到 IV 范围
             const minIv = Math.min(...all.map(p => p.iv));
             const maxIv = Math.max(...all.map(p => p.iv));
             const ivRange = maxIv - minIv || 1;
 
-            html += `<div class="mb-4">
+            html += `<div class="mb-6">
                 <div class="text-sm text-gray-400 mb-2">到期 ${smile.dte} 天 (Spot: $${spot.toLocaleString()})</div>
-                <div class="flex items-end gap-0.5 h-32">`;
+                <div class="relative h-40 bg-gray-800/20 rounded-lg p-2">
+                    <div class="flex items-end justify-center gap-1 h-full">`;
 
             // 按 strike 排序，画柱状图
             const sorted = [...all].sort((a, b) => a.strike - b.strike);
-            const barWidth = Math.max(4, Math.min(20, 200 / sorted.length));
+            const barWidth = Math.max(8, Math.min(24, 300 / sorted.length));
 
             for (const p of sorted) {
-                const height = Math.max(5, ((p.iv - minIv) / ivRange) * 100);
+                const heightPct = Math.max(10, ((p.iv - minIv) / ivRange) * 80 + 10);
                 const isPut = p.type === 'P';
                 const isATM = Math.abs(p.strike - spot) / spot < 0.02;
                 const color = isATM ? 'bg-yellow-400' : isPut ? 'bg-green-500' : 'bg-blue-500';
-                const opacity = p.oi > 100 ? 'opacity-100' : 'opacity-50';
+                const opacity = p.oi > 100 ? 'opacity-100' : 'opacity-60';
 
-                html += `<div class="group relative flex flex-col items-center" style="width:${barWidth}px">
-                    <div class="${color} ${opacity} rounded-t w-full transition-all hover:opacity-100"
-                         style="height:${height}%"></div>
-                    <div class="hidden group-hover:block absolute bottom-full mb-1 bg-gray-900 border border-gray-600 rounded p-1.5 text-xs whitespace-nowrap z-10">
-                        <div>K=$${p.strike.toLocaleString()} | IV=${p.iv}%</div>
-                        <div>${p.type} | OI=${p.oi} | 距现货${p.moneyness}%</div>
+                html += `<div class="group relative flex flex-col items-center justify-end" style="width:${barWidth}px; height:100%;">
+                    <div class="${color} ${opacity} rounded-t w-full transition-all hover:opacity-100 hover:brightness-110"
+                         style="height:${heightPct}%; min-height: 4px;"></div>
+                    <div class="hidden group-hover:block absolute bottom-full mb-1 bg-gray-900 border border-gray-600 rounded p-1.5 text-xs whitespace-nowrap z-10 shadow-lg">
+                        <div class="font-medium">K=$${p.strike.toLocaleString()} | IV=${p.iv}%</div>
+                        <div class="text-gray-400">${p.type} | OI=${Math.round(p.oi)} | 距现货${p.moneyness > 0 ? '+' : ''}${p.moneyness}%</div>
                     </div>
                 </div>`;
             }
 
             html += `</div>
-                <div class="flex justify-between text-xs text-gray-500 mt-1">
+                </div>
+                <div class="flex justify-between text-xs text-gray-500 mt-1 px-2">
                     <span>$${sorted[0]?.strike?.toLocaleString() || ''}</span>
-                    <span class="text-yellow-400">ATM</span>
+                    <span class="text-yellow-400 font-medium">ATM $${spot.toLocaleString()}</span>
                     <span>$${sorted[sorted.length-1]?.strike?.toLocaleString() || ''}</span>
                 </div>
-                <div class="flex gap-3 mt-2 text-xs">
-                    <span class="text-green-400">● Put</span>
-                    <span class="text-blue-400">● Call</span>
-                    <span class="text-yellow-400">● ATM</span>
+                <div class="flex justify-center gap-4 mt-2 text-xs">
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span> Put</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span> Call</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-400"></span> ATM</span>
                 </div>
             </div>`;
         }
@@ -4375,39 +4378,65 @@ async function loadGreeksSummary() {
     try {
         const currency = document.getElementById('greeksCurrency')?.value || 'BTC';
         const resp = await safeFetch(`${API_BASE}/api/charts/greeks-summary?currency=${currency}`);
-        if (resp.error) {
-            container.innerHTML = `<div class="text-yellow-400 text-sm">${safeHTML(resp.error)}</div>`;
+        const data = await resp.json();
+        if (data.error) {
+            container.innerHTML = `<div class="text-yellow-400 text-sm">${safeHTML(data.error)}</div>`;
             return;
         }
 
-        const g = resp.greeks || {};
-        const risk = resp.risk_assessment || {};
-        const spot = resp.spot || 0;
+        // 兼容新旧 API 格式
+        const g = data.greeks_per_contract || data.greeks || {};
+        const total = data.total_greeks_exposure || {};
+        const risk = data.risk_assessment || {};
+        const spot = data.spot || 0;
+        const totalOi = data.total_oi || 0;
 
-        const deltaColor = Math.abs(g.delta) > 500 ? 'text-red-400' : Math.abs(g.delta) > 100 ? 'text-yellow-400' : 'text-green-400';
-        const thetaColor = g.theta < -100 ? 'text-red-400' : g.theta < -20 ? 'text-yellow-400' : 'text-green-400';
+        // 基于单合约 Greeks 计算颜色阈值
+        const deltaColor = Math.abs(g.delta) > 0.5 ? 'text-red-400' : Math.abs(g.delta) > 0.2 ? 'text-yellow-400' : 'text-green-400';
+        const thetaColor = g.theta < -0.5 ? 'text-red-400' : g.theta < -0.1 ? 'text-yellow-400' : 'text-green-400';
 
         container.innerHTML = `
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <div class="bg-gray-800/50 rounded-lg p-3 text-center">
                     <div class="text-xs text-gray-400">Delta (Δ)</div>
-                    <div class="text-xl font-bold ${deltaColor}">${g.delta?.toLocaleString() || 0}</div>
-                    <div class="text-xs text-gray-500">价格敏感度</div>
+                    <div class="text-xl font-bold ${deltaColor}">${g.delta?.toFixed(4) || 0}</div>
+                    <div class="text-xs text-gray-500">每合约价格敏感度</div>
                 </div>
                 <div class="bg-gray-800/50 rounded-lg p-3 text-center">
                     <div class="text-xs text-gray-400">Gamma (Γ)</div>
-                    <div class="text-xl font-bold text-blue-400">${g.gamma?.toFixed(4) || 0}</div>
+                    <div class="text-xl font-bold text-blue-400">${g.gamma?.toFixed(6) || 0}</div>
                     <div class="text-xs text-gray-500">Delta 变化率</div>
                 </div>
                 <div class="bg-gray-800/50 rounded-lg p-3 text-center">
                     <div class="text-xs text-gray-400">Theta (Θ)</div>
-                    <div class="text-xl font-bold ${thetaColor}">$${g.theta?.toLocaleString() || 0}</div>
+                    <div class="text-xl font-bold ${thetaColor}">$${g.theta?.toFixed(4) || 0}</div>
                     <div class="text-xs text-gray-500">每日时间损耗</div>
                 </div>
                 <div class="bg-gray-800/50 rounded-lg p-3 text-center">
                     <div class="text-xs text-gray-400">Vega (V)</div>
-                    <div class="text-xl font-bold text-purple-400">$${g.vega?.toLocaleString() || 0}</div>
+                    <div class="text-xl font-bold text-purple-400">$${g.vega?.toFixed(4) || 0}</div>
                     <div class="text-xs text-gray-500">IV 敏感度</div>
+                </div>
+            </div>
+            <div class="bg-gray-800/30 rounded-lg p-3 mb-3">
+                <div class="text-sm font-medium text-gray-300 mb-2">总风险敞口 (OI 加权)</div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div class="text-center">
+                        <div class="text-gray-400">总 Delta</div>
+                        <div class="text-lg font-bold ${total.delta > 0 ? 'text-green-400' : 'text-red-400'}">${total.delta?.toLocaleString() || 0}</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-gray-400">总 Gamma</div>
+                        <div class="text-lg font-bold text-blue-400">${total.gamma?.toFixed(4) || 0}</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-gray-400">总 Theta</div>
+                        <div class="text-lg font-bold ${total.theta > 0 ? 'text-green-400' : 'text-red-400'}">$${total.theta?.toLocaleString() || 0}</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-gray-400">总 Vega</div>
+                        <div class="text-lg font-bold text-purple-400">$${total.vega?.toLocaleString() || 0}</div>
+                    </div>
                 </div>
             </div>
             <div class="bg-gray-800/30 rounded-lg p-3">
@@ -4427,7 +4456,8 @@ async function loadGreeksSummary() {
                     </div>
                 </div>
                 <div class="mt-2 text-xs text-gray-500">
-                    合约: ${resp.contract_count}个 (${resp.put_count} Put / ${resp.call_count} Call) | 
+                    合约: ${data.contract_count}个 (${data.put_count} Put / ${data.call_count} Call) | 
+                    总 OI: ${totalOi.toLocaleString() || 0} | 
                     Delta 风险: ${risk.delta_risk || '未知'}
                 </div>
             </div>`;

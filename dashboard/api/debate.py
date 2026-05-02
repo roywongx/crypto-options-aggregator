@@ -62,8 +62,8 @@ async def debate_history(
 ):
     """获取最近的辩论历史记录"""
     try:
-        from db.connection import execute_read
-        rows = execute_read(
+        from db.async_connection import execute_read_async
+        rows = await execute_read_async(
             """SELECT currency, spot_price, overall_score, recommendation,
                       recommendation_label, consensus, reports_json, synthesis_json, timestamp
                FROM debate_results
