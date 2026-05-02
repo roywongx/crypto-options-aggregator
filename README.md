@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Platform-Binance%20%2B%20Deribit-orange?logo=bitcoin" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
-  <img src="https://img.shields.io/badge/v5.4-Production%20Ready-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/v5.5-Production%20Ready-blueviolet" alt="Version">
 </p>
 
 <h1 align="center">Crypto Options Aggregator Pro</h1>
@@ -363,7 +363,23 @@ python -m pytest tests/test_core.py -v
 
 ## 📝 更新日志
 
-### v5.4 — AI 配置增强与交互优化（当前）
+### v5.5 — Greeks 计算修复与异步数据库优化（当前）
+
+#### 核心修复
+- **Greeks 计算修复**: 使用 Black-Scholes 模型实时计算 Greeks（Deribit API 不返回 Greeks 数据）
+- **Greeks OI 加权**: 风险矩阵使用 Open Interest 加权计算，更准确反映市场真实风险敞口
+- **异步数据库调用修复**: 修复 5 个 API 端点中的同步 DB 调用阻塞事件循环问题
+  - `api/scan.py` - `get_latest` / `export_csv`
+  - `api/refresh.py` - `refresh_dvol`
+  - `api/debate.py` - `get_debate_history`
+  - `routers/charts.py` - `get_vol_surface`
+
+#### 前端优化
+- **IV Smile 渲染修复**: 修复柱状图高度计算导致空白画布的问题
+- **Greeks 使用说明**: 添加 Delta/Gamma/Theta/Vega 指标说明文本
+- **IV Smile 使用说明**: 添加波动率微笑图表说明和图例
+
+### v5.4 — AI 配置增强与交互优化
 
 #### AI Co-Pilot 增强
 - **自定义 API Key 支持**: 前端新增 AI 配置面板，支持输入任意 OpenAI 兼容 API Key（OpenAI / DeepSeek / Claude / Gemini / 小米米莫等）
