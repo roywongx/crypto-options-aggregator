@@ -144,3 +144,57 @@ class TestLlmSynthesize:
 
         assert result["success"] is False
         assert "raw_response" in result
+
+
+class TestLlmDebate:
+    """Test _llm_debate Bull/Bear LLM calls"""
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_debate_parses_bull_bear_judge(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        # 3 calls: bull, bear, judge
+        mock_ai.side_effect = [
+            json.dumps({"bullish_case": "链上数据显示底部", "key_drivers": ["MVRV低位", "资金流入"], "target_scenarios": ["120000"], "confidence": 70}),
+            json.dumps({"bearish_case": "宏观风险加大", "key_risks": ["利率上升", "流动性收紧"], "downside_scenarios": ["85000"], "confidence": 60}),
+            json.dumps({"judge_verdict": "多头略占优", "winner": "bull", "bull_confidence": 70, "bear_confidence": 60, "reasoning": "链上数据支撑更强"}),
+        ]
+
+        engine = LLMAnalystEngine()
+        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
+               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+               "strategy_summary": {}}
+        synthesis = {"success": True, "market_assessment": "中性偏多"}
+
+        result = engine._llm_debate(ctx, synthesis)
+
+        assert result["success"] is True
+        assert result["bull"]["bullish_case"] == "链上数据显示底部"
+        assert result["bear"]["bearish_case"] == "宏观风险加大"
+        assert result["judge"]["winner"] == "bull"
+        assert mock_ai.call_count == 3
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_debate_handles_partial_failure(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        # bull succeeds, bear fails, judge uses partial data
+        mock_ai.side_effect = [
+            json.dumps({"bullish_case": "理由", "key_drivers": [], "target_scenarios": [], "confidence": 60}),
+            None,  # bear fails
+            json.dumps({"judge_verdict": "数据不足", "winner": "inconclusive", "bull_confidence": 60, "bear_confidence": 0, "reasoning": "空头分析失败"}),
+        ]
+
+        engine = LLMAnalystEngine()
+        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
+               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+               "strategy_summary": {}}
+        synthesis = {"success": True, "market_assessment": "中性"}
+
+        result = engine._llm_debate(ctx, synthesis)
+
+        assert result["success"] is True
+        assert result["bull"]["success"] is True
+        assert result["bear"]["success"] is False

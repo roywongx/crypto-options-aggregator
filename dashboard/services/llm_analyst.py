@@ -336,8 +336,102 @@ class LLMAnalystEngine:
         return None
 
     def _llm_debate(self, context: Dict, synthesis: Dict) -> Dict[str, Any]:
-        """LLM 多空辩论 — 留给 Task 4 实现"""
-        return {"success": False, "placeholder": "debate not implemented"}
+        """LLM 多空辩论 — Bull/Bear/Judge 三次调用"""
+        data_summary = self._build_data_summary(context)
+        custom_config = self._get_custom_config()
+
+        base_context = f"""=== 币种: {context['currency']} ===
+=== 市场数据 ===
+{data_summary}
+
+=== 综合分析师报告 ===
+{json.dumps(synthesis, ensure_ascii=False, indent=2)}"""
+
+        # Bull Agent
+        bull_prompt = [
+            {"role": "system", "content": """你是一位看多分析师。基于全量市场数据和综合分析报告，构建最强的看多论点。
+返回 JSON:
+{"bullish_case": "看多核心论点", "key_drivers": ["驱动因素1", ...], "target_scenarios": ["目标价位1", ...], "confidence": 0-100}"""},
+            {"role": "user", "content": base_context},
+        ]
+
+        # Bear Agent
+        bear_prompt = [
+            {"role": "system", "content": """你是一位看空分析师。基于全量市场数据和综合分析报告，构建最强的看空论点。
+返回 JSON:
+{"bearish_case": "看空核心论点", "key_risks": ["风险因素1", ...], "downside_scenarios": ["下行目标1", ...], "confidence": 0-100}"""},
+            {"role": "user", "content": base_context},
+        ]
+
+        # Execute bull and bear (serial, independent error handling)
+        bull_result = {"success": False}
+        bear_result = {"success": False}
+
+        try:
+            bull_resp = ai_chat_with_config(
+                bull_prompt, preset="analysis", temperature=0.4,
+                max_tokens=1500, custom_config=custom_config
+            )
+            if bull_resp:
+                parsed = self._parse_json_response(bull_resp)
+                if parsed:
+                    parsed["success"] = True
+                    bull_result = parsed
+        except Exception as e:
+            logger.warning("bull agent failed: %s", e)
+            bull_result = {"success": False, "error": str(e)}
+
+        try:
+            bear_resp = ai_chat_with_config(
+                bear_prompt, preset="analysis", temperature=0.4,
+                max_tokens=1500, custom_config=custom_config
+            )
+            if bear_resp:
+                parsed = self._parse_json_response(bear_resp)
+                if parsed:
+                    parsed["success"] = True
+                    bear_result = parsed
+        except Exception as e:
+            logger.warning("bear agent failed: %s", e)
+            bear_result = {"success": False, "error": str(e)}
+
+        # Judge Agent
+        judge_context = f"""{base_context}
+
+=== Bull Agent 分析 ===
+{json.dumps(bull_result, ensure_ascii=False, indent=2)}
+
+=== Bear Agent 分析 ===
+{json.dumps(bear_result, ensure_ascii=False, indent=2)}"""
+
+        judge_prompt = [
+            {"role": "system", "content": """你是辩论裁判。评估多空双方论点，给出裁决。
+返回 JSON:
+{"judge_verdict": "裁决摘要", "winner": "bull|bear|draw", "bull_confidence": 0-100, "bear_confidence": 0-100, "reasoning": "裁判理由"}"""},
+            {"role": "user", "content": judge_context},
+        ]
+
+        judge_result = {"success": False}
+        try:
+            judge_resp = ai_chat_with_config(
+                judge_prompt, preset="analysis", temperature=0.2,
+                max_tokens=1500, custom_config=custom_config
+            )
+            if judge_resp:
+                parsed = self._parse_json_response(judge_resp)
+                if parsed:
+                    parsed["success"] = True
+                    judge_result = parsed
+        except Exception as e:
+            logger.warning("judge agent failed: %s", e)
+            judge_result = {"success": False, "error": str(e)}
+
+        return {
+            "success": bull_result.get("success") or bear_result.get("success"),
+            "bull": bull_result,
+            "bear": bear_result,
+            "judge": judge_result,
+        }
 
     def _llm_audit(self, context: Dict, rule_reports: Dict, synthesis: Dict) -> Dict[str, Any]:
         """LLM 异常检测 — 留给 Task 5 实现"""
