@@ -7,6 +7,7 @@ v5.0: 渐进式重构 - API 端点已迁移到 api/ 目录模块
 
 import os
 import sys
+import hmac
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -123,13 +124,20 @@ async def lifespan(app: FastAPI):
         # 停止后台任务管理器
         await task_mgr.stop()
 
-        # 关闭异步 HTTP 客户端连接池
+        # 关闭 HTTP 客户端连接池
         try:
             from services.async_http import close_async_client
             await close_async_client()
             logger.info("异步 HTTP 客户端已关闭")
         except (ImportError, RuntimeError) as e:
             logger.debug("Async HTTP client close failed: %s", e)
+
+        try:
+            from services.http_client import close_sync_client
+            close_sync_client()
+            logger.info("同步 HTTP 客户端已关闭")
+        except (ImportError, RuntimeError) as e:
+            logger.debug("Sync HTTP client close failed: %s", e)
 
         # 关闭 Deribit monitor session
         try:
@@ -148,20 +156,13 @@ ENV = os.getenv("DASHBOARD_ENV", "development")
 _LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 def _is_local_request(request: Request) -> bool:
-    """检查请求是否来自本地（支持直接访问和常见反向代理）"""
+    """检查请求是否来自本地（仅信任直接连接的客户端 IP）"""
     client_host = request.client.host if request.client else ""
     if client_host in _LOCAL_HOSTS:
         return True
     # TestClient 环境下 client_host 可能为空或为 testclient，允许通过
     if not client_host or client_host == "testclient":
         return True
-    # 检查 forwarded 头（本地代理场景）
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        # 取第一个 IP（客户端真实 IP）
-        real_ip = forwarded_for.split(",")[0].strip()
-        if real_ip in _LOCAL_HOSTS:
-            return True
     return False
 
 def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):
@@ -175,9 +176,9 @@ def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):
     if _is_local_request(request):
         return
 
-    # 远程访问必须验证
+    # 远程访问必须验证（恒定时间比较防时序攻击）
     if API_KEY:
-        if api_key != API_KEY:
+        if not api_key or not hmac.compare_digest(api_key, API_KEY):
             raise HTTPException(status_code=403, detail="Invalid or missing API key")
     else:
         # 未配置 API Key 但非本地访问

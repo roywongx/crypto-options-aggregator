@@ -24,11 +24,6 @@ try:
 except ImportError:
     HAS_SCIPY = False
 
-def _norm_cdf(x: float) -> float:
-    if HAS_SCIPY:
-        return norm.cdf(x)
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
 def _generate_reason(apr: float, distance_pct: float, oi: int, dte: int, iv: float) -> str:
     reasons = []
     if apr > 50:

@@ -50,14 +50,19 @@ async def sandbox_simulate(params: SandboxParams):
 
     old_margin = strike * params.margin_ratio * qty
 
-    # Step 2: 搜索恢复候选合约
+    # Step 2: 搜索恢复候选合约（从最近扫描记录获取）
     all_contracts = []
     try:
-        from db.repository import ContractRepository
-        repo = ContractRepository()
-        all_contracts = repo.get_all_contracts(params.currency)
-    except (ImportError, RuntimeError) as e:
-        logger.debug("Sandbox contract repo failed: %s", e)
+        from db.connection import execute_read
+        import json
+        rows = execute_read(
+            "SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1",
+            (params.currency,)
+        )
+        if rows and rows[0][0]:
+            all_contracts = json.loads(rows[0][0])
+    except (RuntimeError, ValueError, TypeError) as e:
+        logger.debug("Sandbox contract fetch failed: %s", e)
         all_contracts = []
 
     candidates = MartingaleSandboxEngine.search_recovery_candidates(

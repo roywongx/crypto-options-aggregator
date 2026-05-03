@@ -6,9 +6,11 @@ import logging
 from typing import Dict, Any
 from services.risk_framework import RiskFramework
 import concurrent.futures
-import time
 
 logger = logging.getLogger(__name__)
+
+
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 
 class UnifiedRiskAssessor:
@@ -17,16 +19,16 @@ class UnifiedRiskAssessor:
 
     def assess_comprehensive_risk(self, spot: float, currency: str = "BTC") -> Dict[str, Any]:
         # 并行执行独立的评估任务
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            future_price = executor.submit(self._assess_price_risk, spot)
-            future_volatility = executor.submit(self._assess_volatility_risk, currency)
-            future_sentiment = executor.submit(self._assess_sentiment_risk, spot, currency)
-            future_liquidity = executor.submit(self._assess_liquidity_risk, currency)
+        executor = _executor
+        future_price = executor.submit(self._assess_price_risk, spot)
+        future_volatility = executor.submit(self._assess_volatility_risk, currency)
+        future_sentiment = executor.submit(self._assess_sentiment_risk, spot, currency)
+        future_liquidity = executor.submit(self._assess_liquidity_risk, currency)
 
-            price_risk = future_price.result()
-            volatility_risk = future_volatility.result()
-            sentiment_risk = future_sentiment.result()
-            liquidity_risk = future_liquidity.result()
+        price_risk = future_price.result()
+        volatility_risk = future_volatility.result()
+        sentiment_risk = future_sentiment.result()
+        liquidity_risk = future_liquidity.result()
 
         composite_score = (
             price_risk["score"] * 0.30 +

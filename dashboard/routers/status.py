@@ -5,11 +5,8 @@ from typing import Dict
 from fastapi import APIRouter, Query, HTTPException
 from datetime import datetime, timezone, timedelta
 import sqlite3
-import httpx
 import os
 from pathlib import Path
-
-from services.http_client import http_get
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["status"])
@@ -157,31 +154,6 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     # 写入内存缓存
     _latest_scan_cache[currency] = (result, now)
     return result
-
-
-@router.get("/api/health")
-async def health_check():
-    checks = {}
-    try:
-        from db.async_connection import execute_read_async
-        rows = await execute_read_async("SELECT COUNT(*) FROM scan_records")
-        count = rows[0][0] if rows else 0
-        checks["database"] = {"status": "ok", "mode": "wal", "records": count}
-    except sqlite3.OperationalError as e:
-        logger.error("Health check DB query failed: %s", e)
-        checks["database"] = {"status": "error", "message": str(e)}
-    for name, url in [
-        ("deribit_api", "https://www.deribit.com/api/v2/public/get_time"),
-        ("binance_api", "https://api.binance.com/api/v3/ping"),
-    ]:
-        try:
-            r = http_get(url, timeout=5.0)
-            checks[name] = {"status": "ok" if r.status_code == 200 else "error", "code": r.status_code}
-        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
-            logger.warning("Health check %s failed: %s", name, e)
-            checks[name] = {"status": "error", "message": str(e)[:100]}
-    all_ok = all(c.get("status") == "ok" for c in checks.values())
-    return {"status": "healthy" if all_ok else "degraded", "checks": checks}
 
 
 @router.get("/api/dvol-advice")

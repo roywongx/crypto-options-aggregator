@@ -30,17 +30,21 @@ async def dashboard_init(currency: str = Query(default="BTC")):
     ts_data = results[1] if not isinstance(results[1], Exception) else {"error": str(results[1])}
     mp_data = results[2] if not isinstance(results[2], Exception) else {"error": str(results[2])}
     
-    # 获取链上指标数据
-    onchain_data = await asyncio.to_thread(_fetch_onchain_metrics, currency)
-    
-    # 获取衍生品市场数据
-    derivative_data = await asyncio.to_thread(_fetch_derivative_metrics, currency)
-    
-    # 获取压力测试数据
-    pressure_test_data = await asyncio.to_thread(_fetch_pressure_test, currency)
-    
-    # 获取 AI 情绪分析数据
-    ai_sentiment_data = await asyncio.to_thread(_fetch_ai_sentiment, currency)
+    # 并行获取剩余模块数据
+    onchain_task = asyncio.create_task(asyncio.to_thread(_fetch_onchain_metrics, currency))
+    derivative_task = asyncio.create_task(asyncio.to_thread(_fetch_derivative_metrics, currency))
+    pressure_task = asyncio.create_task(asyncio.to_thread(_fetch_pressure_test, currency))
+    sentiment_task = asyncio.create_task(asyncio.to_thread(_fetch_ai_sentiment, currency))
+
+    batch2 = await asyncio.gather(
+        onchain_task, derivative_task, pressure_task, sentiment_task,
+        return_exceptions=True
+    )
+
+    onchain_data = batch2[0] if not isinstance(batch2[0], Exception) else {"error": str(batch2[0])}
+    derivative_data = batch2[1] if not isinstance(batch2[1], Exception) else {"error": str(batch2[1])}
+    pressure_test_data = batch2[2] if not isinstance(batch2[2], Exception) else {"error": str(batch2[2])}
+    ai_sentiment_data = batch2[3] if not isinstance(batch2[3], Exception) else {"error": str(batch2[3])}
     
     return {
         "success": True,

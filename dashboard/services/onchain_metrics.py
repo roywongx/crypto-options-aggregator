@@ -46,16 +46,13 @@ class OnChainMetrics:
                 cls._cache_time = datetime.now()
                 return metrics
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.error("获取链上指标失败: {e}")
+            logger.error("获取链上指标失败: %s", e)
         
         return cls._cache if cls._cache else cls._get_fallback_data()
     
     @classmethod
     def _fetch_all(cls) -> Dict[str, Any]:
         """获取所有数据"""
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
         # 获取当前价格
         current_price = cls._get_current_price()
         if current_price is None or current_price <= 0:

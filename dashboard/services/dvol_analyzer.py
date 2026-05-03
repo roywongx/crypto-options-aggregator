@@ -17,31 +17,8 @@ _dvol_cache = {}
 _dvol_cache_time = None
 _dvol_cache_ttl = 300  # 5分钟缓存
 
-def _norm_cdf_approx(x: float) -> float:
-    """Abramowitz & Stegun 公式 7.1.26，最大误差 < 7.5e-8
-    
-    基于误差函数补码 erfc 的有理逼近。
-    """
-    # 标准正态 PDF
-    pdf = math.exp(-x * x / 2.0) / math.sqrt(2.0 * math.pi)
-    
-    # erfc 逼近系数 (Abramowitz & Stegun 7.1.26)
-    p = 0.2316419
-    b1 = 0.319381530
-    b2 = -0.356563782
-    b3 = 1.781477937
-    b4 = -1.821255978
-    b5 = 1.330274429
-    
-    sign = 1.0 if x >= 0 else -1.0
-    ax = abs(x)
-    t = 1.0 / (1.0 + p * ax)
-    
-    # erfc(ax/sqrt(2)) 的逼近
-    erfc_approx = pdf * (b1*t + b2*t**2 + b3*t**3 + b4*t**4 + b5*t**5)
-    
-    # Φ(x) = 0.5 * (1 + sign * (1 - erfc(ax/sqrt(2))))
-    return 0.5 * (1.0 + sign * (1.0 - 2.0 * erfc_approx))
+from services.shared_calculations import norm_cdf as _norm_cdf_approx
+
 
 def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type: str = 'P') -> float:
     """使用 Black-Scholes 计算期权 Delta

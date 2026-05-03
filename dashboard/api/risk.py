@@ -8,109 +8,18 @@ router = APIRouter(prefix="/api", tags=["risk"])
 
 
 def _calc_max_pain_sync(currency: str = "BTC"):
-    """同步版本的最大痛点计算"""
-    from services.instrument import _parse_inst_name
-    from services.spot_price import get_spot_price, _get_spot_from_scan
-    from routers.maxpain import _fetch_deribit_summaries
-
-    summaries = _fetch_deribit_summaries(currency)
-    if not summaries:
-        return {"error": "No data"}
-
-    parsed = []
-    for s in summaries:
-        meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta.dte < 1:
-            continue
-        oi = float(s.get("open_interest") or 0)
-        gamma = float(s.get("gamma") or 0)
-        if oi < 1:
-            continue
-        parsed.append({"strike": meta.strike, "expiry": meta.expiry, "dte": meta.dte, "option_type": meta.option_type, "oi": oi, "gamma": gamma})
-
-    if not parsed:
-        total = len(summaries)
-        no_meta = sum(1 for s in summaries if not _parse_inst_name(s.get("instrument_name", "")))
-        oi_zero = sum(1 for s in summaries if float(s.get("open_interest") or 0) < 1)
-        return {"error": "No OI data", "debug": {"total": total, "no_meta": no_meta, "oi_zero": oi_zero}}
-
-    strikes = sorted(set(p["strike"] for p in parsed))
-    expiries = sorted(set((p["expiry"], p["dte"]) for p in parsed))
-
+    """同步版本的最大痛点计算（委托给 routers.maxpain 统一实现）"""
+    import asyncio
+    from routers.maxpain import _calc_max_pain_internal
     try:
-        spot = get_spot_price(currency)
-    except (RuntimeError, ValueError) as e:
-        logger.warning("Max pain spot price failed: %s, using fallback", e)
-        db_spot = _get_spot_from_scan()
-        spot = db_spot if db_spot > 1000 else (strikes[len(strikes)//2] if strikes else 0)
-
-    results = []
-    for exp_name, exp_dte in expiries[:4]:
-        calls = [p for p in parsed if p["expiry"] == exp_name and p["option_type"] == "C"]
-        puts = [p for p in parsed if p["expiry"] == exp_name and p["option_type"] == "P"]
-        if not calls and not puts:
-            continue
-        co_map = {p["strike"]: p["oi"] for p in calls}
-        po_map = {p["strike"]: p["oi"] for p in puts}
-        cg_map = {p["strike"]: p["gamma"] * p["oi"] for p in calls}
-        pg_map = {p["strike"]: p["gamma"] * p["oi"] for p in puts}
-
-        mp_strike = strikes[0]
-        min_pain = float('inf')
-        pain_at_s = 0
-        pc = []
-        gc = []
-        flip = None
-        prev_sign = None
-
-        for ts in strikes:
-            cp = sum(max(0, ts - k) * v for k, v in co_map.items())
-            pp = sum(max(0, k - ts) * v for k, v in po_map.items())
-            tp = cp + pp
-            pc.append({"strike": ts, "pain": round(tp, 0), "call_pain": round(cp, 0), "put_pain": round(pp, 0)})
-            if tp < min_pain:
-                min_pain = tp
-                mp_strike = ts
-            if int(round(ts)) == int(round(spot)):
-                pain_at_s = tp
-            ng = sum(g for k, g in cg_map.items() if k >= ts) + sum(-g for k, g in pg_map.items() if k <= ts)
-            call_oi_above = sum(v for k, v in co_map.items() if k >= ts)
-            put_oi_below = sum(v for k, v in po_map.items() if k <= ts)
-            put_oi_at_strike = po_map.get(ts, 0)
-            net_oi_exposure = call_oi_above - put_oi_below
-            if ng != 0:
-                ngex = ng * spot * spot / 100
-            else:
-                ngex = net_oi_exposure * 100
-            gc.append({"strike": ts, "gex": round(ngex, 0), "net_gamma": round(ng, 2),
-                       "net_oi_exposure": round(net_oi_exposure, 0),
-                       "call_oi_above": round(call_oi_above, 0), "put_oi_below": round(put_oi_below, 0),
-                       "put_oi_at_strike": round(put_oi_at_strike, 0)})
-            cs = 1 if net_oi_exposure >= 0 else -1
-            if prev_sign is not None and cs != prev_sign and flip is None:
-                flip = ts
-            prev_sign = cs
-
-        dist = ((mp_strike - spot) / spot * 100) if spot > 0 else 0
-        tco = sum(co_map.values())
-        tpo = sum(po_map.values())
-        pcr = tpo / tco if tco > 0 else 0
-        sig = "中性"
-        if dist > 3:
-            sig = "偏多: 价格在最大痛点下方"
-        elif dist < -3:
-            sig = "偏空: 价格在最大痛点上方"
-
-        results.append({"expiry": exp_name, "dte": exp_dte, "max_pain": round(mp_strike, 0),
-            "dist_pct": round(dist, 2), "pain_at_spot": round(pain_at_s, 0),
-            "pcr": round(pcr, 3), "call_oi": round(tco, 0), "put_oi": round(tpo, 0),
-            "signal": sig, "pain_curve": pc, "gex_curve": gc,
-            "flip_point": flip})
-
-    best = results[0] if results else {}
-    return {"currency": currency, "spot": round(spot, 0), "expiries": results,
-        "nearest_mp": best.get("max_pain"), "nearest_dist": best.get("dist_pct"),
-        "signal": best.get("signal", "")}
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, _calc_max_pain_internal(currency)).result()
+        return loop.run_until_complete(_calc_max_pain_internal(currency))
+    except RuntimeError:
+        return asyncio.run(_calc_max_pain_internal(currency))
 
 
 def get_risk_overview_sync(currency: str = "BTC"):

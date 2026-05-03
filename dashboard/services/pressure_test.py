@@ -8,13 +8,16 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+from services.shared_calculations import norm_cdf as _shared_norm_cdf
+
+
 class PressureTestEngine:
     """压力测试引擎 - 计算高阶 Greeks 敏感度"""
-    
+
     @staticmethod
     def _norm_cdf(x: float) -> float:
         """标准正态分布累积分布函数"""
-        return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+        return _shared_norm_cdf(x)
     
     @staticmethod
     def _norm_pdf(x: float) -> float:
