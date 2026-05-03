@@ -164,46 +164,45 @@
                 </div>
             </div>
 
-            <!-- Gauge + Indicator Cards Row -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+            <!-- Gauge + Radar + Indicator Cards — 3-column compact row -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                 <!-- Gauge -->
-                <div class="bg-gray-800/50 rounded-lg p-4 flex flex-col items-center justify-center">
-                    <canvas id="riskGaugeCanvas" width="280" height="160"></canvas>
-                    <div id="riskGaugeLabel" class="text-sm text-gray-400 mt-1">综合风险评分</div>
+                <div class="bg-gray-800/50 rounded-lg p-3 flex flex-col items-center justify-center">
+                    <canvas id="riskGaugeCanvas" width="220" height="130"></canvas>
+                    <div id="riskGaugeLabel" class="text-xs text-gray-400 mt-1">综合风险评分</div>
+                </div>
+                <!-- Radar -->
+                <div class="bg-gray-800/50 rounded-lg p-3 flex items-center justify-center">
+                    <canvas id="riskRadarCanvas"></canvas>
                 </div>
                 <!-- 5 Indicator Cards -->
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="bg-gray-800/50 rounded-lg p-3">
-                        <div class="text-xs text-gray-400 mb-1">Max Pain</div>
-                        <div id="cardMaxPain" class="text-lg font-bold text-white font-mono">--</div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-gray-800/50 rounded-lg p-2.5">
+                        <div class="text-xs text-gray-400 mb-0.5">Max Pain</div>
+                        <div id="cardMaxPain" class="text-base font-bold text-white font-mono">--</div>
                         <div id="cardMaxPainDist" class="text-xs text-gray-500">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-3">
-                        <div class="text-xs text-gray-400 mb-1">Put Wall</div>
-                        <div id="cardPutWall" class="text-lg font-bold text-yellow-400 font-mono">--</div>
+                    <div class="bg-gray-800/50 rounded-lg p-2.5">
+                        <div class="text-xs text-gray-400 mb-0.5">Put Wall</div>
+                        <div id="cardPutWall" class="text-base font-bold text-yellow-400 font-mono">--</div>
                         <div id="cardPutWallOI" class="text-xs text-gray-500">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-3">
-                        <div class="text-xs text-gray-400 mb-1">Gamma Flip</div>
-                        <div id="cardGammaFlip" class="text-lg font-bold text-purple-400 font-mono">--</div>
+                    <div class="bg-gray-800/50 rounded-lg p-2.5">
+                        <div class="text-xs text-gray-400 mb-0.5">Gamma Flip</div>
+                        <div id="cardGammaFlip" class="text-base font-bold text-purple-400 font-mono">--</div>
                         <div id="cardGammaFlipSignal" class="text-xs text-gray-500">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-3">
-                        <div class="text-xs text-gray-400 mb-1">常规支撑</div>
-                        <div id="cardFloorRegular" class="text-lg font-bold text-green-400 font-mono">--</div>
+                    <div class="bg-gray-800/50 rounded-lg p-2.5">
+                        <div class="text-xs text-gray-400 mb-0.5">常规支撑</div>
+                        <div id="cardFloorRegular" class="text-base font-bold text-green-400 font-mono">--</div>
                         <div id="cardFloorRegularDist" class="text-xs text-gray-500">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-3">
-                        <div class="text-xs text-gray-400 mb-1">极端支撑</div>
-                        <div id="cardFloorExtreme" class="text-lg font-bold text-red-400 font-mono">--</div>
+                    <div class="bg-gray-800/50 rounded-lg p-2.5 col-span-2">
+                        <div class="text-xs text-gray-400 mb-0.5">极端支撑</div>
+                        <div id="cardFloorExtreme" class="text-base font-bold text-red-400 font-mono">--</div>
                         <div id="cardFloorExtremeDist" class="text-xs text-gray-500">--</div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Radar Chart -->
-            <div class="bg-gray-800/50 rounded-lg p-3 mb-4" style="max-height:220px; overflow:hidden;">
-                <canvas id="riskRadarCanvas" style="max-height:190px;"></canvas>
             </div>
 
             <!-- Tabs -->

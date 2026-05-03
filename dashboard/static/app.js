@@ -1713,7 +1713,7 @@ function renderRiskRadar(canvasId, dimensions) {
         options: {
             responsive: true,
             maintainAspectRatio: true,
-            aspectRatio: 2.5,
+            aspectRatio: 1.2,
             scales: {
                 r: {
                     min: 0, max: 100,
