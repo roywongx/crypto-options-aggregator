@@ -276,30 +276,52 @@ class WheelSimulator:
             total_premium = 0.0
             path = [price]
             was_assigned = False
+            holding_stock = False
+            stock_cost_basis = 0.0
             max_val = capital
             max_dd = 0.0
 
             for cycle in range(cycles):
                 put_itm = price < strike
-                total_premium += premium
 
-                if put_itm:
-                    cost = strike - premium
-                    was_assigned = True
-                    z = random.gauss(0, 1)
-                    price = price * math.exp((drift - 0.5 * iv**2) * dt + iv * math.sqrt(dt) * z)
-                    path.append(price)
+                if holding_stock:
+                    # 已持仓：卖 Covered Call，不再卖 Put
                     call_premium = premium * 0.8
                     total_premium += call_premium
-                    call_itm = price > strike
-                    if call_itm:
-                        price = strike
-                        was_assigned = False
-                else:
-                    was_assigned = False
                     z = random.gauss(0, 1)
                     price = price * math.exp((drift - 0.5 * iv**2) * dt + iv * math.sqrt(dt) * z)
                     path.append(price)
+                    call_itm = price > strike
+                    if call_itm:
+                        # 被 Call 走：以 strike 卖出，结算持仓盈亏
+                        total_premium += (strike - stock_cost_basis)
+                        price = strike
+                        holding_stock = False
+                        was_assigned = False
+                else:
+                    total_premium += premium
+                    if put_itm:
+                        # 被行权：以 strike 买入标的
+                        cost = strike - premium
+                        was_assigned = True
+                        holding_stock = True
+                        stock_cost_basis = strike
+                        z = random.gauss(0, 1)
+                        price = price * math.exp((drift - 0.5 * iv**2) * dt + iv * math.sqrt(dt) * z)
+                        path.append(price)
+                        call_premium = premium * 0.8
+                        total_premium += call_premium
+                        call_itm = price > strike
+                        if call_itm:
+                            total_premium += (strike - stock_cost_basis)
+                            price = strike
+                            was_assigned = False
+                            holding_stock = False
+                    else:
+                        was_assigned = False
+                        z = random.gauss(0, 1)
+                        price = price * math.exp((drift - 0.5 * iv**2) * dt + iv * math.sqrt(dt) * z)
+                        path.append(price)
 
                 current_val = capital + total_premium
                 if current_val > max_val:
@@ -308,9 +330,13 @@ class WheelSimulator:
                 if dd > max_dd:
                     max_dd = dd
 
+            # 结算未平仓持仓的市值
+            if holding_stock:
+                total_premium += (price - stock_cost_basis)
+
             roi = total_premium / capital
             all_rois.append(roi)
-            if total_premium > 0:
+            if roi > 0:
                 win_count += 1
             drawdowns.append(max_dd)
 
