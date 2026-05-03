@@ -1,4 +1,4 @@
-import { $, safeHTML, STRATEGY_PRESETS, API_BASE, API_TIMEOUT_MS, FETCH_MAX_RETRIES, TABLE_PAGE_SIZE, getApiKey, safeFetch, getFieldName } from './utils.js';
+import { $, safeHTML, STRATEGY_PRESETS, API_BASE, API_TIMEOUT_MS, FETCH_MAX_RETRIES, TABLE_PAGE_SIZE, getApiKey, safeFetch, getFieldName, getRecommendationLabel, getRecommendationColor } from './utils.js';
 import { loadTermStructure, showTermStructureError } from './term-structure.js';
 import { loadMaxPain, showMaxPainError } from './maxpain.js';
 import { runSandbox, exportCSV } from './sandbox.js';
@@ -65,6 +65,279 @@ function requestNotificationPermission() {
         Notification.requestPermission();
     }
 }
+
+// ── 策略分析中心 ──────────────────────────────────────────────
+let anaChartInstance = null;
+let anaDistChartInstance = null;
+let anaMultiLegs = [];
+
+window.setAnalysisMode = function(mode) {
+    const modes = ['payoff', 'multi', 'wheel', 'compare'];
+    const btnIds = ['anaModePayoff', 'anaModeMulti', 'anaModeWheel', 'anaModeCompare'];
+    const divIds = ['anaPayoffMode', 'anaMultiMode', 'anaWheelMode', 'anaCompareMode'];
+
+    modes.forEach((m, i) => {
+        const btn = document.getElementById(btnIds[i]);
+        const div = document.getElementById(divIds[i]);
+        if (btn) {
+            if (m === mode) {
+                btn.className = 'px-3 py-1.5 rounded-lg text-sm font-medium bg-cyan-600 text-white';
+            } else {
+                btn.className = 'px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300';
+            }
+        }
+        if (div) div.classList.toggle('hidden', m !== mode);
+    });
+
+    const metricsRow = document.getElementById('anaMetricsRow');
+    const wheelStats = document.getElementById('anaWheelStats');
+    const wheelDist = document.getElementById('anaWheelDistChart');
+    if (metricsRow) metricsRow.classList.add('hidden');
+    if (wheelStats) wheelStats.classList.add('hidden');
+    if (wheelDist) wheelDist.classList.add('hidden');
+
+    localStorage.setItem('analysis_mode', mode);
+};
+
+window.anaCalcPayoff = async function() {
+    const spot = await getCurrentSpot();
+    if (!spot) return;
+
+    const strike = parseFloat(document.getElementById('anaPayoffStrike').value) || 0;
+    const premium = parseFloat(document.getElementById('anaPayoffPremium').value) || 0;
+    const dte = parseInt(document.getElementById('anaPayoffDTE').value) || 30;
+    const iv = parseFloat(document.getElementById('anaPayoffIV').value) || 60;
+    const qty = parseFloat(document.getElementById('anaPayoffQty').value) || 1;
+    const side = document.getElementById('anaPayoffSide').value;
+    const optionType = document.getElementById('anaPayoffType').value;
+
+    try {
+        const res = await safeFetch('/api/analytics/payoff', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                mode: 'single', spot, strike, premium,
+                option_type: optionType, dte, iv,
+                quantity: qty, side
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            renderAnalysisMetrics(data);
+            renderPayoffChart(data.payoff_curve, spot, data.breakeven);
+        }
+    } catch (e) {
+        console.error('Payoff calc error:', e);
+    }
+};
+
+window.anaCalcWheel = async function() {
+    const spot = await getCurrentSpot();
+    if (!spot) return;
+
+    const strike = parseFloat(document.getElementById('anaWheelStrike').value) || 0;
+    const premium = parseFloat(document.getElementById('anaWheelPremium').value) || 0;
+    const capital = parseFloat(document.getElementById('anaWheelCapital').value) || 100000;
+    const cycles = parseInt(document.getElementById('anaWheelCycles').value) || 6;
+    const iv = parseFloat(document.getElementById('anaWheelIV').value) || 0.6;
+    const sims = parseInt(document.getElementById('anaWheelSims').value) || 1000;
+
+    try {
+        const res = await safeFetch('/api/analytics/wheel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                spot, strike, premium, option_type: 'PUT',
+                cycles, capital, iv, simulations: sims
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            renderWheelStats(data.summary, data.score);
+            renderWheelDistChart(data.roi_distribution);
+        }
+    } catch (e) {
+        console.error('Wheel simulation error:', e);
+    }
+};
+
+window.anaEstimatePremium = async function() {
+    const spot = await getCurrentSpot();
+    if (!spot) return;
+
+    const strike = parseFloat(document.getElementById('anaPayoffStrike').value) || 0;
+    const dte = parseInt(document.getElementById('anaPayoffDTE').value) || 30;
+    const iv = parseFloat(document.getElementById('anaPayoffIV').value) || 60;
+    const optionType = document.getElementById('anaPayoffType').value;
+
+    try {
+        const res = await safeFetch('/api/analytics/estimate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ spot, strike, dte, iv, option_type: optionType })
+        });
+        const data = await res.json();
+        if (data.success && data.premium > 0) {
+            document.getElementById('anaPayoffPremium').value = Math.round(data.premium);
+        }
+    } catch (e) {
+        console.error('Estimate error:', e);
+    }
+};
+
+function renderAnalysisMetrics(data) {
+    const metricsRow = document.getElementById('anaMetricsRow');
+    if (metricsRow) metricsRow.classList.remove('hidden');
+    const wheelStats = document.getElementById('anaWheelStats');
+    if (wheelStats) wheelStats.classList.add('hidden');
+    const wheelDist = document.getElementById('anaWheelDistChart');
+    if (wheelDist) wheelDist.classList.add('hidden');
+
+    setText('anaMaxProfit', '$' + formatNum(data.max_profit));
+    setText('anaMaxLoss', '$' + formatNum(data.max_loss));
+    setText('anaBreakeven', data.breakeven ? '$' + formatNum(data.breakeven) : '--');
+
+    if (data.score) {
+        const rec = data.score.recommendation || 'SKIP';
+        setText('anaScore', getRecommendationLabel(rec));
+    }
+}
+
+function renderWheelStats(summary, score) {
+    const wheelStats = document.getElementById('anaWheelStats');
+    if (wheelStats) wheelStats.classList.remove('hidden');
+    const wheelDist = document.getElementById('anaWheelDistChart');
+    if (wheelDist) wheelDist.classList.remove('hidden');
+    const metricsRow = document.getElementById('anaMetricsRow');
+    if (metricsRow) metricsRow.classList.add('hidden');
+
+    setText('anaWheelMeanROI', (summary.mean_roi * 100).toFixed(1) + '%');
+    setText('anaWheelMedianROI', (summary.median_roi * 100).toFixed(1) + '%');
+    setText('anaWheelWinRate', (summary.win_rate * 100).toFixed(0) + '%');
+    setText('anaWheelQuantiles', (summary.p10 * 100).toFixed(1) + '% / ' + (summary.p90 * 100).toFixed(1) + '%');
+    setText('anaWheelDrawdown', (summary.max_drawdown_mean * 100).toFixed(1) + '%');
+}
+
+function renderPayoffChart(curve, spot, breakeven) {
+    if (!curve || !curve.prices) return;
+    const canvas = document.getElementById('anaChart');
+    if (!canvas) return;
+
+    if (anaChartInstance) anaChartInstance.destroy();
+
+    const prices = curve.prices;
+    const pnl = curve.pnl;
+    const colors = pnl.map(v => v >= 0 ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)');
+
+    anaChartInstance = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: prices.map(p => formatNum(p)),
+            datasets: [{
+                label: '盈亏 ($)',
+                data: pnl,
+                backgroundColor: colors,
+                borderWidth: 0,
+                barPercentage: 1.0,
+                categoryPercentage: 1.0,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: {
+                    display: true,
+                    ticks: { maxTicksLimit: 10, color: '#9ca3af', font: { size: 10 } },
+                    grid: { color: 'rgba(75, 85, 99, 0.3)' }
+                },
+                y: {
+                    ticks: { color: '#9ca3af', callback: v => '$' + formatNum(v) },
+                    grid: { color: 'rgba(75, 85, 99, 0.3)' }
+                }
+            }
+        }
+    });
+}
+
+function renderWheelDistChart(distribution) {
+    if (!distribution || !distribution.length) return;
+    const canvas = document.getElementById('anaDistChart');
+    if (!canvas) return;
+
+    if (anaDistChartInstance) anaDistChartInstance.destroy();
+
+    const labels = distribution.map(d => (d[0] * 100).toFixed(1) + '%');
+    const counts = distribution.map(d => d[1]);
+
+    anaDistChartInstance = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '模拟次数',
+                data: counts,
+                backgroundColor: 'rgba(34, 211, 238, 0.6)',
+                borderColor: 'rgba(34, 211, 238, 1)',
+                borderWidth: 1,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: {
+                    ticks: { maxTicksLimit: 10, color: '#9ca3af', font: { size: 10 } },
+                    grid: { color: 'rgba(75, 85, 99, 0.3)' }
+                },
+                y: {
+                    ticks: { color: '#9ca3af' },
+                    grid: { color: 'rgba(75, 85, 99, 0.3)' }
+                }
+            }
+        }
+    });
+}
+
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
+function formatNum(n) {
+    if (n == null) return '--';
+    return Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+async function getCurrentSpot() {
+    const strCurrency = document.getElementById('strCurrency');
+    const currency = strCurrency ? strCurrency.value : 'BTC';
+    try {
+        const res = await safeFetch('/api/spot/' + currency);
+        const data = await res.json();
+        return data.spot || data.price || 0;
+    } catch (_) {
+        return 0;
+    }
+}
+
+// 推荐→分析联动
+window.linkToAnalysis = function(rec) {
+    const section = document.getElementById('analysisSection');
+    if (section) section.scrollIntoView({ behavior: 'smooth' });
+
+    window.setAnalysisMode('payoff');
+
+    if (rec.strike) document.getElementById('anaPayoffStrike').value = rec.strike;
+    if (rec.premium_usd) document.getElementById('anaPayoffPremium').value = Math.round(rec.premium_usd);
+    if (rec.dte) document.getElementById('anaPayoffDTE').value = rec.dte;
+    if (rec.option_type) {
+        const isPut = rec.option_type === 'P' || rec.option_type === 'PUT';
+        document.getElementById('anaPayoffType').value = isPut ? 'PUT' : 'CALL';
+    }
+};
 
 function setupEventListeners() {
     document.getElementById('autoRefresh').addEventListener('change', (e) => {
@@ -225,6 +498,36 @@ function setupEventListeners() {
             setStrategyDirection(savedDir);
         }
     } catch(_) {}
+
+    // 策略分析中心事件绑定
+    const anaModePayoff = document.getElementById('anaModePayoff');
+    if (anaModePayoff) anaModePayoff.addEventListener('click', () => setAnalysisMode('payoff'));
+    const anaModeMulti = document.getElementById('anaModeMulti');
+    if (anaModeMulti) anaModeMulti.addEventListener('click', () => setAnalysisMode('multi'));
+    const anaModeWheel = document.getElementById('anaModeWheel');
+    if (anaModeWheel) anaModeWheel.addEventListener('click', () => setAnalysisMode('wheel'));
+    const anaModeCompare = document.getElementById('anaModeCompare');
+    if (anaModeCompare) anaModeCompare.addEventListener('click', () => setAnalysisMode('compare'));
+
+    const anaCalcPayoffBtn = document.getElementById('anaCalcPayoffBtn');
+    if (anaCalcPayoffBtn) anaCalcPayoffBtn.addEventListener('click', anaCalcPayoff);
+    const anaCalcWheelBtn = document.getElementById('anaCalcWheelBtn');
+    if (anaCalcWheelBtn) anaCalcWheelBtn.addEventListener('click', anaCalcWheel);
+    const anaEstimateBtn = document.getElementById('anaEstimateBtn');
+    if (anaEstimateBtn) anaEstimateBtn.addEventListener('click', anaEstimatePremium);
+
+    // 推荐结果"分析"按钮事件委托
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.ana-link-btn');
+        if (!btn) return;
+        const rec = {
+            strike: parseFloat(btn.dataset.strike),
+            premium_usd: parseFloat(btn.dataset.premium),
+            dte: parseInt(btn.dataset.dte),
+            option_type: btn.dataset.type,
+        };
+        linkToAnalysis(rec);
+    });
 }
 
 function updateParamDisplay() {
@@ -842,7 +1145,9 @@ function renderStrategyResults(data) {
         html += '<td class="py-2 px-2 text-right">' + (r.open_interest || 0).toLocaleString() + '</td>';
         html += '<td class="py-2 px-2 text-right">' + (r.spread_pct || 0).toFixed(1) + '%</td>';
         html += '<td class="py-2 px-2 text-right font-mono">' + (sc.total || 0).toFixed(3) + '</td>';
-        html += '<td class="py-2 px-2 text-center"><span class="px-2 py-0.5 rounded text-xs ' + color + '">' + label + '</span></td>';
+        html += '<td class="py-2 px-2 text-center"><span class="px-2 py-0.5 rounded text-xs ' + color + '">' + label + '</span>';
+        html += '<button class="ana-link-btn text-cyan-400 hover:text-cyan-300 text-xs ml-2" data-strike="' + r.strike + '" data-premium="' + (r.premium_usd||0) + '" data-dte="' + r.dte + '" data-type="' + r.option_type + '"><i class="fas fa-chart-area"></i> 分析</button>';
+        html += '</td>';
         html += '</tr>';
         html += '<tr class="hidden detail-row"><td colspan="13" class="px-4 py-3 bg-gray-900/50">';
         html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">';
