@@ -14,8 +14,6 @@ API 路由模块
 - strategy.py: 策略计算端点
 - sandbox.py: 沙盘推演端点
 - risk.py: 风险评估端点
-- payoff.py: Payoff 计算端点
-- analytics.py: 策略分析端点（Payoff + Wheel 模拟）
 """
 
 from fastapi import APIRouter
@@ -32,8 +30,6 @@ from .refresh import router as refresh_router
 from .strategy import router as strategy_router
 from .sandbox import router as sandbox_router
 from .risk import router as risk_router
-from .payoff import router as payoff_router
-from .analytics import router as analytics_router
 from .llm_analyst import router as llm_analyst_router
 
 __all__ = [
@@ -49,7 +45,5 @@ __all__ = [
     "strategy_router",
     "sandbox_router",
     "risk_router",
-    "payoff_router",
-    "analytics_router",
     "llm_analyst_router",
 ]
