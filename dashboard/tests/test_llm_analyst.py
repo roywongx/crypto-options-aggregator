@@ -200,6 +200,62 @@ class TestLlmDebate:
         assert result["bear"]["success"] is False
 
 
+class TestLLMConfig:
+    """Test LLM config save/load/test"""
+
+    def test_save_and_load_config(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+
+        # Save
+        engine.save_config("sk-test123", "https://api.example.com/v1", "gpt-4o")
+
+        # Load
+        config = engine.load_config()
+        assert config["api_key"] == "sk-test123"
+        assert config["base_url"] == "https://api.example.com/v1"
+        assert config["model"] == "gpt-4o"
+
+    def test_load_config_empty(self):
+        from services.llm_analyst import LLMAnalystEngine
+        from db.connection import execute_write
+
+        # Clear config
+        execute_write("DELETE FROM llm_config WHERE id=1")
+
+        engine = LLMAnalystEngine()
+        config = engine.load_config()
+
+        assert config["api_key"] == ""
+        assert config["base_url"] == ""
+        assert config["model"] == ""
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_test_connection_success(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = "OK"
+
+        engine = LLMAnalystEngine()
+        result = engine.test_connection({"api_key": "sk-test", "model": "gpt-4o-mini"})
+
+        assert result["success"] is True
+        assert "latency_ms" in result
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_test_connection_failure(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = None
+
+        engine = LLMAnalystEngine()
+        result = engine.test_connection({"api_key": "sk-bad"})
+
+        assert result["success"] is False
+        assert "error" in result
+
+
 class TestLlmAudit:
     """Test _llm_audit anomaly detection"""
 

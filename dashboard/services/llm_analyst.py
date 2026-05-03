@@ -185,6 +185,67 @@ class LLMAnalystEngine:
             logger.warning("Failed to read LLM config: %s", e)
         return None
 
+    def load_config(self) -> Dict[str, str]:
+        """从数据库加载 LLM 配置"""
+        try:
+            from db.connection import execute_read
+            rows = execute_read(
+                "SELECT api_key, base_url, model FROM llm_config WHERE id=1"
+            )
+            if rows and rows[0]:
+                return {
+                    "api_key": rows[0][0] or "",
+                    "base_url": rows[0][1] or "",
+                    "model": rows[0][2] or "",
+                }
+        except Exception as e:
+            logger.warning("load_config failed: %s", e)
+        return {"api_key": "", "base_url": "", "model": ""}
+
+    def save_config(self, api_key: str, base_url: str = "", model: str = "") -> bool:
+        """保存 LLM 配置到数据库"""
+        try:
+            from db.connection import execute_write
+            execute_write(
+                """INSERT OR REPLACE INTO llm_config (id, api_key, base_url, model, updated_at)
+                   VALUES (1, ?, ?, ?, datetime('now'))""",
+                (api_key, base_url, model)
+            )
+            return True
+        except Exception as e:
+            logger.error("save_config failed: %s", e)
+            return False
+
+    def test_connection(self, config: Dict[str, str]) -> Dict[str, Any]:
+        """测试 LLM 连接"""
+        import time
+
+        custom_config = {}
+        if config.get("api_key"):
+            custom_config["api_key"] = config["api_key"]
+        if config.get("base_url"):
+            custom_config["base_url"] = config["base_url"]
+        if config.get("model"):
+            custom_config["model"] = config["model"]
+
+        start = time.time()
+        try:
+            response = ai_chat_with_config(
+                [{"role": "user", "content": "Reply with exactly: OK"}],
+                preset="fast", temperature=0, max_tokens=10,
+                custom_config=custom_config or None
+            )
+            latency = int((time.time() - start) * 1000)
+
+            if response and "OK" in response.upper():
+                return {"success": True, "latency_ms": latency, "model": config.get("model", "default")}
+            else:
+                return {"success": False, "error": f"模型返回异常: {response[:100] if response else '无响应'}", "latency_ms": latency}
+
+        except Exception as e:
+            latency = int((time.time() - start) * 1000)
+            return {"success": False, "error": str(e), "latency_ms": latency}
+
     def _llm_synthesize(self, context: Dict, rule_reports: Dict) -> Dict[str, Any]:
         """LLM 综合分析师 — 资深期权策略师"""
         system_prompt = """你是一位资深加密货币期权策略师。基于以下全量市场数据和规则引擎分析报告，给出综合研判。
