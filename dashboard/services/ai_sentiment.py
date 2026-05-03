@@ -358,8 +358,9 @@ class AISentimentAnalyzer:
                             score: Dict, reasoning: List, signals: List) -> float:
         """订单流维度分析"""
         # 判断买卖方向
-        is_buy = "BUY" in side or "B" in side
-        is_sell = "SELL" in side or "S" in side
+        side_upper = side.upper() if side else ""
+        is_buy = side_upper in ("BUY", "B")
+        is_sell = side_upper in ("SELL", "S")
         
         if not is_buy and not is_sell:
             # 未知方向，根据 Delta 推断
@@ -437,15 +438,14 @@ class AISentimentAnalyzer:
         
         # 简化 Gamma 估计：Gamma ≈ (1/S) × N'(d1) / (σ√T)
         # 这里使用 Delta 近似：ATM 附近 Gamma 最大
-        moneyness = strike / spot
         delta_distance = abs(abs_delta - 0.5)
-        
+
         # Gamma 峰值在 ATM，远离 ATM 递减
         gamma_factor = max(0, 1 - delta_distance * 2)
-        
+
         # 估计 Gamma 敞口 = 张数 × 合约乘数 × 价格 × Gamma因子
         notional = amount * spot  # 名义价值
-        gamma_exposure = notional * gamma_factor * 0.1  # 简化系数
+        gamma_exposure = notional * gamma_factor * gamma_factor  # quadratic falloff from ATM
         
         return gamma_exposure
     

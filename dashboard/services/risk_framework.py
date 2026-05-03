@@ -63,7 +63,7 @@ class RiskFramework:
         extreme = floors["extreme"]
         multiplier = config.RISK_FLOOR_MULTIPLIER
 
-        if spot > regular * multiplier:
+        if spot >= regular * multiplier:
             return "NORMAL"
         elif spot > regular:
             return "NEAR_FLOOR"

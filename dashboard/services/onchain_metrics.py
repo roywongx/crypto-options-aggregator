@@ -170,7 +170,7 @@ class OnChainMetrics:
             elif "value" in data:
                 return float(data["value"])
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning("MVRV获取失败: {e}")
+            logger.warning("MVRV获取失败: %s", e)
         
         return None
     
@@ -194,7 +194,7 @@ class OnChainMetrics:
             elif "value" in data:
                 return float(data["value"])
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning("Balanced Price获取失败: {e}")
+            logger.warning("Balanced Price获取失败: %s", e)
         
         return None
     
@@ -218,7 +218,7 @@ class OnChainMetrics:
                 ratio = current_price / wma_200 if wma_200 else None
                 return wma_200, ratio
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.warning("200WMA计算失败: {e}")
+            logger.warning("200WMA计算失败: %s", e)
         
         return None, None
     

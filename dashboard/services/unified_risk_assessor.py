@@ -155,7 +155,7 @@ class UnifiedRiskAssessor:
             score = sentiment_scores.get(status, 40)
             factors.append(f"基于价格位置的情绪评估: {status}")
 
-        return {"score": score, "factors": factors}
+        return {"score": max(0, score), "factors": factors}
 
     def _assess_liquidity_risk(self, currency: str) -> Dict[str, Any]:
         score = 30

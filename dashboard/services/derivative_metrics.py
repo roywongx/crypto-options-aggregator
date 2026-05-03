@@ -91,8 +91,8 @@ class DerivativeMetrics:
             returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
             
             # 7 天 Sharpe
-            returns_7d = returns[-7:]
-            sharpe_7d = cls._calc_single_sharpe(returns_7d)
+            returns_14d = returns[-14:]
+            sharpe_7d = cls._calc_single_sharpe(returns_14d)
             
             # 30 天 Sharpe
             returns_30d = returns[-30:]

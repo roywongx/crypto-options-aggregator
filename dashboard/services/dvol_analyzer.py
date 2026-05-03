@@ -103,7 +103,8 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
                 closes = [float(p[4]) for p in points]
                 if len(closes) > 1:
                     mean_val = sum(closes) / len(closes)
-                    std_val = (sum((x - mean_val) ** 2 for x in closes) / len(closes)) ** 0.5
+                    n = len(closes)
+                    std_val = (sum((x - mean_val) ** 2 for x in closes) / (n - 1)) ** 0.5 if n > 1 else 0
                     z_score = (current - mean_val) / std_val if std_val > 0 else 0
                 else:
                     z_score = 0

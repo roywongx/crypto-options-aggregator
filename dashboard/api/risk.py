@@ -45,8 +45,6 @@ def get_risk_overview_sync(currency: str = "BTC"):
     put_wall = None
     gamma_flip = None
     nearest_mp = None
-    mm_signal = ""
-    
     try:
         pain_data = _calc_max_pain_sync(currency)
         if pain_data and not pain_data.get("error"):
@@ -195,7 +193,6 @@ def get_risk_overview_sync(currency: str = "BTC"):
         "put_wall": put_wall,
         "gamma_flip": gamma_flip,
         "max_pain": nearest_mp,
-        "mm_signal": mm_signal,
         "onchain_metrics": onchain_data,
         "derivative_metrics": derivative_data,
         "pressure_test": pressure_test_data,
