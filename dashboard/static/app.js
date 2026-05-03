@@ -4411,8 +4411,367 @@ function renderDebateErrors(errors) {
         errors.map(e => `<div>• ${safeHTML(e)}</div>`).join('');
 }
 
-// 初始化辩论模块
-initDebateSection();
+// =========================================================================
+// AI 研判中心 (LLM Analyst)
+// =========================================================================
+
+function initLLMAnalystSection() {
+    const analyzeBtn = document.getElementById('llmAnalyzeBtn');
+    const quickBtn = document.getElementById('llmQuickBtn');
+    const configToggle = document.getElementById('llmConfigToggle');
+    const saveConfigBtn = document.getElementById('llmSaveConfig');
+    const testConnBtn = document.getElementById('llmTestConn');
+    const toggleRuleBtn = document.getElementById('llmToggleRuleAgents');
+
+    if (analyzeBtn) analyzeBtn.addEventListener('click', () => runLLMAnalysis('full'));
+    if (quickBtn) quickBtn.addEventListener('click', () => runLLMAnalysis('quick'));
+    if (configToggle) configToggle.addEventListener('click', toggleLLMConfig);
+    if (saveConfigBtn) saveConfigBtn.addEventListener('click', saveLLMConfig);
+    if (testConnBtn) testConnBtn.addEventListener('click', testLLMConnection);
+    if (toggleRuleBtn) toggleRuleBtn.addEventListener('click', toggleRuleAgents);
+
+    loadLLMConfigStatus();
+}
+
+function toggleLLMConfig() {
+    const panel = document.getElementById('llmConfigPanel');
+    panel.classList.toggle('hidden');
+}
+
+function toggleRuleAgents() {
+    const content = document.getElementById('llmRuleAgentsContent');
+    const icon = document.getElementById('llmRuleAgentsIcon');
+    content.classList.toggle('hidden');
+    icon.style.transform = content.classList.contains('hidden') ? '' : 'rotate(90deg)';
+}
+
+async function loadLLMConfigStatus() {
+    try {
+        const resp = await safeFetch(`${API_BASE}/api/llm-analyst/config`);
+        if (resp.ok) {
+            const config = await resp.json();
+            const status = document.getElementById('llmConfigStatus');
+            if (config.api_key && config.api_key !== '****') {
+                status.textContent = config.model ? `已配置 (${config.model})` : '已配置';
+                status.className = 'text-xs ml-2 text-green-400';
+            } else if (config.api_key === '****') {
+                status.textContent = config.model ? `已配置 (${config.model})` : '已配置';
+                status.className = 'text-xs ml-2 text-green-400';
+                if (config.base_url) document.getElementById('llmBaseUrl').value = config.base_url;
+                if (config.model) document.getElementById('llmModel').value = config.model;
+            } else {
+                status.textContent = '未配置';
+                status.className = 'text-xs ml-2 text-yellow-400';
+            }
+        }
+    } catch (e) {
+        // silent
+    }
+}
+
+async function saveLLMConfig() {
+    const apiKey = document.getElementById('llmApiKey').value.trim();
+    const baseUrl = document.getElementById('llmBaseUrl').value.trim();
+    const model = document.getElementById('llmModel').value.trim();
+
+    if (!apiKey) {
+        showAlert('请输入 API Key', 'warning');
+        return;
+    }
+
+    try {
+        const resp = await safeFetch(`${API_BASE}/api/llm-analyst/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model: model }),
+        });
+
+        if (resp.ok) {
+            showAlert('配置已保存', 'success');
+            document.getElementById('llmApiKey').value = '';
+            loadLLMConfigStatus();
+        } else {
+            const err = await resp.json();
+            showAlert('保存失败: ' + (err.detail || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showAlert('保存失败: ' + e.message, 'error');
+    }
+}
+
+async function testLLMConnection() {
+    const apiKey = document.getElementById('llmApiKey').value.trim();
+    const baseUrl = document.getElementById('llmBaseUrl').value.trim();
+    const model = document.getElementById('llmModel').value.trim();
+
+    if (!apiKey) {
+        showAlert('请先输入 API Key', 'warning');
+        return;
+    }
+
+    const resultSpan = document.getElementById('llmTestResult');
+    resultSpan.textContent = '测试中...';
+    resultSpan.className = 'text-xs ml-2 text-gray-400';
+
+    try {
+        const resp = await safeFetch(`${API_BASE}/api/llm-analyst/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model: model }),
+        });
+
+        const data = await resp.json();
+        if (data.success) {
+            resultSpan.textContent = `连接成功 (${data.latency_ms}ms)`;
+            resultSpan.className = 'text-xs ml-2 text-green-400';
+        } else {
+            resultSpan.textContent = `失败: ${data.error || '未知错误'}`;
+            resultSpan.className = 'text-xs ml-2 text-red-400';
+        }
+    } catch (e) {
+        resultSpan.textContent = '连接失败: ' + e.message;
+        resultSpan.className = 'text-xs ml-2 text-red-400';
+    }
+}
+
+async function runLLMAnalysis(mode) {
+    const currency = document.getElementById('llmCurrency').value;
+    const analyzeBtn = document.getElementById('llmAnalyzeBtn');
+    const quickBtn = document.getElementById('llmQuickBtn');
+    const progress = document.getElementById('llmProgress');
+    const empty = document.getElementById('llmEmpty');
+    const results = document.getElementById('llmResults');
+
+    analyzeBtn.disabled = true;
+    quickBtn.disabled = true;
+    analyzeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>分析中...</span>';
+    progress.classList.remove('hidden');
+    empty.classList.add('hidden');
+    results.classList.add('hidden');
+
+    resetLLMProgress();
+
+    try {
+        const resp = await safeFetch(`${API_BASE}/api/llm-analyst/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currency: currency, mode: mode }),
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+
+        const data = await resp.json();
+
+        setLLMStepComplete(1);
+        setLLMStepComplete(2);
+        if (mode === 'full') setLLMStepComplete(3);
+        setLLMStepComplete(4);
+        document.getElementById('llmProgressBar').style.width = '100%';
+
+        results.classList.remove('hidden');
+        renderLLMSynthesis(data.synthesis);
+        if (data.debate) renderLLMDebate(data.debate);
+        renderLLMAudit(data.audit);
+        renderLLMRuleAgents(data.rule_reports);
+
+    } catch (e) {
+        console.error('LLM analysis failed:', e);
+        showAlert('分析失败: ' + e.message, 'error');
+        empty.classList.remove('hidden');
+    } finally {
+        analyzeBtn.disabled = false;
+        quickBtn.disabled = false;
+        analyzeBtn.innerHTML = '<i class="fas fa-play"></i> <span>开始分析</span>';
+        setTimeout(() => progress.classList.add('hidden'), 2000);
+    }
+}
+
+function resetLLMProgress() {
+    const labels = ['规则分析', '综合研判', '多空辩论', '数据审计'];
+    for (let i = 1; i <= 4; i++) {
+        const step = document.getElementById(`llmStep${i}`);
+        step.className = 'flex items-center gap-1.5 text-xs text-gray-500';
+        step.innerHTML = '<i class="far fa-circle"></i> ' + labels[i-1];
+    }
+    document.getElementById('llmProgressBar').style.width = '0%';
+}
+
+function setLLMStepComplete(stepNum) {
+    const labels = ['规则分析', '综合研判', '多空辩论', '数据审计'];
+    const step = document.getElementById(`llmStep${stepNum}`);
+    step.className = 'flex items-center gap-1.5 text-xs text-green-400';
+    step.innerHTML = '<i class="fas fa-check-circle"></i> ' + labels[stepNum-1];
+    const progress = (stepNum / 4) * 100;
+    document.getElementById('llmProgressBar').style.width = progress + '%';
+}
+
+function renderLLMSynthesis(synthesis) {
+    const card = document.getElementById('llmSynthesisCard');
+    const content = document.getElementById('llmSynthesisContent');
+    const confSpan = document.getElementById('llmSynthesisConfidence');
+
+    if (!synthesis || !synthesis.success) {
+        card.classList.add('hidden');
+        return;
+    }
+
+    card.classList.remove('hidden');
+
+    const conf = synthesis.confidence || 0;
+    confSpan.textContent = `信心度 ${conf}%`;
+    confSpan.className = `text-xs px-2 py-0.5 rounded-full ${conf >= 70 ? 'bg-green-500/20 text-green-300' : conf >= 40 ? 'bg-yellow-500/20 text-yellow-300' : 'bg-red-500/20 text-red-300'} ml-auto`;
+
+    let html = '';
+    if (synthesis.market_assessment) {
+        html += `<div><span class="text-purple-400 font-medium">市场评估：</span><span>${safeHTML(synthesis.market_assessment)}</span></div>`;
+    }
+    if (synthesis.strategy_recommendation) {
+        html += `<div><span class="text-blue-400 font-medium">策略建议：</span><span>${safeHTML(synthesis.strategy_recommendation)}</span></div>`;
+    }
+    if (synthesis.risk_warning) {
+        html += `<div><span class="text-red-400 font-medium">风险提示：</span><span>${safeHTML(synthesis.risk_warning)}</span></div>`;
+    }
+    content.innerHTML = html;
+}
+
+function renderLLMDebate(debate) {
+    const card = document.getElementById('llmDebateCard');
+    if (!debate || !debate.success) {
+        card.classList.add('hidden');
+        return;
+    }
+    card.classList.remove('hidden');
+
+    // Bull
+    const bull = debate.bull || {};
+    document.getElementById('llmBullConf').textContent = bull.success ? `${bull.confidence || 0}%` : '失败';
+    let bullHtml = '';
+    if (bull.bullish_case) bullHtml += `<p>${safeHTML(bull.bullish_case)}</p>`;
+    if (bull.key_drivers && bull.key_drivers.length) {
+        bullHtml += '<ul class="list-disc list-inside mt-1">';
+        for (const d of bull.key_drivers) bullHtml += `<li>${safeHTML(d)}</li>`;
+        bullHtml += '</ul>';
+    }
+    document.getElementById('llmBullContent').innerHTML = bullHtml || '<p class="text-gray-500">分析失败</p>';
+
+    // Bear
+    const bear = debate.bear || {};
+    document.getElementById('llmBearConf').textContent = bear.success ? `${bear.confidence || 0}%` : '失败';
+    let bearHtml = '';
+    if (bear.bearish_case) bearHtml += `<p>${safeHTML(bear.bearish_case)}</p>`;
+    if (bear.key_risks && bear.key_risks.length) {
+        bearHtml += '<ul class="list-disc list-inside mt-1">';
+        for (const r of bear.key_risks) bearHtml += `<li>${safeHTML(r)}</li>`;
+        bearHtml += '</ul>';
+    }
+    document.getElementById('llmBearContent').innerHTML = bearHtml || '<p class="text-gray-500">分析失败</p>';
+
+    // Judge
+    const judge = debate.judge || {};
+    let judgeHtml = '';
+    if (judge.judge_verdict) judgeHtml += `<p class="font-medium">${safeHTML(judge.judge_verdict)}</p>`;
+    if (judge.winner) {
+        const winnerColors = { bull: 'text-green-400', bear: 'text-red-400', draw: 'text-yellow-400' };
+        const winnerLabels = { bull: '多头胜', bear: '空头胜', draw: '平局' };
+        judgeHtml += `<p class="${winnerColors[judge.winner] || 'text-gray-300'} font-bold mt-2">${winnerLabels[judge.winner] || judge.winner}</p>`;
+    }
+    if (judge.reasoning) judgeHtml += `<p class="mt-1 text-gray-400">${safeHTML(judge.reasoning)}</p>`;
+    document.getElementById('llmJudgeContent').innerHTML = judgeHtml || '<p class="text-gray-500">裁决生成中</p>';
+}
+
+function renderLLMAudit(audit) {
+    const card = document.getElementById('llmAuditCard');
+    if (!audit) {
+        card.classList.add('hidden');
+        return;
+    }
+    card.classList.remove('hidden');
+
+    const score = audit.data_quality_score || 0;
+    const scoreEl = document.getElementById('llmAuditScore');
+    const fillEl = document.getElementById('llmAuditScoreFill');
+
+    scoreEl.textContent = score;
+    scoreEl.className = `text-lg font-bold ${score >= 80 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'}`;
+    fillEl.style.width = score + '%';
+    fillEl.className = `h-full rounded-full transition-all ${score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`;
+
+    const content = document.getElementById('llmAuditContent');
+    let html = '';
+
+    const anomalies = audit.anomalies || [];
+    const issues = audit.logic_issues || [];
+
+    if (anomalies.length === 0 && issues.length === 0) {
+        html = '<div class="text-green-400 text-sm"><i class="fas fa-check-circle mr-1"></i>未发现数据异常</div>';
+    } else {
+        for (const a of anomalies) {
+            const sevColors = { critical: 'red', warning: 'yellow', info: 'blue' };
+            const sevIcons = { critical: 'exclamation-triangle', warning: 'exclamation-circle', info: 'info-circle' };
+            const color = sevColors[a.severity] || 'gray';
+            const icon = sevIcons[a.severity] || 'info-circle';
+            html += `<div class="flex items-start gap-2 p-2 rounded bg-${color}-900/20 border border-${color}-500/20 text-sm">`;
+            html += `<i class="fas fa-${icon} text-${color}-400 mt-0.5"></i>`;
+            html += `<div><span class="text-${color}-300 font-medium">[${safeHTML(a.source || '')}]</span> ${safeHTML(a.description || '')}`;
+            if (a.suggestion) html += `<div class="text-xs text-gray-400 mt-1">建议: ${safeHTML(a.suggestion)}</div>`;
+            html += `</div></div>`;
+        }
+        for (const i of issues) {
+            const sevColors = { critical: 'red', warning: 'yellow', info: 'blue' };
+            const color = sevColors[i.severity] || 'gray';
+            html += `<div class="flex items-start gap-2 p-2 rounded bg-${color}-900/20 border border-${color}-500/20 text-sm">`;
+            html += `<i class="fas fa-cog text-${color}-400 mt-0.5"></i>`;
+            html += `<div><span class="text-${color}-300 font-medium">[${safeHTML(i.component || '')}]</span> ${safeHTML(i.description || '')}`;
+            if (i.suggestion) html += `<div class="text-xs text-gray-400 mt-1">建议: ${safeHTML(i.suggestion)}</div>`;
+            html += `</div></div>`;
+        }
+    }
+
+    content.innerHTML = html;
+}
+
+function renderLLMRuleAgents(ruleReports) {
+    const countSpan = document.getElementById('llmRuleAgentsCount');
+    const content = document.getElementById('llmRuleAgentsContent');
+
+    const reports = ruleReports?.reports || [];
+    countSpan.textContent = `(${reports.length} 个 Agent)`;
+
+    let html = '';
+    const agentColors = {
+        '\u{1f402} 多头分析师': { bg: 'green', icon: '\u{1f402}' },
+        '\u{1f43b} 空头分析师': { bg: 'red', icon: '\u{1f43b}' },
+        '\u{1f4ca} 波动率分析师': { bg: 'blue', icon: '\u{1f4ca}' },
+        '\u{1f40b} 资金流向分析师': { bg: 'purple', icon: '\u{1f40b}' },
+        '\u{1f6e1}️ 风险官': { bg: 'yellow', icon: '\u{1f6e1}️' },
+    };
+
+    for (const r of reports) {
+        const colors = agentColors[r.name] || { bg: 'gray', icon: '\u{1f916}' };
+        const score = r.score || 0;
+        const scoreColor = score > 20 ? 'text-green-400' : score > 0 ? 'text-emerald-300' : score > -20 ? 'text-yellow-400' : 'text-red-400';
+
+        html += `<div class="card-glass rounded-lg p-3 border-l-4 border-${colors.bg}-500/60">`;
+        html += `<div class="flex items-center justify-between mb-2">`;
+        html += `<div class="flex items-center gap-1.5"><span>${colors.icon}</span><span class="text-xs font-semibold">${safeHTML(r.name)}</span></div>`;
+        html += `<span class="text-sm font-bold ${scoreColor}">${score > 0 ? '+' : ''}${score}</span>`;
+        html += `</div>`;
+        html += `<div class="text-[10px] text-gray-400 mb-1">${safeHTML(r.verdict || '')} · 置信度 ${r.confidence || 0}%</div>`;
+        html += `<ul class="text-[10px] text-gray-300 space-y-0.5">`;
+        for (const pt of (r.key_points || []).slice(0, 3)) {
+            html += `<li>• ${safeHTML(pt)}</li>`;
+        }
+        html += `</ul></div>`;
+    }
+
+    content.innerHTML = html;
+}
+
+// 初始化 AI 研判中心
+initLLMAnalystSection();
 
 
 // ============================================================
