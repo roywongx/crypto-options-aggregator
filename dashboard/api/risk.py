@@ -200,6 +200,44 @@ def get_risk_overview_sync(currency: str = "BTC"):
     }
 
 
+@router.get("/risk/llm-insight")
+async def get_llm_risk_insight(currency: str = Query(default="BTC")):
+    """LLM 智能研判端点 — 基于全量风险数据生成分析报告"""
+    try:
+        from services.llm_analyst import LLMAnalystEngine
+        from services.ai_router import ai_chat_with_config
+        import json as _json
+
+        risk_data = await run_in_threadpool(get_risk_overview_sync, currency.upper())
+
+        prompt = f"""你是加密货币风险分析师。基于以下风险数据，给出分析。
+
+数据：
+{_json.dumps(risk_data, ensure_ascii=False, indent=2)}
+
+输出 JSON：
+{{
+  "narrative": "200字以内的风险总评",
+  "anomalies": ["异常1", "异常2"],
+  "recommendations": ["建议1", "建议2"],
+  "confidence": 0-100
+}}"""
+
+        custom_config = LLMAnalystEngine()._get_custom_config()
+        response = ai_chat_with_config(
+            [{"role": "user", "content": prompt}],
+            preset="analysis", temperature=0.3, max_tokens=1500,
+            custom_config=custom_config
+        )
+
+        parsed = LLMAnalystEngine()._parse_json_response(response)
+        return parsed or {"narrative": response, "anomalies": [], "recommendations": [], "confidence": 50}
+
+    except Exception as e:
+        logger.warning("LLM insight failed: %s", e)
+        return {"narrative": f"LLM 服务不可用: {e}", "anomalies": [], "recommendations": [], "confidence": 0}
+
+
 @router.get("/risk/assess")
 async def get_risk_assessment(currency: str = Query(default="BTC")):
     """风险评估"""
