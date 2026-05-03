@@ -187,13 +187,12 @@ def calc_pop(delta_val: float, option_type: str, spot: float, strike: float, iv:
         sqrt_t = math.sqrt(dte_years)
 
         d1 = (math.log(spot / strike) + (0.5 * iv_decimal ** 2) * dte_years) / (iv_decimal * sqrt_t)
+        d2 = d1 - iv_decimal * sqrt_t
 
         if option_type.upper() == "CALL":
-            nd1 = norm.cdf(d1)
-            pop = 1 - nd1 if delta_val > 0 else nd1
+            pop = norm.cdf(d2)       # P(S_T > K) = N(d2)
         else:
-            nd1 = norm.cdf(-d1)
-            pop = 1 - nd1 if delta_val < 0 else nd1
+            pop = norm.cdf(-d2)      # P(S_T < K) = N(-d2)
 
         return max(0.0, min(1.0, pop))
     except (ImportError, ValueError, ZeroDivisionError) as e:
