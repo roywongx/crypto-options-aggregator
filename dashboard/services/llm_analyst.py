@@ -446,5 +446,88 @@ class LLMAnalystEngine:
         }
 
     def _llm_audit(self, context: Dict, rule_reports: Dict, synthesis: Dict) -> Dict[str, Any]:
-        """LLM 异常检测 — 留给 Task 5 实现"""
-        return {"success": False, "placeholder": "audit not implemented"}
+        """LLM 数据质量审计 — 异常检测"""
+        system_prompt = """你是数据质量审计师。审查以下加密货币期权分析数据，找出异常。
+
+检查维度：
+1. 数据源间一致性：DVOL vs IV、链上信号 vs 衍生品信号、价格 vs 成交量
+2. 计算逻辑合理性：APR 是否异常（>200%?）、胜率是否合理（>95%?）、spread 是否正常
+3. 数据完整性：是否有缺失字段、数据是否过期（timestamp > 1小时?）
+4. 前端展示一致性：策略引擎输出 vs 原始数据是否匹配
+
+输出 JSON：
+{
+  "anomalies": [
+    {"severity": "critical|warning|info", "source": "数据源名", "description": "描述", "suggestion": "建议"}
+  ],
+  "logic_issues": [
+    {"severity": "...", "component": "模块名", "description": "...", "suggestion": "..."}
+  ],
+  "data_quality_score": 0-100
+}"""
+
+        # 组装全量原始数据
+        raw_data = {
+            "currency": context["currency"],
+            "spot": context.get("spot", 0),
+            "dvol": context.get("dvol", {}),
+            "onchain": context.get("onchain", {}),
+            "derivatives": context.get("derivatives", {}),
+            "macro": context.get("macro", {}),
+            "iv_term": context.get("iv_term", {}),
+            "max_pain": context.get("max_pain", 0),
+            "risk": context.get("risk", {}),
+            "contracts_count": len(context.get("contracts", [])),
+            "contracts_sample": context.get("contracts", [])[:5],
+            "large_trades_count": len(context.get("large_trades", [])),
+            "large_trades_sample": context.get("large_trades", [])[:5],
+            "strategy_summary": context.get("strategy_summary", {}),
+            "data_errors": context.get("errors", []),
+        }
+
+        user_prompt = f"""=== 全量原始数据 ===
+{json.dumps(raw_data, ensure_ascii=False, indent=2, default=str)}
+
+=== 规则引擎报告 ===
+{json.dumps(rule_reports, ensure_ascii=False, indent=2, default=str)}
+
+=== LLM 综合分析 ===
+{json.dumps(synthesis, ensure_ascii=False, indent=2, default=str)}
+
+请审查以上数据，返回异常检测 JSON。"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        custom_config = self._get_custom_config()
+
+        try:
+            response = ai_chat_with_config(
+                messages, preset="analysis", temperature=0.2,
+                max_tokens=2000, custom_config=custom_config
+            )
+            if not response:
+                return {"success": False, "error": "LLM 无响应", "anomalies": [], "logic_issues": [], "data_quality_score": 0}
+
+            parsed = self._parse_json_response(response)
+            if parsed is None:
+                return {"success": False, "error": "LLM 返回格式异常", "raw_response": response[:500],
+                        "anomalies": [], "logic_issues": [], "data_quality_score": 0}
+
+            # Validate required fields
+            required = {"anomalies", "logic_issues", "data_quality_score"}
+            if not required.issubset(parsed.keys()):
+                return {"success": False, "error": "LLM response missing required fields", "raw_response": response[:500],
+                        "anomalies": [], "logic_issues": [], "data_quality_score": 0}
+
+            parsed.setdefault("anomalies", [])
+            parsed.setdefault("logic_issues", [])
+            parsed.setdefault("data_quality_score", 0)
+            parsed["success"] = True
+            return parsed
+
+        except Exception as e:
+            logger.error("llm_audit failed: %s", e)
+            return {"success": False, "error": str(e), "anomalies": [], "logic_issues": [], "data_quality_score": 0}

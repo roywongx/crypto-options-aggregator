@@ -198,3 +198,52 @@ class TestLlmDebate:
         assert result["success"] is True
         assert result["bull"]["success"] is True
         assert result["bear"]["success"] is False
+
+
+class TestLlmAudit:
+    """Test _llm_audit anomaly detection"""
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_audit_parses_anomalies(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = json.dumps({
+            "anomalies": [
+                {"severity": "warning", "source": "DVOL", "description": "DVOL与IV不一致", "suggestion": "检查数据源"}
+            ],
+            "logic_issues": [],
+            "data_quality_score": 85,
+        })
+
+        engine = LLMAnalystEngine()
+        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
+               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+               "strategy_summary": {}}
+        rule_reports = {"reports": [], "synthesis": {}, "market_summary": {}}
+        synthesis = {"success": True}
+
+        result = engine._llm_audit(ctx, rule_reports, synthesis)
+
+        assert result["success"] is True
+        assert len(result["anomalies"]) == 1
+        assert result["anomalies"][0]["severity"] == "warning"
+        assert result["data_quality_score"] == 85
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_audit_handles_llm_failure(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = None
+
+        engine = LLMAnalystEngine()
+        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
+               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+               "strategy_summary": {}}
+        rule_reports = {"reports": [], "synthesis": {}, "market_summary": {}}
+        synthesis = {"success": True}
+
+        result = engine._llm_audit(ctx, rule_reports, synthesis)
+
+        assert result["success"] is False
