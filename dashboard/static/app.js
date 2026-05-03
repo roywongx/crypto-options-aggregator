@@ -972,7 +972,6 @@ window.setStrategyDirection = function(dir) {
 };
 
 window.fetchStrategyRecommend = async function() {
-    console.log('[Strategy] fetchStrategyRecommend called, mode=', _strMode, 'dir=', _strDirection);
     const loading = document.getElementById('strLoading');
     const empty = document.getElementById('strEmpty');
     const wrapper = document.getElementById('strResultsWrapper');
@@ -1015,14 +1014,12 @@ window.fetchStrategyRecommend = async function() {
     }
 
     try {
-        console.log('[Strategy] Sending request:', JSON.stringify(body));
         const res = await safeFetch('/api/strategy/recommend', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(body),
         });
         const data = await res.json();
-        console.log('[Strategy] Response:', data.success, 'recommendations:', data.recommendations?.length);
         if (loading) loading.classList.add('hidden');
 
         if (!data.success || !data.recommendations?.length) {
@@ -1856,10 +1853,7 @@ function updateRiskDashboardUI(data) {
 }
 
 function updateOnchainMetrics(onchain) {
-    console.log('[OnChain] 更新链上指标:', onchain);
-    
     if (!onchain) {
-        console.log('[OnChain] 警告: onchain 数据为空');
         return;
     }
     
@@ -2037,7 +2031,6 @@ function setMetricText(elementId, text) {
 
 function updateDerivativeMetrics(dm) {
     if (!dm || dm.error) {
-        console.log('[Derivative] 警告: 数据为空');
         return;
     }
     
@@ -2563,8 +2556,6 @@ function updateLargeTrades(trades, count) {
 
     if (!container) { console.warn('大单风向标: container not found'); return; }
 
-    console.log('大单风向标更新:', count, '条记录,', trades?.length || 0, '条详情');
-
     if (count > 0) { titleCount.textContent = count; titleCount.classList.remove('hidden'); }
     else titleCount.classList.add('hidden');
 
@@ -2949,18 +2940,11 @@ async function sendCopilotMessage(event) {
         if (aiCfg.base_url) headers['X-AI-Base-URL'] = aiCfg.base_url;
         if (aiCfg.model) headers['X-AI-Model'] = aiCfg.model;
 
-        // 调试日志
-        console.log('[AI Debug] 配置:', { hasKey: !!aiCfg.api_key, model: aiCfg.model, baseUrl: aiCfg.base_url });
-        console.log('[AI Debug] 请求 Headers:', Object.keys(headers));
-
         const response = await fetch(`${API_BASE}/api/copilot/chat?message=${encodeURIComponent(message)}&currency=${currency}`, {
             method: 'POST',
             headers: headers
         });
         const data = await response.json();
-
-        // 调试日志
-        console.log('[AI Debug] 响应:', data);
 
         // 移除加载中
         loadingDiv.remove();
@@ -3589,8 +3573,6 @@ async function _loadTermStructure(retryCount = 0) {
                 }
             }
         });
-        console.log('TS chart rendered:', validTs.length, 'points');
-
         // ===== v2.0 学术分析展示 =====
         const analysis = d.analysis;
         if (!analysis || analysis.error) {
@@ -3944,7 +3926,6 @@ async function _loadMaxPain(retryCount = 0) {
                 }
             }
         });
-        console.log('MP chart rendered:', strikes.length, 'strikes');
     } catch(e) {
         console.error('MP error:', e);
         if (retryCount < maxRetries) {
