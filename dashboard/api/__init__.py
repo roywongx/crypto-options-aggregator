@@ -33,7 +33,6 @@ from .strategy import router as strategy_router
 from .sandbox import router as sandbox_router
 from .risk import router as risk_router
 from .payoff import router as payoff_router
-from .debate import router as debate_router
 from .analytics import router as analytics_router
 from .llm_analyst import router as llm_analyst_router
 
@@ -51,7 +50,6 @@ __all__ = [
     "sandbox_router",
     "risk_router",
     "payoff_router",
-    "debate_router",
     "analytics_router",
     "llm_analyst_router",
 ]
