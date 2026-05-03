@@ -62,8 +62,8 @@ class TestPrepareContext:
             "contracts": [], "max_pain": 0, "risk_status": "UNKNOWN",
             "risk_label": "", "risk_desc": "", "errors": ["spot failed"],
         }
-        mock_onchain.get_all_metrics.return_value = {}
-        mock_deriv.get_all_metrics.return_value = {}
+        mock_onchain.get_all_metrics.side_effect = ConnectionError("timeout")
+        mock_deriv.get_all_metrics.side_effect = ConnectionError("api down")
         mock_macro.return_value = {}
         mock_iv.return_value.analyze.return_value = {}
 
@@ -72,8 +72,10 @@ class TestPrepareContext:
 
         assert ctx["currency"] == "BTC"
         assert ctx["spot"] == 0
-        assert isinstance(ctx["onchain"], dict)
-        assert isinstance(ctx["derivatives"], dict)
+        assert ctx["onchain"] == {}
+        assert ctx["derivatives"] == {}
         assert isinstance(ctx["macro"], dict)
         assert isinstance(ctx["iv_term"], dict)
         assert "spot failed" in ctx["errors"]
+        assert any("onchain" in e for e in ctx["errors"])
+        assert any("derivatives" in e for e in ctx["errors"])

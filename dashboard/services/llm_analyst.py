@@ -2,11 +2,10 @@
 LLM 分析师引擎 — AI 研判中心核心
 叠加在 5 个规则 agent 之上的 LLM 综合分析层
 """
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
