@@ -124,9 +124,6 @@ class OnChainMetrics:
     @classmethod
     def _get_current_price(cls) -> Optional[float]:
         """获取当前价格"""
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
         # Binance
         try:
             resp = request_with_retry(
