@@ -1,7 +1,4 @@
-"""Payoff 计算 API
-
-修复 H-4: 所有端点使用 Pydantic 输入验证
-"""
+"""Payoff 计算 API (兼容层 — 委托给 analytics engine)"""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -15,24 +12,12 @@ class PayoffCalcRequest(BaseModel):
     steps: int = Field(default=100, ge=1, le=1000)
 
 
-class PayoffScoreRequest(BaseModel):
-    legs: list
-    spot: float = Field(gt=0)
-    dte: int = Field(default=30, ge=1)
-    iv: float = Field(default=50, gt=0)
-
-
 class PayoffEstimateRequest(BaseModel):
     option_type: str = "P"
     strike: float = Field(gt=0)
     spot: float = Field(gt=0)
     dte: int = Field(default=30, ge=1)
     iv: float = Field(default=50, gt=0)
-
-
-class PayoffCompareRequest(BaseModel):
-    strategies: list
-    spot: float = Field(gt=0)
 
 
 class PayoffWheelRequest(BaseModel):
@@ -48,57 +33,63 @@ class PayoffWheelRequest(BaseModel):
 
 @router.post("/payoff/calc")
 async def calc_payoff(data: PayoffCalcRequest):
-    """计算策略Payoff图"""
-    from services.payoff_calculator import PayoffCalculator
-
-    calc = PayoffCalculator()
-
-    if not data.legs or not data.spot:
-        raise HTTPException(status_code=400, detail="缺少legs或spot参数")
-
-    return calc.calc_payoff(data.legs, data.spot, data.pct_range, data.steps)
-
-
-@router.post("/payoff/score")
-async def calc_strategy_score(data: PayoffScoreRequest):
-    """策略评分和实操建议"""
-    from services.payoff_calculator import PayoffCalculator
-
-    calc = PayoffCalculator()
-    score_data = calc.calc_strategy_score(data.legs, data.spot, data.dte, data.iv)
-    advice_data = calc.generate_strategy_advice(score_data, data.legs, data.spot)
-
+    """计算策略Payoff图 (兼容层)"""
+    from services.strategy_analytics import PayoffEngine
+    engine = PayoffEngine()
+    if not data.legs:
+        raise HTTPException(status_code=400, detail="缺少 legs 参数")
+    leg = data.legs[0] if data.legs else {}
+    result = engine.calc_single(
+        spot=data.spot,
+        strike=leg.get("strike", data.spot),
+        premium=leg.get("premium", 0),
+        option_type=leg.get("option_type", "P"),
+        dte=leg.get("dte", 30),
+        quantity=leg.get("quantity", 1),
+        side=leg.get("direction", "sell"),
+        pct_range=data.pct_range,
+        steps=data.steps,
+    )
     return {
-        "score": score_data,
-        "advice": advice_data
+        "prices": result["payoff_curve"]["prices"],
+        "total_pnl": result["payoff_curve"]["pnl"],
+        "legs": [{"pnl": result["payoff_curve"]["pnl"], **leg}],
+        "breakevens": [result["breakeven"]] if result["breakeven"] else [],
+        "max_profit": result["max_profit"],
+        "max_loss": result["max_loss"],
+        "spot": data.spot,
     }
 
 
 @router.post("/payoff/estimate")
 async def estimate_premium(data: PayoffEstimateRequest):
-    """智能估算权利金"""
-    from services.payoff_calculator import PayoffCalculator
-
-    calc = PayoffCalculator()
-    return calc.estimate_premium(data.option_type, data.strike, data.spot, data.dte, data.iv)
-
-
-@router.post("/payoff/compare")
-async def compare_strategies(data: PayoffCompareRequest):
-    """对比多个策略（最多 5 个）"""
-    from services.payoff_calculator import PayoffCalculator
-
-    calc = PayoffCalculator()
-    return calc.compare_strategies(data.strategies, data.spot)
+    """智能估算权利金 (兼容层)"""
+    from services.strategy_analytics import PayoffEngine
+    engine = PayoffEngine()
+    result = engine.estimate_premium(
+        spot=data.spot, strike=data.strike, dte=data.dte,
+        iv=data.iv, option_type=data.option_type,
+    )
+    return {"estimated_premium": result["premium"], **result}
 
 
 @router.post("/payoff/wheel")
 async def calc_wheel_roi(data: PayoffWheelRequest):
-    """计算 Wheel 策略 ROI（增强版）"""
-    from services.payoff_calculator import PayoffCalculator
-
-    calc = PayoffCalculator()
-    return calc.calc_wheel_roi(
-        data.put_strike, data.put_premium, data.call_strike, data.call_premium,
-        data.spot, data.quantity, data.put_dte, data.call_dte
+    """计算 Wheel ROI (兼容层)"""
+    from services.strategy_analytics import WheelSimulator
+    sim = WheelSimulator()
+    return sim.simulate(
+        spot=data.spot, strike=data.put_strike, premium=data.put_premium,
+        option_type="PUT", cycles=3, capital=data.put_strike * data.quantity,
+        simulations=500,
     )
+
+
+@router.post("/payoff/score")
+async def calc_strategy_score():
+    raise HTTPException(status_code=410, detail="已迁移至 /api/analytics/payoff?mode=single")
+
+
+@router.post("/payoff/compare")
+async def compare_strategies():
+    raise HTTPException(status_code=410, detail="已迁移至 /api/analytics/payoff?mode=multi")
