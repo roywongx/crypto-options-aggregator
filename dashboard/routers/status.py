@@ -11,9 +11,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["status"])
 
-DB_PATH = Path(__file__).parent.parent / "data" / "monitor.db"
-
-
 def get_db_connection(read_only: bool = True):
     from db.connection import get_db_connection as _db_conn
     return _db_conn(read_only=read_only)
@@ -30,7 +27,9 @@ async def get_stats():
         today_scans = rows[0][0] if rows else 0
         rows = await execute_read_async("SELECT COUNT(*) FROM large_trades_history")
         total_trades = rows[0][0] if rows else 0
-        db_size = os.path.getsize(DB_PATH) if DB_PATH.exists() else 0
+        from config import config as _cfg
+        _db = Path(_cfg.db_path)
+        db_size = os.path.getsize(_db) if _db.exists() else 0
         return {
             "total_scans": total_scans,
             "today_scans": today_scans,

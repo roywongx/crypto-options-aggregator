@@ -5,11 +5,11 @@ import csv
 import logging
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
 
 from db.connection import execute_read
 from services.spot_price import get_spot_price
 from services.risk_framework import RiskFramework
+from models.contracts import ScanParams, QuickScanParams
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["scan"])
@@ -22,28 +22,6 @@ def _get_spot_safe(currency: str) -> float:
     except (RuntimeError, ValueError) as e:
         logger.warning("Spot price fetch failed for %s: %s", currency, e)
         return 0
-
-
-class ScanParams(BaseModel):
-    currency: str = Field(default="BTC", description="交易对")
-    option_type: str = Field(default="PUT", description="期权类型")
-    min_dte: int = Field(default=14, ge=1, le=90)
-    max_dte: int = Field(default=35, ge=1, le=90)
-    max_delta: float = Field(default=0.5, ge=0.01, le=0.99)
-    strike: float = Field(default=None)
-    margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
-    min_volume: float = Field(default=0.0)
-    max_spread: float = Field(default=20.0)
-    
-    
-class QuickScanParams(BaseModel):
-    currency: str = Field(default="BTC")
-    option_type: str = Field(default="PUT")
-    min_dte: int = Field(default=5, ge=1)
-    max_dte: int = Field(default=45, ge=1)
-    max_delta: float = Field(default=0.6)
-    strike: float = Field(default=None)
-    margin_ratio: float = Field(default=0.2)
 
 
 @router.post("/scan")

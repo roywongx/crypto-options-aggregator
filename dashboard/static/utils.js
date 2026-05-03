@@ -29,6 +29,9 @@ export const FETCH_MAX_RETRIES = 1;
 export const TABLE_PAGE_SIZE = 30;
 
 export function getApiKey() {
+    // Security note: localStorage is accessible to any JS on the page.
+    // Mitigated by CSP headers in index.html restricting script sources.
+    // For higher security deployments, consider httpOnly cookie auth.
     try {
         return localStorage.getItem('dashboard_api_key') || '';
     } catch (_) {

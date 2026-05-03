@@ -126,7 +126,7 @@ async def lifespan(app: FastAPI):
 
         # 关闭 HTTP 客户端连接池
         try:
-            from services.async_http import close_async_client
+            from services.http_client import close_async_client
             await close_async_client()
             logger.info("异步 HTTP 客户端已关闭")
         except (ImportError, RuntimeError) as e:

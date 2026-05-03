@@ -3,12 +3,14 @@ Crypto Options Dashboard - 常量定义
 集中管理所有硬编码默认值，避免多处散布
 """
 
+import os
+
 # 现货价格回退值（仅当 API 和数据库都不可用时使用）
-# 这些是"最后手段"的默认值，实际应该优先使用实时价格或数据库缓存
+# 可通过环境变量覆盖: DASHBOARD_SPOT_BTC, DASHBOARD_SPOT_ETH, DASHBOARD_SPOT_SOL
 DEFAULT_SPOT_FALLBACK = {
-    "BTC": 83000.0,
-    "ETH": 3500.0,
-    "SOL": 150.0,
+    "BTC": float(os.getenv("DASHBOARD_SPOT_BTC", "83000")),
+    "ETH": float(os.getenv("DASHBOARD_SPOT_ETH", "3500")),
+    "SOL": float(os.getenv("DASHBOARD_SPOT_SOL", "150")),
 }
 
 def get_spot_fallback(currency: str) -> float:
