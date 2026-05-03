@@ -1320,307 +1320,95 @@ async function loadRiskDashboard(currency = 'BTC') {
 }
 
 function updateRiskDashboardUI(data) {
-    const scoreBadge = document.getElementById('riskScoreBadge');
-    if (scoreBadge) {
-        scoreBadge.textContent = `综合风险: ${data.composite_score}`;
-        scoreBadge.className = 'px-3 py-1 rounded-full text-sm font-bold ';
-        if (data.risk_level === 'LOW') {
-            scoreBadge.classList.add('bg-green-500/20', 'text-green-400');
-        } else if (data.risk_level === 'MEDIUM') {
-            scoreBadge.classList.add('bg-yellow-500/20', 'text-yellow-400');
-        } else if (data.risk_level === 'HIGH') {
-            scoreBadge.classList.add('bg-orange-500/20', 'text-orange-400');
-        } else {
-            scoreBadge.classList.add('bg-red-500/20', 'text-red-400', 'animate-pulse');
-        }
-    }
-    
-    // Status Badge
+    if (!data) return;
+
+    // Status badge
+    const statusMap = { 'NORMAL': ['正常', 'bg-green-900/50 text-green-400'], 'NEAR_FLOOR': ['接近支撑', 'bg-yellow-900/50 text-yellow-400'], 'ADVERSE': ['逆境', 'bg-orange-900/50 text-orange-400'], 'PANIC': ['恐慌', 'bg-red-900/50 text-red-400'] };
+    const status = data.status || 'NORMAL';
+    const [statusText, statusClass] = statusMap[status] || ['--', 'bg-gray-700 text-gray-300'];
     const badge = document.getElementById('rfStatusBadge');
-    if (badge && data.status) {
-        badge.innerText = data.status;
-        badge.className = 'px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ';
-        if (data.status === 'NORMAL') {
-            badge.classList.add('bg-green-500/20', 'text-green-400');
-        } else if (data.status === 'NEAR_FLOOR') {
-            badge.classList.add('bg-blue-500/20', 'text-blue-400');
-        } else if (data.status === 'ADVERSE') {
-            badge.classList.add('bg-orange-500/20', 'text-orange-400', 'animate-pulse');
-        } else if (data.status === 'PANIC') {
-            badge.classList.add('bg-red-500/20', 'text-red-400', 'animate-bounce');
-        }
+    if (badge) { badge.textContent = statusText; badge.className = 'px-2 py-0.5 rounded text-xs font-medium ' + statusClass; }
+
+    // Risk score
+    const score = data.risk_score || 0;
+    const scoreBadge = document.getElementById('riskScoreBadge');
+    if (scoreBadge) { scoreBadge.textContent = score; scoreBadge.style.color = getRiskColor(score); }
+
+    // Gauge
+    renderRiskGauge('riskGaugeCanvas', score);
+
+    // Radar
+    const dims = data.dimensions || {};
+    renderRiskRadar('riskRadarCanvas', { 'Price': dims.price || 0, 'Volatility': dims.volatility || 0, 'Sentiment': dims.sentiment || 0, 'Liquidity': dims.liquidity || 0 });
+
+    // 5 Indicator Cards
+    const spot = data.spot || 0;
+    if (data.max_pain && data.max_pain.price) {
+        const mp = data.max_pain.price;
+        document.getElementById('cardMaxPain').textContent = '$' + mp.toLocaleString();
+        document.getElementById('cardMaxPainDist').textContent = spot ? ((mp - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
     }
-    
-    // 4维度风险分数
-    const components = data.components;
-    if (components) {
-        const priceScore = document.getElementById('priceRiskScore');
-        const priceLevel = document.getElementById('priceRiskLevel');
-        if (priceScore && components.price_risk) {
-            priceScore.textContent = components.price_risk.score;
-            priceScore.className = 'text-2xl font-bold ' + getRiskColor(components.price_risk.score);
-            priceLevel.textContent = components.price_risk.status;
-        }
-        
-        const volScore = document.getElementById('volRiskScore');
-        const volLevel = document.getElementById('volRiskLevel');
-        if (volScore && components.volatility_risk) {
-            volScore.textContent = components.volatility_risk.score;
-            volScore.className = 'text-2xl font-bold ' + getRiskColor(components.volatility_risk.score);
-            volLevel.textContent = components.volatility_risk.signal || '正常';
-        }
-        
-        const sentScore = document.getElementById('sentimentRiskScore');
-        const sentLevel = document.getElementById('sentimentRiskLevel');
-        if (sentScore && components.sentiment_risk) {
-            sentScore.textContent = components.sentiment_risk.score;
-            sentScore.className = 'text-2xl font-bold ' + getRiskColor(components.sentiment_risk.score);
-            sentLevel.textContent = '基于价格';
-        }
-        
-        const liqScore = document.getElementById('liquidityRiskScore');
-        const liqLevel = document.getElementById('liquidityRiskLevel');
-        if (liqScore && components.liquidity_risk) {
-            liqScore.textContent = components.liquidity_risk.score;
-            liqScore.className = 'text-2xl font-bold ' + getRiskColor(components.liquidity_risk.score);
-            liqLevel.textContent = '正常';
-        }
+    if (data.put_wall) {
+        document.getElementById('cardPutWall').textContent = '$' + (data.put_wall.strike || 0).toLocaleString();
+        document.getElementById('cardPutWallOI').textContent = 'OI: ' + (data.put_wall.oi || 0).toLocaleString();
     }
-    
-    // 策略建议
-    const adviceList = document.getElementById('rfAdviceList');
-    if (adviceList && data.advice) {
-        adviceList.innerHTML = data.advice.map(a => `<li>${safeHTML(a)}</li>`).join('');
+    if (data.gamma_flip) {
+        document.getElementById('cardGammaFlip').textContent = '$' + (data.gamma_flip.strike || 0).toLocaleString();
+        document.getElementById('cardGammaFlipSignal').textContent = spot > data.gamma_flip.strike ? '多头Gamma区' : '空头Gamma区';
     }
-    
-    // 推荐操作
-    const actionList = document.getElementById('rfActionList');
-    if (actionList && data.recommended_actions) {
-        actionList.innerHTML = data.recommended_actions.map(a => 
-            `<span class="px-3 py-1 bg-green-500/20 border border-green-500/30 rounded-full text-xs text-green-300 font-medium">
-                <i class="fas fa-check mr-1"></i> ${safeHTML(a)}
-            </span>`
-        ).join('');
-    }
-    
-    // 市场痛点
-    const mpEl = document.getElementById('rfMaxPain');
-    if (mpEl) {
-        mpEl.innerText = data.max_pain ? `$${data.max_pain.toLocaleString()}` : '--';
-    }
-    
-    const distEl = document.getElementById('rfPainDist');
-    if (distEl && data.max_pain && data.spot) {
-        const diff = data.max_pain - data.spot;
-        const pct = (diff / data.spot * 100).toFixed(1);
-        const color = diff > 0 ? 'text-green-400' : 'text-red-400';
-        const icon = diff > 0 ? '↑' : '↓';
-        distEl.innerHTML = `<span class="${color}">${icon} ${Math.abs(diff).toLocaleString()} (${pct}%)</span>`;
-    }
-    
-    // MM Signal
-    const mmEl = document.getElementById('rfMmSignal');
-    if (mmEl) {
-        mmEl.innerHTML = data.mm_signal ? `<i class="fas fa-info-circle mr-2"></i> ${safeHTML(data.mm_signal)}` : '暂无做市商对冲信号';
-    }
-    
-    // 支撑位
     if (data.floors) {
-        const regularEl = document.getElementById('regularFloor');
-        const extremeEl = document.getElementById('extremeFloor');
-        const regularHeader = document.getElementById('floorRegularHeader');
-        const extremeHeader = document.getElementById('floorExtremeHeader');
-        
-        if (regularEl) regularEl.textContent = `$${data.floors.regular.toLocaleString()}`;
-        if (extremeEl) extremeEl.textContent = `$${data.floors.extreme.toLocaleString()}`;
-        if (regularHeader) regularHeader.textContent = `$${data.floors.regular.toLocaleString()}`;
-        if (extremeHeader) extremeHeader.textContent = `$${data.floors.extreme.toLocaleString()}`;
+        document.getElementById('cardFloorRegular').textContent = '$' + (data.floors.regular || 0).toLocaleString();
+        document.getElementById('cardFloorRegularDist').textContent = spot ? ((data.floors.regular - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
+        document.getElementById('cardFloorExtreme').textContent = '$' + (data.floors.extreme || 0).toLocaleString();
+        document.getElementById('cardFloorExtremeDist').textContent = spot ? ((data.floors.extreme - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
     }
 
-    // 仓位建议
-    const posGuide = data.position_guidance;
-    if (posGuide) {
-        const posEl = document.getElementById('positionGuidance');
-        if (posEl) {
-            const maxPct = posGuide.max_position_pct;
-            const deltaRange = posGuide.suggested_delta_range;
-            const dteRange = posGuide.suggested_dte;
-            posEl.innerHTML = `
-                <div class="flex items-center gap-4 text-sm">
-                    <div class="flex items-center gap-2">
-                        <i class="fas fa-chart-pie text-blue-400"></i>
-                        <span class="text-gray-400">最大仓位:</span>
-                        <span class="font-bold ${maxPct === 0 ? 'text-red-400' : maxPct <= 15 ? 'text-orange-400' : maxPct >= 40 ? 'text-emerald-400' : 'text-green-300'}">${maxPct}%</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <i class="fas fa-crosshairs text-yellow-400"></i>
-                        <span class="text-gray-400">Delta:</span>
-                        <span class="font-mono font-bold text-yellow-300">${safeHTML(deltaRange)}</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <i class="fas fa-clock text-purple-400"></i>
-                        <span class="text-gray-400">DTE:</span>
-                        <span class="font-mono font-bold text-purple-300">${safeHTML(dteRange)}</span>
-                    </div>
-                </div>
-            `;
-        }
+    // Floors in header
+    if (data.floors) {
+        document.getElementById('floorRegularHeader').textContent = '$' + (data.floors.regular || 0).toLocaleString();
+        document.getElementById('floorExtremeHeader').textContent = '$' + (data.floors.extreme || 0).toLocaleString();
     }
 
-    // Put Wall / Gamma Flip
-    const pwEl = document.getElementById('putWallInfo');
-    const gfEl = document.getElementById('gammaFlipInfo');
-    if (pwEl && data.put_wall) {
-        const pw = data.put_wall;
-        const distPct = ((data.spot - pw.strike) / pw.strike * 100).toFixed(1);
-        pwEl.innerHTML = `<span class="text-emerald-400 font-bold">$${pw.strike.toLocaleString()}</span> <span class="text-gray-500 text-xs">(OI: ${pw.oi.toLocaleString()})</span> <span class="${distPct > 0 ? 'text-emerald-400' : 'text-red-400'} text-xs">${distPct > 0 ? '↑' + distPct + '%' : '↓' + Math.abs(distPct) + '%'}</span>`;
-    } else if (pwEl) {
-        pwEl.innerHTML = '<span class="text-gray-500">--</span>';
-    }
-    if (gfEl && data.gamma_flip) {
-        const gf = data.gamma_flip;
-        const isAbove = data.spot > gf.strike;
-        gfEl.innerHTML = `<span class="${isAbove ? 'text-emerald-400' : 'text-red-400'} font-bold">$${gf.strike.toLocaleString()}</span> <span class="text-xs ${isAbove ? 'text-emerald-400' : 'text-red-400'}">${isAbove ? '✅ 多头Gamma区' : '⚠️ 空头Gamma区'}</span>`;
-    } else if (gfEl) {
-        gfEl.innerHTML = '<span class="text-gray-500">--</span>';
-    }
+    // Sub-functions
+    if (data.onchain_metrics) updateOnchainMetrics(data.onchain_metrics);
+    if (data.derivative_metrics) updateDerivativeMetrics(data.derivative_metrics);
+    if (data.pressure_test) updatePressureTest(data.pressure_test);
+    if (data.ai_sentiment) updateSentimentAnalysis(data.ai_sentiment);
 
-    // 更新顶部指标卡
-    const supportDistCard = document.getElementById('supportDistCard');
-    if (supportDistCard && data.floors && data.spot) {
-        const distPct = ((data.spot - data.floors.regular) / data.floors.regular * 100).toFixed(1);
-        supportDistCard.textContent = distPct + '%';
-        supportDistCard.className = 'text-2xl font-bold ' + (distPct >= 15 ? 'text-emerald-400' : distPct >= 5 ? 'text-yellow-400' : 'text-red-400');
-    }
-    const riskScoreCard = document.getElementById('riskScoreCard');
-    const riskLevelCard = document.getElementById('riskLevelCard');
-    if (riskScoreCard) {
-        riskScoreCard.textContent = data.composite_score;
-        riskScoreCard.className = 'text-2xl font-bold ' + getRiskColor(data.composite_score);
-    }
-    if (riskLevelCard) {
-        riskLevelCard.textContent = data.risk_level || '综合风险';
-    }
-    
-    // 更新宏观数据
-    loadMacroData().catch(() => {});
-    
-    // 更新链上核心指标（v8.1新增）
-    updateOnchainMetrics(data.onchain_metrics);
-    
-    // 衍生品市场过热检测（v12.0新增）
-    updateDerivativeMetrics(data.derivative_metrics);
-    
-    // 压力测试系统（v9.0新增）
-    updatePressureTest(data.pressure_test);
-    
-    // AI 驱动的情绪分析（v9.0新增）
-    updateSentimentAnalysis(data.ai_sentiment);
+    // Default to onchain tab
+    setRiskTab('onchain');
 }
 
 function updateOnchainMetrics(onchain) {
-    if (!onchain) {
-        return;
-    }
-    
-    // ===== 汇合仪表盘 =====
-    updateConvergenceDashboard(onchain.convergence_score);
-    
-    // ===== MVRV Ratio =====
-    setMetricValue('onchainMVRV', onchain.mvrv_ratio, 2);
-    setMetricText('onchainMVRVSignal', onchain.mvrv_signal || '--');
-    if (onchain.mvrv_ratio !== null && onchain.mvrv_ratio !== undefined) {
-        const mvrvEl = document.getElementById('onchainMVRV');
-        const sigEl = document.getElementById('onchainMVRVSignal');
-        if (mvrvEl) mvrvEl.className = 'text-xl font-bold ' + (onchain.mvrv_ratio < 1 ? 'text-green-400' : onchain.mvrv_ratio < 3.5 ? 'text-yellow-400' : 'text-red-400');
-        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.mvrv_ratio < 1 ? 'text-green-500' : onchain.mvrv_ratio < 3.5 ? 'text-yellow-500' : 'text-red-500');
-    }
-    
-    // ===== MVRV Z-Score =====
-    const zscore = onchain.mvrv_z_score;
-    const zzone = onchain.mvrv_z_zone;
-    const zzoneName = onchain.mvrv_z_zone_name;
-    const zExtremes = onchain.mvrv_z_extremes || {};
-    
-    setMetricValue('onchainMVRVZScore', zscore, 2);
-    setMetricText('onchainMVRVZSignal', zzoneName || onchain.mvrv_z_signal || '--');
-    
-    if (zscore !== null && zscore !== undefined) {
-        const zEl = document.getElementById('onchainMVRVZScore');
-        const sigEl = document.getElementById('onchainMVRVZSignal');
-        
-        // Bitcoin Magazine Pro 颜色带区标准
-        let zColor, sigColor;
-        if (zzone === 'green') {
-            zColor = 'text-green-400';
-            sigColor = 'text-green-500';
-        } else if (zzone === 'pink') {
-            zColor = 'text-pink-400';
-            sigColor = 'text-pink-500';
-        } else {
-            zColor = 'text-yellow-400';
-            sigColor = 'text-yellow-500';
-        }
-        
-        if (zEl) zEl.className = 'text-xl font-bold ' + zColor;
-        if (sigEl) sigEl.className = 'text-xs mt-1 ' + sigColor;
-    }
-    
-    // Z-Score 历史极值提示
-    if (zExtremes && zExtremes.min_z !== undefined) {
-        const histEl = document.getElementById('onchainMVRVZHistory');
-        if (histEl) {
-            const histText = `历史极值: ${zExtremes.min_z} ~ ${zExtremes.max_z} | 百分位: ${zExtremes.current_percentile}%`;
-            histEl.textContent = histText;
-            histEl.className = 'text-[10px] text-gray-600 mt-1';
-        }
-    }
-    
-    // ===== NUPL =====
-    if (onchain.nupl !== null && onchain.nupl !== undefined) {
-        setMetricValue('onchainNUPL', onchain.nupl, 3);
-        setMetricText('onchainNUPLSignal', onchain.nupl_signal || '--');
-        const nuplEl = document.getElementById('onchainNUPL');
-        const sigEl = document.getElementById('onchainNUPLSignal');
-        if (nuplEl) nuplEl.className = 'text-xl font-bold ' + (onchain.nupl < 0 ? 'text-red-400' : onchain.nupl < 0.25 ? 'text-yellow-400' : onchain.nupl < 0.75 ? 'text-yellow-300' : 'text-green-400');
-        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.nupl < 0 ? 'text-red-500' : onchain.nupl < 0.25 ? 'text-yellow-500' : onchain.nupl < 0.75 ? 'text-yellow-300' : 'text-green-500');
-    }
-    
-    // ===== Mayer Multiple =====
-    setMetricValue('onchainMayer', onchain.mayer_multiple, 2);
-    setMetricText('onchainMayerSignal', onchain.mayer_signal || '--');
-    if (onchain.mayer_multiple !== null && onchain.mayer_multiple !== undefined) {
-        const mEl = document.getElementById('onchainMayer');
-        const sigEl = document.getElementById('onchainMayerSignal');
-        if (mEl) mEl.className = 'text-xl font-bold ' + (onchain.mayer_multiple < 1 ? 'text-green-400' : onchain.mayer_multiple < 2.4 ? 'text-yellow-400' : 'text-red-400');
-        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.mayer_multiple < 1 ? 'text-green-500' : onchain.mayer_multiple < 2.4 ? 'text-yellow-500' : 'text-red-500');
-    }
-    
-    // ===== 200WMA =====
-    setMetricValue('onchain200WMA', onchain.price_200wma, 0, '$');
-    setMetricText('onchain200WMARatio', onchain.price_to_200wma_ratio ? `当前价格 / 200WMA = ${onchain.price_to_200wma_ratio.toFixed(2)}x` : '--');
-    
-    // ===== Balanced Price =====
-    setMetricValue('onchainBalancedPrice', onchain.balanced_price, 0, '$');
-    setMetricText('onchainBalancedPriceRatio', onchain.balanced_price_ratio ? `当前价格 / BP = ${onchain.balanced_price_ratio.toFixed(2)}x` : '--');
-    
-    // ===== 200DMA =====
-    setMetricValue('onchain200DMA', onchain.price_200dma, 0, '$');
-    
-    // ===== 减半倒计时 =====
-    if (onchain.halving_days_remaining !== null && onchain.halving_days_remaining !== undefined) {
-        setMetricText('onchainHalvingDays', `${onchain.halving_days_remaining} 天`);
-    }
-    
-    // ===== Puell Multiple =====
-    setMetricValue('onchainPuell', onchain.puell_multiple, 2);
-    setMetricText('onchainPuellSignal', onchain.puell_signal || '--');
-    if (onchain.puell_multiple !== null && onchain.puell_multiple !== undefined) {
-        const pEl = document.getElementById('onchainPuell');
-        const sigEl = document.getElementById('onchainPuellSignal');
-        if (pEl) pEl.className = 'text-xl font-bold ' + (onchain.puell_multiple < 0.4 ? 'text-green-400' : onchain.puell_multiple < 2.0 ? 'text-yellow-400' : 'text-red-400');
-        if (sigEl) sigEl.className = 'text-xs mt-1 ' + (onchain.puell_multiple < 0.4 ? 'text-green-500' : onchain.puell_multiple < 2.0 ? 'text-yellow-500' : 'text-red-500');
-    }
+    if (!onchain || onchain.error) return;
+
+    // Convergence dashboard (keep existing logic)
+    if (onchain.convergence_score) updateConvergenceDashboard(onchain.convergence_score);
+
+    // 9 indicator cards into grid
+    const grid = document.getElementById('onchainGrid');
+    if (!grid) return;
+
+    const indicators = [
+        { id: 'MVRV', value: onchain.mvrv, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#10b981' : v < 3.5 ? '#eab308' : '#ef4444' },
+        { id: 'MVRV Z-Score', value: onchain.mvrv_zscore, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0 ? '#10b981' : v < 7 ? '#eab308' : '#ef4444' },
+        { id: 'NUPL', value: onchain.nupl, fmt: v => v != null ? (v * 100).toFixed(1) + '%' : '--', color: v => v < 0 ? '#ef4444' : v < 0.25 ? '#eab308' : v < 0.75 ? '#f97316' : '#10b981' },
+        { id: 'Mayer', value: onchain.mayer_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#10b981' : v < 2.4 ? '#eab308' : '#ef4444' },
+        { id: '200WMA', value: onchain.wma_200, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
+        { id: 'Balanced Price', value: onchain.balanced_price, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
+        { id: '200DMA', value: onchain.price_200dma, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
+        { id: 'Halving', value: onchain.halving_days, fmt: v => v != null ? v + ' 天' : '--', color: () => '#a78bfa' },
+        { id: 'Puell', value: onchain.puell_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0.4 ? '#10b981' : v < 2.0 ? '#eab308' : '#ef4444' }
+    ];
+
+    grid.innerHTML = indicators.map(ind => {
+        const val = ind.fmt(ind.value);
+        const clr = ind.color(ind.value);
+        return `<div class="bg-gray-800/50 rounded-lg p-3">
+            <div class="text-xs text-gray-400 mb-1">${ind.id}</div>
+            <div class="text-lg font-bold font-mono" style="color:${clr}">${val}</div>
+        </div>`;
+    }).join('');
 }
 
 function updateConvergenceDashboard(convergence) {
@@ -1695,69 +1483,34 @@ function setMetricText(elementId, text) {
     el.textContent = text || '--';
 }
 
-function updateDerivativeMetrics(dm) {
-    if (!dm || dm.error) {
-        return;
-    }
-    
-    // Sharpe 7d
-    setMetricValue('derivSharpe7d', dm.sharpe_ratio_7d, 2);
-    setMetricText('derivSharpe7dSignal', dm.sharpe_signal_7d || '--');
-    if (dm.sharpe_ratio_7d !== null && dm.sharpe_ratio_7d !== undefined) {
-        const el = document.getElementById('derivSharpe7d');
-        if (el) el.className = 'text-xl font-bold ' + (dm.sharpe_ratio_7d < -1 ? 'text-green-400' : dm.sharpe_ratio_7d < 0 ? 'text-yellow-400' : dm.sharpe_ratio_7d < 2 ? 'text-cyan-400' : 'text-red-400');
-    }
-    
-    // Sharpe 30d
-    setMetricValue('derivSharpe30d', dm.sharpe_ratio_30d, 2);
-    setMetricText('derivSharpe30dSignal', dm.sharpe_signal_30d || '--');
-    if (dm.sharpe_ratio_30d !== null && dm.sharpe_ratio_30d !== undefined) {
-        const el = document.getElementById('derivSharpe30d');
-        if (el) el.className = 'text-xl font-bold ' + (dm.sharpe_ratio_30d < -1 ? 'text-green-400' : dm.sharpe_ratio_30d < 0 ? 'text-yellow-400' : dm.sharpe_ratio_30d < 2 ? 'text-teal-400' : 'text-red-400');
-    }
-    
-    // 资金费率
-    if (dm.funding_rate !== null && dm.funding_rate !== undefined) {
-        const pct = dm.funding_rate * 100;
-        setMetricText('derivFundingRate', pct.toFixed(3) + '%');
-        setMetricText('derivFundingSignal', dm.funding_signal || '--');
-        const el = document.getElementById('derivFundingRate');
-        if (el) el.className = 'text-xl font-bold ' + (pct > 0.1 ? 'text-red-400' : pct > 0.05 ? 'text-orange-400' : pct < -0.05 ? 'text-green-400' : 'text-rose-400');
-    }
-    
-    // 期货/现货比率
-    setMetricValue('derivVolRatio', dm.futures_spot_ratio, 2);
-    setMetricText('derivVolRatioSignal', dm.futures_spot_signal || '--');
-    if (dm.futures_spot_ratio !== null && dm.futures_spot_ratio !== undefined) {
-        const el = document.getElementById('derivVolRatio');
-        if (el) el.className = 'text-xl font-bold ' + (dm.futures_spot_ratio > 3 ? 'text-red-400' : dm.futures_spot_ratio > 1.5 ? 'text-yellow-400' : 'text-violet-400');
-    }
-    
-    // 综合评估
-    const oa = dm.overheating_assessment;
-    if (oa) {
-        const badge = document.getElementById('derivOverheatBadge');
-        const advice = document.getElementById('derivOverheatAdvice');
-        const signals = document.getElementById('derivOverheatSignals');
-        
-        if (badge) {
-            badge.textContent = oa.icon + ' ' + oa.name;
-            badge.className = 'px-3 py-1 rounded-full text-xs font-bold ' + (oa.color || 'text-gray-400') + ' ' + getDerivBg(oa.level);
-        }
-        if (advice) advice.textContent = oa.advice || '--';
-        
-        if (signals && oa.signals && oa.signals.length > 0) {
-            const colors = {
-                'bottom': 'text-green-400 bg-green-500/10 border-green-500/30',
-                'top': 'text-red-400 bg-red-500/10 border-red-500/30',
-                'neutral': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
-            };
-            signals.innerHTML = oa.signals.map(([icon, name, type]) => {
-                const c = colors[type] || colors.neutral;
-                return '<div class="p-2 rounded border ' + c + '">' + safeHTML(icon) + ' ' + safeHTML(name) + '</div>';
-            }).join('');
-        }
-    }
+function updateDerivativeMetrics(deriv) {
+    if (!deriv || deriv.error) return;
+
+    const section = document.getElementById('derivOverheatSection');
+    const grid = document.getElementById('derivGrid');
+    if (!section || !grid) return;
+
+    // Overheating assessment
+    const oh = deriv.overheating_assessment || {};
+    const level = oh.level || 'NORMAL';
+    const levelColors = { NORMAL: 'bg-green-900/50 text-green-400', WARM: 'bg-yellow-900/50 text-yellow-400', HOT: 'bg-orange-900/50 text-orange-400', OVERHEATED: 'bg-red-900/50 text-red-400' };
+    section.innerHTML = `<div class="flex items-center gap-3 mb-2">
+        <span class="px-2 py-0.5 rounded text-xs font-medium ${levelColors[level] || levelColors.NORMAL}">${level}</span>
+        <span class="text-sm text-gray-300">${oh.advice || ''}</span>
+    </div>`;
+
+    // 4 metric cards
+    const metrics = [
+        { id: 'Sharpe 14d', value: deriv.sharpe_7d, fmt: v => v != null ? v.toFixed(2) : '--' },
+        { id: 'Sharpe 30d', value: deriv.sharpe_30d, fmt: v => v != null ? v.toFixed(2) : '--' },
+        { id: '资金费率', value: deriv.funding_rate, fmt: v => v != null ? (v * 100).toFixed(4) + '%' : '--' },
+        { id: '期货/现货比', value: deriv.futures_spot_ratio, fmt: v => v != null ? v.toFixed(2) : '--' }
+    ];
+
+    grid.innerHTML = metrics.map(m => `<div class="bg-gray-800/50 rounded-lg p-3">
+        <div class="text-xs text-gray-400 mb-1">${m.id}</div>
+        <div class="text-lg font-bold font-mono text-white">${m.fmt(m.value)}</div>
+    </div>`).join('');
 }
 
 function getDerivBg(level) {
@@ -1772,174 +1525,113 @@ function getDerivBg(level) {
 }
 
 function updatePressureTest(pt) {
-    if (!pt || pt.error) {
-        return;
-    }
-    
-    const levelEl = document.getElementById('ptRiskLevel');
-    const descEl = document.getElementById('ptRiskDesc');
-    if (levelEl && pt.risk_assessment) {
-        const ra = pt.risk_assessment;
-        levelEl.textContent = ra.level === 'HIGH' ? '⚠️ 高风险' : ra.level === 'MEDIUM' ? '⚡ 中风险' : '✅ 低风险';
-        levelEl.className = 'text-lg font-bold ' + (ra.level === 'HIGH' ? 'text-red-400' : ra.level === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400');
-        if (descEl) descEl.textContent = ra.description;
-    }
-    
-    const vannaEl = document.getElementById('ptVannaRisk');
-    const volgaEl = document.getElementById('ptVolgaRisk');
-    const maxDeltaEl = document.getElementById('ptMaxDelta');
-    if (vannaEl && pt.risk_assessment) {
-        vannaEl.textContent = pt.risk_assessment.vanna_risk ? '⚠️ 较高' : '✅ 可控';
-        vannaEl.className = 'text-lg font-bold ' + (pt.risk_assessment.vanna_risk ? 'text-red-400' : 'text-green-400');
-    }
-    if (volgaEl && pt.risk_assessment) {
-        volgaEl.textContent = pt.risk_assessment.volga_risk ? '⚠️ 较高' : '✅ 可控';
-        volgaEl.className = 'text-lg font-bold ' + (pt.risk_assessment.volga_risk ? 'text-orange-400' : 'text-green-400');
-    }
-    if (maxDeltaEl && pt.risk_assessment) {
-        maxDeltaEl.textContent = pt.risk_assessment.max_delta_exposure.toFixed(4);
-    }
-    
-    const tbody = document.getElementById('ptJointScenarios');
-    if (tbody && pt.joint_stress_tests) {
-        tbody.innerHTML = pt.joint_stress_tests.map(s => {
-            const deltaColor = Math.abs(s.delta) > 0.5 ? 'text-red-400' : Math.abs(s.delta) > 0.3 ? 'text-yellow-400' : 'text-green-400';
-            return `<tr class="hover:bg-gray-800/30">
-                <td class="py-1 px-2 text-left text-gray-300">${safeHTML(s.scenario)}</td>
-                <td class="py-1 px-2 font-mono">$${s.price.toLocaleString()}</td>
-                <td class="py-1 px-2 font-mono">${s.volatility.toFixed(1)}%</td>
-                <td class="py-1 px-2 font-mono ${deltaColor}">${s.delta.toFixed(4)}</td>
-                <td class="py-1 px-2 font-mono text-gray-400">${s.gamma.toFixed(6)}</td>
-                <td class="py-1 px-2 font-mono text-gray-400">${s.vanna.toFixed(6)}</td>
-                <td class="py-1 px-2 font-mono text-gray-400">${s.volga.toFixed(4)}</td>
+    if (!pt || pt.error) return;
+
+    const section = document.getElementById('pressureTestSection');
+    if (!section) return;
+
+    const ra = pt.risk_assessment || {};
+    const levelColors = { HIGH: 'text-red-400', MEDIUM: 'text-yellow-400', LOW: 'text-green-400' };
+    const level = ra.risk_level || 'LOW';
+
+    let html = `<div class="flex items-center gap-3 mb-3">
+        <span class="text-lg font-bold ${levelColors[level] || 'text-gray-400'}">${level} 风险</span>
+        <span class="text-sm text-gray-400">${ra.description || ''}</span>
+    </div>`;
+
+    // Greeks cards
+    const bg = pt.base_greeks || {};
+    html += `<div class="grid grid-cols-4 gap-3 mb-3">
+        <div class="bg-gray-800/50 rounded-lg p-3"><div class="text-xs text-gray-400">Delta</div><div class="font-mono text-white">${(bg.delta || 0).toFixed(4)}</div></div>
+        <div class="bg-gray-800/50 rounded-lg p-3"><div class="text-xs text-gray-400">Gamma</div><div class="font-mono text-white">${(bg.gamma || 0).toFixed(6)}</div></div>
+        <div class="bg-gray-800/50 rounded-lg p-3"><div class="text-xs text-gray-400">Vanna</div><div class="font-mono text-white">${(bg.vanna || 0).toFixed(6)}</div></div>
+        <div class="bg-gray-800/50 rounded-lg p-3"><div class="text-xs text-gray-400">Volga</div><div class="font-mono text-white">${(bg.volga || 0).toFixed(4)}</div></div>
+    </div>`;
+
+    // Joint stress scenarios table
+    const scenarios = pt.joint_stress_tests || [];
+    if (scenarios.length) {
+        html += `<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-gray-400 border-b border-gray-700">
+            <th class="text-left py-2 px-2">场景</th><th class="text-right py-2 px-2">Delta</th><th class="text-right py-2 px-2">Gamma</th><th class="text-right py-2 px-2">Vanna</th><th class="text-right py-2 px-2">Volga</th>
+        </tr></thead><tbody>`;
+        scenarios.forEach(s => {
+            const risk = s.risk_assessment || {};
+            const rowColor = risk.risk_level === 'HIGH' ? 'text-red-400' : risk.risk_level === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400';
+            html += `<tr class="border-b border-gray-800 ${rowColor}">
+                <td class="py-1.5 px-2">${safeHTML(s.scenario || '')}</td>
+                <td class="text-right py-1.5 px-2 font-mono">${(s.delta || 0).toFixed(4)}</td>
+                <td class="text-right py-1.5 px-2 font-mono">${(s.gamma || 0).toFixed(6)}</td>
+                <td class="text-right py-1.5 px-2 font-mono">${(s.vanna || 0).toFixed(6)}</td>
+                <td class="text-right py-1.5 px-2 font-mono">${(s.volga || 0).toFixed(4)}</td>
             </tr>`;
-        }).join('');
+        });
+        html += '</tbody></table></div>';
     }
+
+    section.innerHTML = html;
 }
 
-function updateSentimentAnalysis(sa) {
-    if (!sa || sa.error) {
-        return;
-    }
-    
-    const iconEl = document.getElementById('aiSentimentIcon');
-    const intentEl = document.getElementById('aiDominantIntent');
-    const confEl = document.getElementById('aiConfidence');
-    const recEl = document.getElementById('aiRecommendation');
-    const riskLevelEl = document.getElementById('aiRiskLevel');
-    const signalStrengthEl = document.getElementById('aiSignalStrength');
-    
-    if (iconEl) iconEl.textContent = sa.sentiment_icon || '➖';
-    if (intentEl) {
-        intentEl.textContent = sa.overall_sentiment || '--';
-        intentEl.className = 'text-xl font-bold ' + (sa.dominant_intent?.intent_color || 'text-gray-400');
-    }
-    if (confEl) confEl.textContent = sa.confidence ? `${sa.confidence}%` : '--';
-    if (recEl) recEl.innerHTML = sa.ai_recommendation ? safeHTML(sa.ai_recommendation) : '等待分析...';
-    
-    // v2.0: 风险等级
-    if (riskLevelEl && sa.dominant_intent?.risk_level) {
-        const rl = sa.dominant_intent.risk_level;
-        riskLevelEl.textContent = `风险等级: ${rl === 'HIGH' ? '🔴 高风险' : rl === 'MEDIUM' ? '🟡 中风险' : '🟢 低风险'}`;
-        riskLevelEl.className = 'text-xs mt-1 ' + (rl === 'HIGH' ? 'text-red-400' : rl === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400');
-    }
-    
-    // v2.0: 信号强度
-    if (signalStrengthEl) {
-        // 信号强度从 confidence 推断
-        const conf = sa.confidence || 0;
-        if (conf > 75) {
-            signalStrengthEl.textContent = '🔥 STRONG';
-            signalStrengthEl.className = 'text-xs font-bold text-red-400';
-        } else if (conf > 50) {
-            signalStrengthEl.textContent = '⚡ MEDIUM';
-            signalStrengthEl.className = 'text-xs font-bold text-yellow-400';
-        } else {
-            signalStrengthEl.textContent = '💤 WEAK';
-            signalStrengthEl.className = 'text-xs font-bold text-gray-500';
-        }
-    }
-    
-    if (sa.put_call_ratio) {
-        const putPctEl = document.getElementById('aiPutPct');
-        const callPctEl = document.getElementById('aiCallPct');
-        if (putPctEl) putPctEl.textContent = `${sa.put_call_ratio.put_pct.toFixed(1)}%`;
-        if (callPctEl) callPctEl.textContent = `${sa.put_call_ratio.call_pct.toFixed(1)}%`;
-    }
-    
-    // v2.0: 市场流摘要
-    const summaryEl = document.getElementById('aiMarketFlowSummary');
-    if (summaryEl && sa.market_flow_summary) {
-        const mfs = sa.market_flow_summary;
-        if (mfs.total_trades > 0) {
-            summaryEl.classList.remove('hidden');
-            const totalPremiumM = (mfs.total_premium / 1e6).toFixed(1);
-            summaryEl.innerHTML = `📊 分析 <b>${mfs.total_trades}</b> 笔交易 | 总名义价值 <b>$${totalPremiumM}M</b> | 机构占比 <b>${mfs.institutional_ratio || 0}%</b> | 平均单量 <b>$${(mfs.avg_trade_size / 1e3).toFixed(0)}K</b>`;
-        }
-    }
-    
-    const distEl = document.getElementById('aiIntentDist');
-    if (distEl && sa.intent_distribution) {
-        const intentNames = {
-            'directional_speculation': {name: '方向性投机', icon: '🎯', color: 'bg-red-500/20'},
-            'institutional_hedging': {name: '机构对冲', icon: '🛡️', color: 'bg-blue-500/20'},
-            'arbitrage': {name: '套利交易', icon: '⚖️', color: 'bg-green-500/20'},
-            'market_maker_adjust': {name: '做市商调仓', icon: '🔄', color: 'bg-yellow-500/20'},
-            'income_generation': {name: '收益增强', icon: '💰', color: 'bg-purple-500/20'},
-            'volatility_play': {name: '波动率博弈', icon: '📊', color: 'bg-cyan-500/20'}
-        };
-        const total = Object.values(sa.intent_distribution).reduce((sum, v) => sum + v.count, 0);
-        distEl.innerHTML = Object.entries(sa.intent_distribution).map(([key, val]) => {
-            const info = intentNames[key] || {name: key, icon: '❓', color: 'bg-gray-500/20'};
-            const pct = total > 0 ? (val.count / total * 100).toFixed(0) : 0;
-            return `<div class="flex items-center gap-2">
-                <span class="text-xs">${info.icon}</span>
-                <span class="text-xs text-gray-300 flex-1">${info.name}</span>
-                <div class="w-16 bg-gray-700 rounded-full h-1.5">
-                    <div class="${info.color} h-1.5 rounded-full" style="width: ${pct}%"></div>
-                </div>
-                <span class="text-xs font-mono text-gray-400 w-8 text-right">${val.count}</span>
+function updateSentimentAnalysis(sentiment) {
+    if (!sentiment || sentiment.error) return;
+
+    const section = document.getElementById('sentimentSection');
+    if (!section) return;
+
+    const da = sentiment.dominant_intent || {};
+    const intentColors = {
+        directional_speculation: 'text-red-400', institutional_hedging: 'text-blue-400',
+        arbitrage: 'text-purple-400', market_maker_adjust: 'text-yellow-400',
+        income_generation: 'text-green-400', volatility_play: 'text-orange-400'
+    };
+    const intentLabels = {
+        directional_speculation: '方向投机', institutional_hedging: '机构对冲',
+        arbitrage: '套利', market_maker_adjust: '做市商调整',
+        income_generation: '收租', volatility_play: '波动率交易'
+    };
+
+    let html = `<div class="flex items-center gap-4 mb-3">
+        <div><span class="text-xs text-gray-400">主导意图</span><div class="text-lg font-bold ${intentColors[da.intent] || 'text-white'}">${intentLabels[da.intent] || da.intent || '--'}</div></div>
+        <div><span class="text-xs text-gray-400">风险等级</span><div class="text-lg font-bold ${da.risk_level === 'HIGH' ? 'text-red-400' : da.risk_level === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400'}">${da.risk_level || '--'}</div></div>
+        <div><span class="text-xs text-gray-400">信心度</span><div class="text-lg font-bold text-white">${da.confidence || 0}%</div></div>
+        <div><span class="text-xs text-gray-400">AI 建议</span><div class="text-sm text-gray-300">${safeHTML(sentiment.recommendation || '--')}</div></div>
+    </div>`;
+
+    // Put/Call ratio
+    const pc = sentiment.put_call_ratio || {};
+    html += `<div class="flex gap-4 mb-3 text-sm">
+        <span class="text-red-400">Put: ${(pc.put_pct || 0).toFixed(1)}%</span>
+        <span class="text-green-400">Call: ${(pc.call_pct || 0).toFixed(1)}%</span>
+    </div>`;
+
+    // Intent distribution
+    const dist = sentiment.intent_distribution || {};
+    if (Object.keys(dist).length) {
+        html += '<div class="space-y-1 mb-3">';
+        Object.entries(dist).forEach(([key, val]) => {
+            const pct = typeof val === 'number' ? val : 0;
+            const label = intentLabels[key] || key;
+            html += `<div class="flex items-center gap-2 text-xs">
+                <span class="w-24 text-gray-400">${label}</span>
+                <div class="flex-1 bg-gray-700 rounded-full h-2"><div class="bg-blue-500 h-2 rounded-full" style="width:${Math.min(pct, 100)}%"></div></div>
+                <span class="text-gray-400 w-10 text-right">${pct.toFixed(0)}</span>
             </div>`;
-        }).join('');
+        });
+        html += '</div>';
     }
-    
-    const signalsEl = document.getElementById('aiKeySignals');
-    if (signalsEl && sa.key_signals) {
-        if (sa.key_signals.length === 0) {
-            signalsEl.innerHTML = '<div class="text-gray-600 text-xs">暂无显著信号</div>';
-        } else {
-            const typeClasses = {
-                'warning': 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300',
-                'success': 'bg-green-500/10 border-green-500/30 text-green-300',
-                'info': 'bg-blue-500/10 border-blue-500/30 text-blue-300',
-                'danger': 'bg-red-500/10 border-red-500/30 text-red-300'
-            };
-            signalsEl.innerHTML = sa.key_signals.map(s => 
-                `<div class="p-2 rounded border text-xs ${typeClasses[s.type] || 'bg-gray-500/10 border-gray-500/30 text-gray-300'}">
-                    ${safeHTML(s.text)}
-                </div>`
-            ).join('');
-        }
+
+    // Risk warnings
+    const warnings = sentiment.risk_warnings || [];
+    if (warnings.length) {
+        html += '<div class="space-y-1">';
+        warnings.forEach(w => {
+            const level = (w.level || '').toUpperCase();
+            const icon = level === 'HIGH' ? '🔴' : level === 'MEDIUM' ? '🟡' : '🟢';
+            html += `<div class="text-sm text-gray-300">${icon} ${safeHTML(w.message || w)}</div>`;
+        });
+        html += '</div>';
     }
-    
-    // v2.0: 风险预警
-    const riskWarningsSection = document.getElementById('aiRiskWarningsSection');
-    const riskWarningsEl = document.getElementById('aiRiskWarnings');
-    if (riskWarningsSection && riskWarningsEl && sa.risk_warnings && sa.risk_warnings.length > 0) {
-        riskWarningsSection.classList.remove('hidden');
-        const levelClasses = {
-            'HIGH': 'bg-red-500/10 border-red-500/30 text-red-300',
-            'MEDIUM': 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300',
-            'LOW': 'bg-blue-500/10 border-blue-500/30 text-blue-300'
-        };
-        riskWarningsEl.innerHTML = sa.risk_warnings.map(w => 
-            `<div class="p-2 rounded border text-xs ${levelClasses[w.level] || 'bg-gray-500/10 border-gray-500/30 text-gray-300'}">
-                <span class="font-bold mr-1">${w.level === 'HIGH' ? '🔴' : w.level === 'MEDIUM' ? '🟡' : '🔵'}</span>${safeHTML(w.text)}
-            </div>`
-        ).join('');
-    } else if (riskWarningsSection) {
-        riskWarningsSection.classList.add('hidden');
-    }
+
+    section.innerHTML = html;
 }
 
 function getRiskColor(score) {
