@@ -64,6 +64,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_scan_timestamp ON scan_records(timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_debate_currency_timestamp ON debate_results(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_max_pain_currency_timestamp ON max_pain_history(currency, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_llm_analysis_currency_timestamp ON llm_analysis_results(currency, timestamp DESC)",
 ]
 
 SCHEMA_DEBATE_RESULTS = """
@@ -90,6 +91,28 @@ CREATE TABLE IF NOT EXISTS max_pain_history (
 )
 """
 
+SCHEMA_LLM_CONFIG = """
+CREATE TABLE IF NOT EXISTS llm_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    api_key TEXT DEFAULT '',
+    base_url TEXT DEFAULT '',
+    model TEXT DEFAULT '',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+SCHEMA_LLM_ANALYSIS_RESULTS = """
+CREATE TABLE IF NOT EXISTS llm_analysis_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    currency TEXT NOT NULL,
+    mode TEXT DEFAULT 'full',
+    result_json TEXT,
+    llm_config_json TEXT,
+    success INTEGER DEFAULT 1,
+    timestamp DATETIME NOT NULL
+)
+"""
+
 SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'top_contracts_data', 'raw_output']
 TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
 
@@ -109,6 +132,8 @@ def init_database_schema(conn: sqlite3.Connection):
     cursor.execute(SCHEMA_DVOL_HISTORY)
     cursor.execute(SCHEMA_DEBATE_RESULTS)
     cursor.execute(SCHEMA_MAX_PAIN_HISTORY)
+    cursor.execute(SCHEMA_LLM_CONFIG)
+    cursor.execute(SCHEMA_LLM_ANALYSIS_RESULTS)
 
     for idx in INDEXES:
         cursor.execute(idx)
