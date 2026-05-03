@@ -251,3 +251,125 @@ class PayoffEngine:
             "theta": round(score.theta, 4),
             "recommendation": scorer._classify_score(adjusted_total),
         }
+
+
+class WheelSimulator:
+
+    def simulate(self, spot: float, strike: float, premium: float,
+                 option_type: str, cycles: int, capital: float,
+                 assigned_pct: float = 0.5, iv: float = 0.6,
+                 drift: float = 0.0, simulations: int = 1000) -> Dict[str, Any]:
+        """蒙特卡洛 Wheel 模拟"""
+        if spot <= 0 or strike <= 0 or capital <= 0 or cycles <= 0:
+            return {"success": False, "error": "参数无效"}
+
+        random.seed(42)
+        dt = 30 / 365.0
+
+        all_rois = []
+        sample_paths = []
+        win_count = 0
+        drawdowns = []
+
+        for sim_idx in range(simulations):
+            price = spot
+            total_premium = 0.0
+            path = [price]
+            was_assigned = False
+            max_val = capital
+            max_dd = 0.0
+
+            for cycle in range(cycles):
+                put_itm = price < strike
+                total_premium += premium
+
+                if put_itm:
+                    cost = strike - premium
+                    was_assigned = True
+                    z = random.gauss(0, 1)
+                    price = price * math.exp((drift - 0.5 * iv**2) * dt + iv * math.sqrt(dt) * z)
+                    path.append(price)
+                    call_premium = premium * 0.8
+                    total_premium += call_premium
+                    call_itm = price > strike
+                    if call_itm:
+                        price = strike
+                        was_assigned = False
+                else:
+                    was_assigned = False
+                    z = random.gauss(0, 1)
+                    price = price * math.exp((drift - 0.5 * iv**2) * dt + iv * math.sqrt(dt) * z)
+                    path.append(price)
+
+                current_val = capital + total_premium
+                if current_val > max_val:
+                    max_val = current_val
+                dd = (max_val - current_val) / max_val
+                if dd > max_dd:
+                    max_dd = dd
+
+            roi = total_premium / capital
+            all_rois.append(roi)
+            if total_premium > 0:
+                win_count += 1
+            drawdowns.append(max_dd)
+
+            if sim_idx < 5:
+                sample_paths.append(path)
+
+        all_rois.sort()
+        n = len(all_rois)
+
+        bins = 20
+        min_roi = all_rois[0]
+        max_roi = all_rois[-1]
+        bin_width = (max_roi - min_roi) / bins if max_roi > min_roi else 0.01
+        roi_distribution = []
+        for i in range(bins):
+            lo = min_roi + i * bin_width
+            hi = lo + bin_width
+            count = sum(1 for r in all_rois if lo <= r < hi)
+            roi_distribution.append([round(lo, 4), count])
+
+        mean_roi = sum(all_rois) / n
+        score = self._score_wheel(mean_roi, win_count / n, sum(drawdowns) / n)
+
+        return {
+            "success": True,
+            "summary": {
+                "mean_roi": round(mean_roi, 4),
+                "median_roi": round(all_rois[n // 2], 4),
+                "p10": round(all_rois[int(n * 0.1)], 4),
+                "p25": round(all_rois[int(n * 0.25)], 4),
+                "p75": round(all_rois[int(n * 0.75)], 4),
+                "p90": round(all_rois[int(n * 0.9)], 4),
+                "win_rate": round(win_count / simulations, 4),
+                "max_drawdown_mean": round(sum(drawdowns) / len(drawdowns), 4),
+                "simulations": simulations,
+                "cycles": cycles,
+            },
+            "roi_distribution": roi_distribution,
+            "sample_paths": sample_paths,
+            "score": score,
+        }
+
+    def _score_wheel(self, mean_roi: float, win_rate: float,
+                     mean_drawdown: float) -> Dict[str, Any]:
+        """Wheel 策略评分"""
+        roi_score = min(max(mean_roi / 0.20, 0), 1.0)
+        wr_score = win_rate
+        dd_score = max(1 - mean_drawdown / 0.30, 0)
+        total = roi_score * 0.40 + wr_score * 0.35 + dd_score * 0.25
+
+        if total >= 0.75:
+            rec = "BEST"
+        elif total >= 0.55:
+            rec = "GOOD"
+        elif total >= 0.40:
+            rec = "OK"
+        elif total >= 0.25:
+            rec = "CAUTION"
+        else:
+            rec = "SKIP"
+
+        return {"total": round(total, 4), "recommendation": rec}

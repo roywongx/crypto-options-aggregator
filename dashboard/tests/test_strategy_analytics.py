@@ -5,7 +5,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from services.strategy_analytics import PayoffEngine
+from services.strategy_analytics import PayoffEngine, WheelSimulator
 
 
 class TestCalcSingle:
@@ -145,3 +145,60 @@ class TestScoreStrategy:
         )
         for key in ("total", "ev", "apr", "liquidity", "theta", "recommendation"):
             assert key in result
+
+
+class TestWheelSimulator:
+    def setup_method(self):
+        self.sim = WheelSimulator()
+
+    def test_basic_simulation(self):
+        """基本模拟返回所有必要字段"""
+        result = self.sim.simulate(
+            spot=100000, strike=95000, premium=2000,
+            option_type="PUT", cycles=6, capital=100000,
+            simulations=100
+        )
+        assert result["success"] is True
+        assert "summary" in result
+        summary = result["summary"]
+        for key in ("mean_roi", "median_roi", "p10", "p90", "win_rate", "max_drawdown_mean"):
+            assert key in summary
+
+    def test_roi_reasonable_range(self):
+        """ROI 在合理范围内"""
+        result = self.sim.simulate(
+            spot=100000, strike=95000, premium=2000,
+            option_type="PUT", cycles=6, capital=100000,
+            simulations=500
+        )
+        mean_roi = result["summary"]["mean_roi"]
+        assert -0.10 < mean_roi < 0.30
+
+    def test_sample_paths_count(self):
+        """返回正确数量的样本路径"""
+        result = self.sim.simulate(
+            spot=100000, strike=95000, premium=2000,
+            option_type="PUT", cycles=4, capital=100000,
+            simulations=200
+        )
+        assert len(result["sample_paths"]) == 5
+
+    def test_roi_distribution_non_empty(self):
+        """ROI 分布直方图数据非空"""
+        result = self.sim.simulate(
+            spot=100000, strike=95000, premium=2000,
+            option_type="PUT", cycles=6, capital=100000,
+            simulations=200
+        )
+        assert len(result["roi_distribution"]) > 0
+
+    def test_score_present(self):
+        """包含策略评分"""
+        result = self.sim.simulate(
+            spot=100000, strike=95000, premium=2000,
+            option_type="PUT", cycles=6, capital=100000,
+            simulations=100
+        )
+        assert "score" in result
+        assert "total" in result["score"]
+        assert "recommendation" in result["score"]
