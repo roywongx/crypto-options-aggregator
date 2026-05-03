@@ -3780,7 +3780,13 @@ function renderLLMSynthesis(synthesis) {
 function renderLLMDebate(debate) {
     const card = document.getElementById('llmDebateCard');
     if (!debate || !debate.success) {
-        card.classList.add('hidden');
+        card.classList.remove('hidden');
+        const bull = document.getElementById('llmBullContent');
+        const bear = document.getElementById('llmBearContent');
+        const judge = document.getElementById('llmJudgeContent');
+        if (bull) bull.innerHTML = '<p class="text-gray-500">LLM 未配置或分析失败</p>';
+        if (bear) bear.innerHTML = '<p class="text-gray-500">LLM 未配置或分析失败</p>';
+        if (judge) judge.innerHTML = '<p class="text-gray-500">无法完成辩论裁决</p>';
         return;
     }
     card.classList.remove('hidden');
@@ -3841,6 +3847,13 @@ function renderLLMAudit(audit) {
 
     const content = document.getElementById('llmAuditContent');
     let html = '';
+
+    // Show error if audit failed
+    if (audit.error) {
+        html = `<div class="text-yellow-400 text-sm"><i class="fas fa-exclamation-circle mr-1"></i>审计未完成: ${safeHTML(audit.error)}</div>`;
+        content.innerHTML = html;
+        return;
+    }
 
     const anomalies = audit.anomalies || [];
     const issues = audit.logic_issues || [];
