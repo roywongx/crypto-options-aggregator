@@ -37,6 +37,7 @@ from .risk import router as risk_router
 from .payoff import router as payoff_router
 from .debate import router as debate_router
 from .analytics import router as analytics_router
+from .llm_analyst import router as llm_analyst_router
 
 __all__ = [
     "scan_router",
@@ -55,4 +56,5 @@ __all__ = [
     "payoff_router",
     "debate_router",
     "analytics_router",
+    "llm_analyst_router",
 ]
