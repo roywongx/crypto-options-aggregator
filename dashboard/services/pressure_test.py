@@ -78,7 +78,7 @@ class PressureTestEngine:
         vanna = cls._norm_pdf(d1) * (-d2 / sigma)
         
         # Volga (Vomma) = dVega/dSigma
-        volga = vega * math.sqrt(T) * d1 * d2 / sigma / 100
+        volga = vega * d1 * d2 / sigma
         
         return {
             "delta": round(delta, 4),
