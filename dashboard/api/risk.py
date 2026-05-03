@@ -133,10 +133,19 @@ def get_risk_overview_sync(currency: str = "BTC"):
         logger.warning("Derivative metrics failed: %s", e)
         derivative_data = {"error": "获取衍生品数据失败"}
 
+    # 获取 DVOL 数据用于压力测试
+    dvol_data = {}
+    try:
+        from services.dvol_analyzer import get_dvol_from_deribit
+        dvol_data = get_dvol_from_deribit(currency)
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.warning("获取 DVOL 数据失败: %s", e)
+
     # 获取压力测试数据
     try:
+        sigma = dvol_data.get("current", 50) / 100 if isinstance(dvol_data, dict) and not dvol_data.get("error") else 0.50
         pressure_test_data = PressureTestEngine.stress_test(
-            S=spot, K=spot, T=30/365, r=0.05, sigma=0.5, option_type="C"
+            S=spot, K=spot, T=30/365, r=0.05, sigma=sigma, option_type="P"
         )
     except (ValueError, TypeError, RuntimeError) as e:
         logger.warning("Pressure test failed: %s", e)

@@ -140,13 +140,14 @@ class DynamicSupportCalculator:
         return fallback * 0.5  # Realized Price 通常远低于现价
 
     def _calculate_regular_floor(self, ma200: float, fib_levels: dict, on_chain: float) -> float:
-        """计算常规支撑位 - 加权平均，链上数据权重最大"""
+        """计算常规支撑位 - 加权平均: MA200 25%, Fibonacci 25%, 链上数据 50%"""
+        weights = [0.25, 0.25, 0.50]
         supports = [
             ma200,
             fib_levels.get("0.382", 50000),
             on_chain
         ]
-        return sum(supports) / len(supports)
+        return sum(s * w for s, w in zip(supports, weights))
 
     def _calculate_extreme_floor(self, regular_floor: float, fib_levels: dict) -> float:
         """计算极端支撑位"""

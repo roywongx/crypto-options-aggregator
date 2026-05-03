@@ -76,3 +76,29 @@ class TestPOPCalculation:
             for delta in (0.1, 0.5, 0.9, -0.1, -0.5, -0.9):
                 pop = calc_pop(delta_val=delta, option_type=ot, spot=100000, strike=100000, iv=50, dte=30)
                 assert 0 <= pop <= 1, f"POP out of bounds: {pop} for {ot} delta={delta}"
+
+
+class TestPressureTestParams:
+    """Pressure test should use actual DVOL and option_type='P'."""
+
+    def test_stress_test_uses_put_type(self):
+        """stress_test with option_type='P' should return valid Greeks with negative delta."""
+        from services.pressure_test import PressureTestEngine
+        result = PressureTestEngine.stress_test(S=100000, K=100000, T=30/365, r=0.05, sigma=0.50, option_type="P")
+        assert "base_greeks" in result
+        assert result["base_greeks"]["delta"] < 0, "Put delta should be negative"
+
+
+class TestSupportWeights:
+    """Support calculator should use weighted average: 25% MA200, 25% Fib, 50% on-chain."""
+
+    def test_weighted_average_uses_correct_weights(self):
+        from services.support_calculator import DynamicSupportCalculator
+        calc = DynamicSupportCalculator()
+        result = calc._calculate_regular_floor(
+            ma200=80000,
+            fib_levels={"0.382": 70000},
+            on_chain=90000
+        )
+        expected = 0.25 * 80000 + 0.25 * 70000 + 0.50 * 90000
+        assert abs(result - expected) < 1, f"Expected {expected}, got {result}"
