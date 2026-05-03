@@ -23,22 +23,9 @@ def _nice_step(range_size: float, target_steps: int) -> float:
 
 class PayoffEngine:
 
-    def calc_single(self, spot: float, strike: float, premium: float,
-                    option_type: str, dte: int, quantity: float = 1,
-                    side: str = "sell", pct_range: float = 0.3,
-                    steps: int = 100) -> Dict[str, Any]:
-        """单腿 payoff 计算"""
-        is_put = option_type.upper() in ("P", "PUT")
-        is_sell = side.lower() == "sell"
-
-        low = spot * (1 - pct_range)
-        high = spot * (1 + pct_range)
-
-        step_size = _nice_step(high - low, steps)
-        # 生成价格网格
-        num_points = int(round((high - low) / step_size)) + 1
-        prices = [round(low + i * step_size, 2) for i in range(num_points)]
-
+    def _calc_leg_pnl(self, prices: List[float], strike: float, premium: float,
+                       is_sell: bool, is_put: bool, qty: float) -> List[float]:
+        """计算单腿在价格网格上的 PnL。"""
         pnl = []
         for price in prices:
             if is_sell:
@@ -51,25 +38,46 @@ class PayoffEngine:
                     val = -premium + (strike - price) if price < strike else -premium
                 else:
                     val = -premium + (price - strike) if price > strike else -premium
-            pnl.append(round(val * quantity, 2))
+            pnl.append(round(val * qty, 2))
+        return pnl
+
+    def _generate_grid(self, spot: float, pct_range: float, steps: int) -> List[float]:
+        """生成价格网格，使用 _nice_step 确保步长整齐。"""
+        low = spot * (1 - pct_range)
+        high = spot * (1 + pct_range)
+        step_size = _nice_step(high - low, steps)
+        num_points = int(round((high - low) / step_size)) + 1
+        return [round(low + i * step_size, 2) for i in range(num_points)]
+
+    def _find_breakevens(self, prices: List[float], pnl: List[float]) -> List[float]:
+        """查找所有盈亏平衡点：先精确零点，再线性插值。"""
+        breakevens = []
+        for i in range(len(prices)):
+            if pnl[i] == 0:
+                breakevens.append(round(prices[i], 2))
+        if not breakevens:
+            for i in range(len(prices) - 1):
+                if (pnl[i] < 0 and pnl[i + 1] > 0) or (pnl[i] > 0 and pnl[i + 1] < 0):
+                    ratio = -pnl[i] / (pnl[i + 1] - pnl[i])
+                    breakevens.append(round(prices[i] + (prices[i + 1] - prices[i]) * ratio, 2))
+        return breakevens
+
+    def calc_single(self, spot: float, strike: float, premium: float,
+                    option_type: str, dte: int, quantity: float = 1,
+                    side: str = "sell", pct_range: float = 0.3,
+                    steps: int = 100) -> Dict[str, Any]:
+        """单腿 payoff 计算"""
+        is_put = option_type.upper() in ("P", "PUT")
+        is_sell = side.lower() == "sell"
+
+        prices = self._generate_grid(spot, pct_range, steps)
+        pnl = self._calc_leg_pnl(prices, strike, premium, is_sell, is_put, quantity)
 
         max_profit = max(pnl)
         max_loss = min(pnl)
 
-        # --- 盈亏平衡点检测 ---
-        breakeven = None
-        # 1) 先检查是否有精确零点
-        for i in range(len(prices)):
-            if pnl[i] == 0:
-                breakeven = round(prices[i], 2)
-                break
-        # 2) 若无精确零点，使用线性插值
-        if breakeven is None:
-            for i in range(len(prices) - 1):
-                if (pnl[i] < 0 and pnl[i + 1] > 0) or (pnl[i] > 0 and pnl[i + 1] < 0):
-                    ratio = -pnl[i] / (pnl[i + 1] - pnl[i])
-                    breakeven = round(prices[i] + (prices[i + 1] - prices[i]) * ratio, 2)
-                    break
+        breakevens = self._find_breakevens(prices, pnl)
+        breakeven = breakevens[0] if breakevens else None
 
         profit_prices = [p for p, v in zip(prices, pnl) if v > 0]
         loss_prices = [p for p, v in zip(prices, pnl) if v < 0]
@@ -96,10 +104,7 @@ class PayoffEngine:
         if not legs:
             return {"success": False, "error": "至少需要一条腿"}
 
-        low = spot * (1 - pct_range)
-        high = spot * (1 + pct_range)
-        step_size = (high - low) / steps
-        prices = [round(low + i * step_size, 2) for i in range(steps + 1)]
+        prices = self._generate_grid(spot, pct_range, steps)
 
         total_pnl = [0.0] * len(prices)
         leg_results = []
@@ -111,19 +116,7 @@ class PayoffEngine:
             premium = leg.get("premium", 0)
             qty = leg.get("quantity", 1)
 
-            pnl = []
-            for price in prices:
-                if is_sell:
-                    if is_put:
-                        val = premium if price >= strike else premium - (strike - price)
-                    else:
-                        val = premium if price <= strike else premium - (price - strike)
-                else:
-                    if is_put:
-                        val = -premium + (strike - price) if price < strike else -premium
-                    else:
-                        val = -premium + (price - strike) if price > strike else -premium
-                pnl.append(round(val * qty, 2))
+            pnl = self._calc_leg_pnl(prices, strike, premium, is_sell, is_put, qty)
 
             for i in range(len(total_pnl)):
                 total_pnl[i] += pnl[i]
@@ -141,10 +134,7 @@ class PayoffEngine:
 
         total_pnl = [round(v, 2) for v in total_pnl]
 
-        breakevens = []
-        for i in range(len(prices) - 1):
-            if (total_pnl[i] <= 0 and total_pnl[i + 1] > 0) or (total_pnl[i] >= 0 and total_pnl[i + 1] < 0):
-                breakevens.append(round((prices[i] + prices[i + 1]) / 2, 2))
+        breakevens = self._find_breakevens(prices, total_pnl)
 
         return {
             "success": True,
