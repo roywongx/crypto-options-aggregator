@@ -90,6 +90,71 @@ class PayoffEngine:
             "zones": zones,
         }
 
+    def calc_multi_legs(self, spot: float, legs: List[Dict[str, Any]],
+                        pct_range: float = 0.3, steps: int = 100) -> Dict[str, Any]:
+        """组合策略 payoff"""
+        if not legs:
+            return {"success": False, "error": "至少需要一条腿"}
+
+        low = spot * (1 - pct_range)
+        high = spot * (1 + pct_range)
+        step_size = (high - low) / steps
+        prices = [round(low + i * step_size, 2) for i in range(steps + 1)]
+
+        total_pnl = [0.0] * len(prices)
+        leg_results = []
+
+        for leg in legs:
+            is_put = leg.get("option_type", "P").upper() in ("P", "PUT")
+            is_sell = leg.get("side", "sell").lower() == "sell"
+            strike = leg.get("strike", spot)
+            premium = leg.get("premium", 0)
+            qty = leg.get("quantity", 1)
+
+            pnl = []
+            for price in prices:
+                if is_sell:
+                    if is_put:
+                        val = premium if price >= strike else premium - (strike - price)
+                    else:
+                        val = premium if price <= strike else premium - (price - strike)
+                else:
+                    if is_put:
+                        val = -premium + (strike - price) if price < strike else -premium
+                    else:
+                        val = -premium + (price - strike) if price > strike else -premium
+                pnl.append(round(val * qty, 2))
+
+            for i in range(len(total_pnl)):
+                total_pnl[i] += pnl[i]
+
+            leg_results.append({
+                "strike": strike,
+                "premium": premium,
+                "option_type": "PUT" if is_put else "CALL",
+                "side": "sell" if is_sell else "buy",
+                "quantity": qty,
+                "pnl": pnl,
+                "max_profit": max(pnl),
+                "max_loss": min(pnl),
+            })
+
+        total_pnl = [round(v, 2) for v in total_pnl]
+
+        breakevens = []
+        for i in range(len(prices) - 1):
+            if (total_pnl[i] <= 0 and total_pnl[i + 1] > 0) or (total_pnl[i] >= 0 and total_pnl[i + 1] < 0):
+                breakevens.append(round((prices[i] + prices[i + 1]) / 2, 2))
+
+        return {
+            "success": True,
+            "max_profit": max(total_pnl),
+            "max_loss": min(total_pnl),
+            "breakevens": breakevens,
+            "payoff_curve": {"prices": prices, "pnl": total_pnl},
+            "legs": leg_results,
+        }
+
     def estimate_premium(self, spot: float, strike: float, dte: int,
                          iv: float, option_type: str) -> Dict[str, Any]:
         """BS 估算权利金 + Greeks"""

@@ -58,3 +58,33 @@ class TestCalcSingle:
         result = self.engine.calc_single(spot=100000, strike=95000, premium=2000, option_type="PUT", dte=30)
         assert "profit_range" in result["zones"]
         assert "loss_range" in result["zones"]
+
+
+class TestCalcMultiLegs:
+    def setup_method(self):
+        self.engine = PayoffEngine()
+
+    def test_bull_put_spread(self):
+        """牛市看跌价差: sell 95000P + buy 90000P"""
+        legs = [
+            {"strike": 95000, "premium": 2000, "option_type": "PUT", "quantity": 1, "side": "sell"},
+            {"strike": 90000, "premium": 800, "option_type": "PUT", "quantity": 1, "side": "buy"},
+        ]
+        result = self.engine.calc_multi_legs(spot=100000, legs=legs)
+        assert result["max_profit"] == 1200
+        assert result["max_loss"] == -3800
+        assert len(result["legs"]) == 2
+
+    def test_short_straddle(self):
+        """卖出跨式: sell 100000C + sell 100000P"""
+        legs = [
+            {"strike": 100000, "premium": 3000, "option_type": "CALL", "quantity": 1, "side": "sell"},
+            {"strike": 100000, "premium": 2500, "option_type": "PUT", "quantity": 1, "side": "sell"},
+        ]
+        result = self.engine.calc_multi_legs(spot=100000, legs=legs)
+        assert result["max_profit"] == 5500
+
+    def test_empty_legs_returns_error(self):
+        """空 legs 返回错误"""
+        result = self.engine.calc_multi_legs(spot=100000, legs=[])
+        assert result["success"] is False
