@@ -307,7 +307,7 @@ function setChartPeriod(chartType, hours) {
         }
     });
     if (chartType === 'dvol') loadDvolChartData();
-    else if (chartType === 'pcr') loadPcrChart(document.getElementById('currencySelect').value, hours);
+    else if (chartType === 'pcr') loadPcrChart(document.getElementById('currencySelect')?.value || 'BTC', hours);
 }
 
 let _scanLock = false;
@@ -385,6 +385,8 @@ function setCalcMode(mode) {
     const newFields = document.getElementById('scNewFields');
     const gridFields = document.getElementById('scGridFields');
     const optionTypeSelect = document.getElementById('scOptionType');
+
+    if (!rollBtn || !newBtn || !gridBtn || !rollFields || !newFields || !gridFields) return;
 
     rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
     newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50';
@@ -880,9 +882,9 @@ async function loadLatestData(showSuccess = true, skipCharts = false) {
             showAlert('网络连接已断开，刷新失败', 'error');
             return;
         }
-        
-        const currency = document.getElementById('currencySelect').value;
-        
+
+        const currency = document.getElementById('currencySelect')?.value || 'BTC';
+
         // 渐进式加载：先获取宏观数据（快速），再获取合约数据（慢速）
         const [macroRes, fullRes] = await Promise.all([
             safeFetch(`${API_BASE}/api/macro?currency=${currency}`),
@@ -1345,28 +1347,40 @@ function updateRiskDashboardUI(data) {
     const spot = data.spot || 0;
     if (data.max_pain && data.max_pain.price) {
         const mp = data.max_pain.price;
-        document.getElementById('cardMaxPain').textContent = '$' + mp.toLocaleString();
-        document.getElementById('cardMaxPainDist').textContent = spot ? ((mp - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
+        const elMaxPain = document.getElementById('cardMaxPain');
+        if (elMaxPain) elMaxPain.textContent = '$' + mp.toLocaleString();
+        const elMaxPainDist = document.getElementById('cardMaxPainDist');
+        if (elMaxPainDist) elMaxPainDist.textContent = spot ? ((mp - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
     }
     if (data.put_wall) {
-        document.getElementById('cardPutWall').textContent = '$' + (data.put_wall.strike || 0).toLocaleString();
-        document.getElementById('cardPutWallOI').textContent = 'OI: ' + (data.put_wall.oi || 0).toLocaleString();
+        const elPutWall = document.getElementById('cardPutWall');
+        if (elPutWall) elPutWall.textContent = '$' + (data.put_wall.strike || 0).toLocaleString();
+        const elPutWallOI = document.getElementById('cardPutWallOI');
+        if (elPutWallOI) elPutWallOI.textContent = 'OI: ' + (data.put_wall.oi || 0).toLocaleString();
     }
     if (data.gamma_flip) {
-        document.getElementById('cardGammaFlip').textContent = '$' + (data.gamma_flip.strike || 0).toLocaleString();
-        document.getElementById('cardGammaFlipSignal').textContent = spot > data.gamma_flip.strike ? '多头Gamma区' : '空头Gamma区';
+        const elGammaFlip = document.getElementById('cardGammaFlip');
+        if (elGammaFlip) elGammaFlip.textContent = '$' + (data.gamma_flip.strike || 0).toLocaleString();
+        const elGammaFlipSignal = document.getElementById('cardGammaFlipSignal');
+        if (elGammaFlipSignal) elGammaFlipSignal.textContent = spot > data.gamma_flip.strike ? '多头Gamma区' : '空头Gamma区';
     }
     if (data.floors) {
-        document.getElementById('cardFloorRegular').textContent = '$' + (data.floors.regular || 0).toLocaleString();
-        document.getElementById('cardFloorRegularDist').textContent = spot ? ((data.floors.regular - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
-        document.getElementById('cardFloorExtreme').textContent = '$' + (data.floors.extreme || 0).toLocaleString();
-        document.getElementById('cardFloorExtremeDist').textContent = spot ? ((data.floors.extreme - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
+        const elFloorRegular = document.getElementById('cardFloorRegular');
+        if (elFloorRegular) elFloorRegular.textContent = '$' + (data.floors.regular || 0).toLocaleString();
+        const elFloorRegularDist = document.getElementById('cardFloorRegularDist');
+        if (elFloorRegularDist) elFloorRegularDist.textContent = spot ? ((data.floors.regular - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
+        const elFloorExtreme = document.getElementById('cardFloorExtreme');
+        if (elFloorExtreme) elFloorExtreme.textContent = '$' + (data.floors.extreme || 0).toLocaleString();
+        const elFloorExtremeDist = document.getElementById('cardFloorExtremeDist');
+        if (elFloorExtremeDist) elFloorExtremeDist.textContent = spot ? ((data.floors.extreme - spot) / spot * 100).toFixed(1) + '% 距现货' : '--';
     }
 
     // Floors in header
     if (data.floors) {
-        document.getElementById('floorRegularHeader').textContent = '$' + (data.floors.regular || 0).toLocaleString();
-        document.getElementById('floorExtremeHeader').textContent = '$' + (data.floors.extreme || 0).toLocaleString();
+        const elFloorRegularHeader = document.getElementById('floorRegularHeader');
+        if (elFloorRegularHeader) elFloorRegularHeader.textContent = '$' + (data.floors.regular || 0).toLocaleString();
+        const elFloorExtremeHeader = document.getElementById('floorExtremeHeader');
+        if (elFloorExtremeHeader) elFloorExtremeHeader.textContent = '$' + (data.floors.extreme || 0).toLocaleString();
     }
 
     // Sub-functions
@@ -1808,10 +1822,13 @@ function renderLLMRiskInsight(data) {
 window.setRiskTab = setRiskTab;
 window.loadLLMRiskInsight = loadLLMRiskInsight;
 window.renderLLMRiskInsight = renderLLMRiskInsight;
+window.loadIVSmile = loadIVSmile;
+window.loadGreeksSummary = loadGreeksSummary;
 
 function updateMacroIndicators(data) {
     const spotPrice = data.spot_price;
     const spotEl = document.getElementById('spotPrice');
+    if (!spotEl) return;
     if (spotPrice) {
         spotEl.textContent = `$${Math.round(spotPrice).toLocaleString()}`;
         spotEl.classList.remove('text-gray-500');
@@ -1830,24 +1847,27 @@ function updateMacroIndicators(data) {
     const dvolInterp = data.dvol_interpretation || '';
     const dvolTrend = data.dvol_trend_label || data.dvol_trend || '';
 
-    if (dvolInterp) {
-        dvolSignal.textContent = dvolInterp;
-        dvolSignal.className = dvolTrend.includes('上涨') ? 'text-xs mt-1 text-red-400 font-medium' : dvolTrend.includes('下跌') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
-    } else if (signal) {
-        dvolSignal.textContent = signal;
-        dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-red-400 font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
-    } else if (zScore !== null && zScore !== undefined) {
-        if (zScore > 2) { dvolSignal.textContent = '异常偏高 ⚠️'; dvolSignal.className = 'text-xs mt-1 text-red-400 font-medium'; }
-        else if (zScore > 1) { dvolSignal.textContent = '偏高'; dvolSignal.className = 'text-xs mt-1 text-yellow-400 font-medium'; }
-        else if (zScore < -2) { dvolSignal.textContent = '异常偏低'; dvolSignal.className = 'text-xs mt-1 text-green-400 font-medium'; }
-        else if (zScore < -1) { dvolSignal.textContent = '偏低'; dvolSignal.className = 'text-xs mt-1 text-blue-400 font-medium'; }
-        else { dvolSignal.textContent = '正常区间'; dvolSignal.className = 'text-xs mt-1 text-gray-400'; }
-    } else {
-        dvolSignal.textContent = '--';
-        dvolSignal.className = 'text-xs mt-1 text-gray-400';
+    if (dvolSignal) {
+        if (dvolInterp) {
+            dvolSignal.textContent = dvolInterp;
+            dvolSignal.className = dvolTrend.includes('上涨') ? 'text-xs mt-1 text-red-400 font-medium' : dvolTrend.includes('下跌') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+        } else if (signal) {
+            dvolSignal.textContent = signal;
+            dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-red-400 font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+        } else if (zScore !== null && zScore !== undefined) {
+            if (zScore > 2) { dvolSignal.textContent = '异常偏高 ⚠️'; dvolSignal.className = 'text-xs mt-1 text-red-400 font-medium'; }
+            else if (zScore > 1) { dvolSignal.textContent = '偏高'; dvolSignal.className = 'text-xs mt-1 text-yellow-400 font-medium'; }
+            else if (zScore < -2) { dvolSignal.textContent = '异常偏低'; dvolSignal.className = 'text-xs mt-1 text-green-400 font-medium'; }
+            else if (zScore < -1) { dvolSignal.textContent = '偏低'; dvolSignal.className = 'text-xs mt-1 text-blue-400 font-medium'; }
+            else { dvolSignal.textContent = '正常区间'; dvolSignal.className = 'text-xs mt-1 text-gray-400'; }
+        } else {
+            dvolSignal.textContent = '--';
+            dvolSignal.className = 'text-xs mt-1 text-gray-400';
+        }
     }
 
-    document.getElementById('largeTradesCount').textContent = data.large_trades_count || 0;
+    const largeTradesEl = document.getElementById('largeTradesCount');
+    if (largeTradesEl) largeTradesEl.textContent = data.large_trades_count || 0;
 }
 
 let _expandedRow = null;
@@ -1862,14 +1882,14 @@ function updateOpportunitiesTable(contracts) {
     const loadMoreContainer = document.getElementById('loadMoreContainer');
 
     if (_allContracts.length === 0) {
-        countEl.textContent = '0 个合约';
-        loadMoreContainer.classList.add('hidden');
+        if (countEl) countEl.textContent = '0 个合约';
+        if (loadMoreContainer) loadMoreContainer.classList.add('hidden');
         const tbody = document.getElementById('opportunitiesTable');
         tbody.innerHTML = `<tr><td colspan="25" class="text-center py-12 text-gray-500"><div class="flex flex-col items-center gap-3"><i class="fas fa-inbox text-3xl text-gray-600"></i><p>暂无符合条件的合约</p><p class="text-xs text-gray-600">尝试调整扫描参数</p></div></td></tr>`;
         return;
     }
 
-    countEl.textContent = `${_allContracts.length} 个合约`;
+    if (countEl) countEl.textContent = `${_allContracts.length} 个合约`;
     renderTablePage();
 }
 
@@ -2009,9 +2029,8 @@ function resetTableSort() {
 }
 
 function showRollSuggestion(idx) {
-    if (!currentData || !currentData.contracts || !currentData.contracts[idx]) return;
-
-    const contract = currentData.contracts[idx];
+    const contract = (_allContracts && _allContracts[idx]) || (currentData && currentData.contracts && currentData.contracts[idx]);
+    if (!contract) return;
     const deltaAbs = Math.abs(contract.delta);
     const distancePct = currentSpotPrice ? Math.abs(contract.strike - currentSpotPrice) / currentSpotPrice * 100 : 0;
 
@@ -2309,7 +2328,8 @@ function updateLastUpdateTime(timestamp) {
 
 async function loadDvolChartData() {
     try {
-        const currency = document.getElementById('currencySelect').value;
+        if (!dvolChart) return;
+        const currency = document.getElementById('currencySelect')?.value || 'BTC';
         const hours = chartPeriods.dvol;
         const response = await safeFetch(`${API_BASE}/api/charts/dvol?currency=${currency}&hours=${hours}`);
         const data = await response.json();
@@ -2760,9 +2780,9 @@ async function _loadTermStructure(retryCount = 0) {
         if (d.error) {
             if (retryCount < maxRetries) {
                 setTimeout(() => _loadTermStructure(retryCount + 1), 2000);
-            return;
-        }
-        _showTermStructureError(d.error);
+            } else {
+                _showTermStructureError(d.error);
+            }
             return;
         }
 

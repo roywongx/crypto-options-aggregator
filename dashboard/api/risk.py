@@ -11,15 +11,7 @@ def _calc_max_pain_sync(currency: str = "BTC"):
     """同步版本的最大痛点计算（委托给 routers.maxpain 统一实现）"""
     import asyncio
     from routers.maxpain import _calc_max_pain_internal
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                return pool.submit(asyncio.run, _calc_max_pain_internal(currency)).result()
-        return loop.run_until_complete(_calc_max_pain_internal(currency))
-    except RuntimeError:
-        return asyncio.run(_calc_max_pain_internal(currency))
+    return asyncio.run(_calc_max_pain_internal(currency))
 
 
 def get_risk_overview_sync(currency: str = "BTC"):

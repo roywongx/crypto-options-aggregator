@@ -139,16 +139,28 @@ async def save_llm_config(request: ConfigRequest):
 
 @router.post("/test")
 async def test_llm_connection(request: TestConnectionRequest):
-    """测试 LLM 连接"""
+    """测试 LLM 连接（api_key 为空时使用已保存的配置）"""
     from fastapi.concurrency import run_in_threadpool
     from services.llm_analyst import LLMAnalystEngine
 
     engine = LLMAnalystEngine()
-    config = {
-        "api_key": request.api_key,
-        "base_url": request.base_url,
-        "model": request.model,
-    }
+
+    # 如果没传 api_key，使用已保存的配置
+    if not request.api_key:
+        saved = engine.load_config()
+        if not saved.get("api_key"):
+            return {"success": False, "error": "未配置 API Key，请先保存配置"}
+        config = {
+            "api_key": saved["api_key"],
+            "base_url": request.base_url or saved.get("base_url", ""),
+            "model": request.model or saved.get("model", ""),
+        }
+    else:
+        config = {
+            "api_key": request.api_key,
+            "base_url": request.base_url,
+            "model": request.model,
+        }
 
     result = await run_in_threadpool(engine.test_connection, config)
     return result

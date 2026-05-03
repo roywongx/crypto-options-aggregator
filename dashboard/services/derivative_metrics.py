@@ -31,7 +31,7 @@ class DerivativeMetrics:
     def get_all_metrics(cls) -> Dict[str, Any]:
         """获取所有衍生品指标"""
         # 获取 Sharpe Ratio
-        sharpe_7d, sharpe_30d = cls._calc_sharp_ratio()
+        sharpe_14d, sharpe_30d = cls._calc_sharp_ratio()
         
         # 获取资金费率
         funding_rate, funding_signal = cls._get_funding_rate()
@@ -41,14 +41,14 @@ class DerivativeMetrics:
         
         # 获取衍生品过热综合评分
         overheating = cls._assess_derivatives_overheating(
-            sharpe_7d=sharpe_7d, sharpe_30d=sharpe_30d,
+            sharpe_14d=sharpe_14d, sharpe_30d=sharpe_30d,
             funding_rate=funding_rate, vol_ratio=vol_ratio
         )
         
         return {
-            "sharpe_ratio_14d": round(sharpe_7d, 2) if sharpe_7d is not None else None,
+            "sharpe_ratio_14d": round(sharpe_14d, 2) if sharpe_14d is not None else None,
             "sharpe_ratio_30d": round(sharpe_30d, 2) if sharpe_30d is not None else None,
-            "sharpe_signal_14d": cls._interpret_sharpe(sharpe_7d) if sharpe_7d is not None else None,
+            "sharpe_signal_14d": cls._interpret_sharpe(sharpe_14d) if sharpe_14d is not None else None,
             "sharpe_signal_30d": cls._interpret_sharpe(sharpe_30d) if sharpe_30d is not None else None,
             "funding_rate": round(funding_rate, 5) if funding_rate is not None else None,
             "funding_rate_pct": round(funding_rate * 100, 3) if funding_rate is not None else None,
@@ -92,13 +92,13 @@ class DerivativeMetrics:
             
             # 7 天 Sharpe
             returns_14d = returns[-14:]
-            sharpe_7d = cls._calc_single_sharpe(returns_14d)
+            sharpe_14d = cls._calc_single_sharpe(returns_14d)
             
             # 30 天 Sharpe
             returns_30d = returns[-30:]
             sharpe_30d = cls._calc_single_sharpe(returns_30d)
             
-            return sharpe_7d, sharpe_30d
+            return sharpe_14d, sharpe_30d
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
             logger.warning("Sharpe Ratio计算失败: %s", e)
         
@@ -243,7 +243,7 @@ class DerivativeMetrics:
         return None, None
     
     @classmethod
-    def _assess_derivatives_overheating(cls, sharpe_7d=None, sharpe_30d=None,
+    def _assess_derivatives_overheating(cls, sharpe_14d=None, sharpe_30d=None,
                                           funding_rate=None, vol_ratio=None) -> Dict[str, Any]:
         """
         衍生品市场过热综合评估
@@ -259,19 +259,19 @@ class DerivativeMetrics:
         signals = []
         
         # 1. Sharpe 14d 评分
-        if sharpe_7d is not None:
-            if sharpe_7d < -1:
+        if sharpe_14d is not None:
+            if sharpe_14d < -1:
                 score += 10
-                signals.append(("🔴", f"Sharpe 14d={sharpe_7d}（底部）", "bottom"))
-            elif sharpe_7d < 0:
+                signals.append(("🔴", f"Sharpe 14d={sharpe_14d}（底部）", "bottom"))
+            elif sharpe_14d < 0:
                 score += 3
-                signals.append(("🟡", f"Sharpe 14d={sharpe_7d}（负值）", "neutral"))
-            elif sharpe_7d < 2:
+                signals.append(("🟡", f"Sharpe 14d={sharpe_14d}（负值）", "neutral"))
+            elif sharpe_14d < 2:
                 score -= 2
-                signals.append(("🟢", f"Sharpe 14d={sharpe_7d}（正常）", "neutral"))
+                signals.append(("🟢", f"Sharpe 14d={sharpe_14d}（正常）", "neutral"))
             else:
                 score -= 10
-                signals.append(("⚠️", f"Sharpe 14d={sharpe_7d}（过热）", "top"))
+                signals.append(("⚠️", f"Sharpe 14d={sharpe_14d}（过热）", "top"))
         
         # 2. Sharpe 30d 评分
         if sharpe_30d is not None:

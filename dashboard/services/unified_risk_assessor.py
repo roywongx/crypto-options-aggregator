@@ -25,10 +25,10 @@ class UnifiedRiskAssessor:
         future_sentiment = executor.submit(self._assess_sentiment_risk, spot, currency)
         future_liquidity = executor.submit(self._assess_liquidity_risk, currency)
 
-        price_risk = future_price.result()
-        volatility_risk = future_volatility.result()
-        sentiment_risk = future_sentiment.result()
-        liquidity_risk = future_liquidity.result()
+        price_risk = future_price.result(timeout=30)
+        volatility_risk = future_volatility.result(timeout=30)
+        sentiment_risk = future_sentiment.result(timeout=30)
+        liquidity_risk = future_liquidity.result(timeout=30)
 
         composite_score = (
             price_risk["score"] * 0.30 +

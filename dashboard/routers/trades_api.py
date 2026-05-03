@@ -183,7 +183,7 @@ async def get_wind_analysis(
         dist_pct = ((k - spot) / spot * 100) if spot > 0 else 0
         strike_flows.append({
             "strike": k,
-            "option_type": "PUT" if net < 0 else "CALL",
+            "option_type": "CALL" if net < 0 else "PUT",
             "volume": round(v['total'], 0),
             "net": round(net, 0),
             "dist_from_spot_pct": round(dist_pct, 2)

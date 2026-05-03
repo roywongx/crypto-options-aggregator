@@ -60,8 +60,9 @@ class DataHub:
         async with self._lock:
             self._topic_data[topic][symbol] = data
             self._topic_timestamps[topic] = time.time()
+            subscribers = list(self._subscribers.get(topic, []))
 
-        for queue in self._subscribers.get(topic, []):
+        for queue in subscribers:
             try:
                 await queue.put({"symbol": symbol, "data": data, "timestamp": time.time()})
             except (asyncio.CancelledError, RuntimeError) as e:
@@ -236,12 +237,12 @@ class DeribitWSConnector:
         kind = parts[2] if len(parts) > 2 else ""
         
         if kind == "option":
-            mark_price = float(tick_data.get("mark_price", 0))
-            iv = float(tick_data.get("mark_iv", 0))
-            delta = float(tick_data.get("delta", 0))
-            gamma = float(tick_data.get("gamma", 0))
-            theta = float(tick_data.get("theta", 0))
-            vega = float(tick_data.get("vega", 0))
+            mark_price = float(tick_data.get("mark_price") or 0)
+            iv = float(tick_data.get("mark_iv") or 0)
+            delta = float(tick_data.get("delta") or 0)
+            gamma = float(tick_data.get("gamma") or 0)
+            theta = float(tick_data.get("theta") or 0)
+            vega = float(tick_data.get("vega") or 0)
             
             option_data = {
                 "symbol": instrument,

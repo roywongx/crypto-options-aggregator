@@ -288,16 +288,16 @@ async def quick_scan(params: QuickScanParams = None):
                         continue
                     summaries.append({
                         "instrument_name": opt_data.get("symbol", symbol),
-                        "mark_price": opt_data.get("mark_price", 0),
-                        "mark_iv": opt_data.get("iv", 0) * 100 if opt_data.get("iv", 0) <= 1 else opt_data.get("iv", 0),
-                        "delta": opt_data.get("delta", 0),
-                        "gamma": opt_data.get("gamma", 0),
-                        "theta": opt_data.get("theta", 0),
-                        "vega": opt_data.get("vega", 0),
-                        "best_bid_amount": opt_data.get("best_bid", 0),
-                        "best_ask_amount": opt_data.get("best_ask", 0),
-                        "open_interest": opt_data.get("open_interest", 0),
-                        "stats": {"volume": opt_data.get("volume", 0)},
+                        "mark_price": opt_data.get("mark_price") or 0,
+                        "mark_iv": (opt_data.get("iv") or 0) * 100 if (opt_data.get("iv") or 0) <= 1 else (opt_data.get("iv") or 0),
+                        "delta": opt_data.get("delta") or 0,
+                        "gamma": opt_data.get("gamma") or 0,
+                        "theta": opt_data.get("theta") or 0,
+                        "vega": opt_data.get("vega") or 0,
+                        "best_bid_amount": opt_data.get("best_bid") or 0,
+                        "best_ask_amount": opt_data.get("best_ask") or 0,
+                        "open_interest": opt_data.get("open_interest") or 0,
+                        "stats": {"volume": opt_data.get("volume") or 0},
                         "underlying_price": spot
                     })
                 binance_contracts = []

@@ -12,7 +12,7 @@ import logging
 import time
 from typing import Dict, List, Callable, Any, Optional, Set
 from enum import Enum
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -126,8 +126,8 @@ class EventBus:
         self._snapshot_timestamps: Dict[EventType, float] = {}
         self._lock = asyncio.Lock()
         self._running = False
-        self._event_log: List[Event] = []
         self._max_log_size = 1000
+        self._event_log = deque(maxlen=self._max_log_size)
     
     def register_handler(self, event_type: EventType, handler: Callable):
         self._handlers[event_type].append(handler)
@@ -146,8 +146,6 @@ class EventBus:
             self._snapshot_timestamps[event.event_type] = event.timestamp
             
             self._event_log.append(event)
-            if len(self._event_log) > self._max_log_size:
-                self._event_log = self._event_log[-self._max_log_size:]
         
         for handler in self._handlers.get(event.event_type, []):
             try:
@@ -155,14 +153,14 @@ class EventBus:
                     await handler(event)
                 else:
                     handler(event)
-            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
+            except Exception as e:
                 logger.error("Event handler error for %s: %s", event.event_type.value, str(e))
         
         for subscriber in self._subscribers.get(event.event_type, []):
             if subscriber._active:
                 try:
                     await subscriber._queue.put(event)
-                except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
+                except Exception as e:
                     logger.error("Failed to deliver event to subscriber: %s", str(e))
     
     def get_snapshot(self, event_type: EventType) -> Optional[Dict]:
@@ -183,7 +181,7 @@ class EventBus:
         event_type: Optional[EventType] = None,
         limit: int = 50
     ) -> List[Dict]:
-        events = self._event_log
+        events = list(self._event_log)
         if event_type:
             events = [e for e in events if e.event_type == event_type]
         return [e.to_dict() for e in events[-limit:]]

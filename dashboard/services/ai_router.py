@@ -104,8 +104,11 @@ def ai_chat_with_config(
         if custom_config.get("model"):
             model = custom_config["model"]
             fallbacks = []  # 自定义模型不使用 fallback
+            # OpenRouter 模型需要 openrouter/ 前缀
+            if base_url and "openrouter.ai" in base_url and not model.startswith("openrouter/"):
+                model = f"openrouter/{model}"
             # 对于自定义 OpenAI 兼容 API，如果模型名不包含 /，添加 openai/ 前缀
-            if base_url and "/" not in model:
+            elif base_url and "/" not in model:
                 model = f"openai/{model}"
     
     # 回退到环境变量
@@ -129,17 +132,24 @@ def ai_chat_with_config(
         logger.info("AI 请求参数: model=%s, base_url=%s, messages_count=%d", model, base_url, len(messages))
         response = completion(**kwargs)
         logger.info("AI 响应成功: %s", response)
-        return response.choices[0].message.content
+        if not response or not response.choices:
+            return None
+        msg = response.choices[0].message
+        # 推理模型（如 mimo）回复在 reasoning_content 而非 content
+        return msg.content or getattr(msg, "reasoning_content", None) or ""
 
-    except (RuntimeError, ConnectionError, TimeoutError, ValueError) as e:
+    except Exception as e:
         # 尝试 fallback（仅当未指定自定义模型时）
         if not custom_config or not custom_config.get("model"):
             for fallback_model in fallbacks:
                 try:
                     kwargs["model"] = fallback_model
                     response = completion(**kwargs)
-                    return response.choices[0].message.content
-                except (RuntimeError, ConnectionError, TimeoutError, ValueError) as fb_e:
+                    if not response or not response.choices:
+                        continue
+                    msg = response.choices[0].message
+                    return msg.content or getattr(msg, "reasoning_content", None) or ""
+                except Exception as fb_e:
                     logger.debug("AI fallback %s failed: %s", fallback_model, fb_e)
                     continue
 

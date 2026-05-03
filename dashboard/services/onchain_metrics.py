@@ -25,25 +25,25 @@ logger = logging.getLogger(__name__)
 class OnChainMetrics:
     """使用真实数据源的链上指标"""
     
-    # 缓存
-    _cache = {}
-    _cache_time = None
+    # 缓存 (按 currency 分别缓存)
+    _cache: Dict[str, Dict] = {}
+    _cache_times: Dict[str, datetime] = {}
     CACHE_DURATION = 300  # 5分钟缓存
-    
+
     @classmethod
     def get_all_metrics(cls, currency: str = "bitcoin") -> Dict[str, Any]:
         """获取所有链上指标"""
-        # 检查缓存
-        if cls._cache_time and cls._cache:
-            elapsed = (datetime.now() - cls._cache_time).total_seconds()
+        # 检查缓存 (按 currency 查找)
+        if currency in cls._cache_times and currency in cls._cache:
+            elapsed = (datetime.now() - cls._cache_times[currency]).total_seconds()
             if elapsed < cls.CACHE_DURATION:
-                return cls._cache.copy()
-        
+                return cls._cache[currency].copy()
+
         try:
             metrics = cls._fetch_all()
             if metrics and metrics.get('current_price'):
-                cls._cache = metrics
-                cls._cache_time = datetime.now()
+                cls._cache[currency] = metrics
+                cls._cache_times[currency] = datetime.now()
                 return metrics
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("获取链上指标失败: %s", e)

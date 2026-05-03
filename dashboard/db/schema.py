@@ -60,6 +60,7 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_trades_currency_timestamp_notional ON large_trades_history(currency, timestamp DESC, notional_usd DESC)",
     "CREATE INDEX IF NOT EXISTS idx_dvol_currency ON dvol_history(currency)",
     "CREATE INDEX IF NOT EXISTS idx_dvol_timestamp ON dvol_history(timestamp)",
+    "CREATE INDEX IF NOT EXISTS idx_dvol_currency_timestamp ON dvol_history(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_scan_currency_timestamp ON scan_records(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_scan_timestamp ON scan_records(timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_debate_currency_timestamp ON debate_results(currency, timestamp DESC)",

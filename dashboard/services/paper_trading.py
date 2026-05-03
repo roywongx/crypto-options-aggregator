@@ -123,7 +123,7 @@ def paper_open_position(
             return {"error": "账户未初始化"}
 
         premium_total = premium * qty
-        margin_required = calc_margin(option_type, strike, premium, qty, currency=currency)
+        margin_required = calc_margin(strike, premium, option_type)
 
         # 计算已占用保证金（open positions）
         locked_margin = _get_locked_margin()
@@ -453,7 +453,7 @@ def _estimate_current_premium(pos: Dict, spot: float) -> float:
     
     # 简化时间衰减: 假设每天衰减 2%
     try:
-        entry_date = datetime.strptime(pos["timestamp"], "%Y-%m-%d %H:%M:%S")
+        entry_date = datetime.strptime(pos["timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         days_held = (datetime.now(timezone.utc) - entry_date).days
     except (ValueError, TypeError, KeyError) as e:
         logger.debug("Time decay calc fallback: %s", e)
@@ -469,7 +469,7 @@ def _get_dte(expiry: str) -> int:
     if not expiry:
         return 30  # 默认
     try:
-        exp_date = datetime.strptime(expiry, "%Y-%m-%d")
+        exp_date = datetime.strptime(expiry, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         return max(0, (exp_date - datetime.now(timezone.utc)).days)
     except (ValueError, TypeError) as e:
         logger.debug("DTE parse fallback for %s: %s", expiry, e)
