@@ -230,6 +230,9 @@ async def get_llm_risk_insight(currency: str = Query(default="BTC")):
             custom_config=custom_config
         )
 
+        if not response:
+            return {"narrative": "LLM 服务未配置或无响应，请检查 LLM 配置。", "anomalies": [], "recommendations": [], "confidence": 0}
+
         parsed = LLMAnalystEngine()._parse_json_response(response)
         return parsed or {"narrative": response, "anomalies": [], "recommendations": [], "confidence": 50}
 

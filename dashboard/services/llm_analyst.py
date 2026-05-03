@@ -232,13 +232,13 @@ class LLMAnalystEngine:
         try:
             response = ai_chat_with_config(
                 [{"role": "user", "content": "Reply with exactly: OK"}],
-                preset="fast", temperature=0, max_tokens=10,
+                preset="fast", temperature=0, max_tokens=100,
                 custom_config=custom_config or None
             )
             latency = int((time.time() - start) * 1000)
 
-            if response and "OK" in response.upper():
-                return {"success": True, "latency_ms": latency, "model": config.get("model", "default")}
+            if response and len(response.strip()) > 0:
+                return {"success": True, "latency_ms": latency, "model": config.get("model", "default"), "reply": response[:100]}
             else:
                 return {"success": False, "error": f"模型返回异常: {response[:100] if response else '无响应'}", "latency_ms": latency}
 
@@ -371,6 +371,8 @@ class LLMAnalystEngine:
 
     def _parse_json_response(self, response: str) -> Optional[Dict]:
         """从 LLM 响应中提取 JSON"""
+        if not response:
+            return None
         # 尝试直接解析
         try:
             return json.loads(response)
