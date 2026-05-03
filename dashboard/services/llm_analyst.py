@@ -2,7 +2,9 @@
 LLM 分析师引擎 — AI 研判中心核心
 叠加在 5 个规则 agent 之上的 LLM 综合分析层
 """
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -15,6 +17,7 @@ from services.onchain_metrics import OnChainMetrics
 from services.derivative_metrics import DerivativeMetrics
 from services.macro_data import get_all_macro_data
 from services.iv_term_structure import IVTermStructureAnalyzer
+from services.ai_router import ai_chat_with_config
 
 
 @dataclass
@@ -183,8 +186,150 @@ class LLMAnalystEngine:
         return None
 
     def _llm_synthesize(self, context: Dict, rule_reports: Dict) -> Dict[str, Any]:
-        """LLM 综合分析师 — 留给 Task 3 实现"""
-        return {"success": False, "placeholder": "synthesis not implemented"}
+        """LLM 综合分析师 — 资深期权策略师"""
+        system_prompt = """你是一位资深加密货币期权策略师。基于以下全量市场数据和规则引擎分析报告，给出综合研判。
+
+要求：
+1. market_assessment: 市场整体评估（多空力量、关键位、趋势判断）
+2. strategy_recommendation: 策略建议（具体操作、行权价、DTE、理由）
+3. risk_warning: 风险提示（需要关注的风险因素）
+4. confidence: 信心度（0-100）
+
+请严格返回 JSON 格式，不要添加其他文字。"""
+
+        data_summary = self._build_data_summary(context)
+        rule_summary = self._build_rule_summary(rule_reports)
+
+        user_prompt = f"""=== 币种: {context['currency']} ===
+
+=== 市场数据 ===
+{data_summary}
+
+=== 规则引擎分析 ===
+{rule_summary}
+
+请基于以上数据给出综合研判 JSON。"""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        custom_config = self._get_custom_config()
+
+        try:
+            response = ai_chat_with_config(
+                messages, preset="analysis", temperature=0.3,
+                max_tokens=2000, custom_config=custom_config
+            )
+            if not response:
+                return {"success": False, "error": "LLM 无响应，请检查 API Key 配置"}
+
+            parsed = self._parse_json_response(response)
+            if parsed is None:
+                return {"success": False, "error": "LLM 返回格式异常", "raw_response": response[:500]}
+
+            parsed["success"] = True
+            return parsed
+
+        except (RuntimeError, ConnectionError, TimeoutError, ValueError) as e:
+            logger.error("llm_synthesize failed: %s", e)
+            return {"success": False, "error": str(e)}
+
+    def _build_data_summary(self, ctx: Dict) -> str:
+        """将全量上下文数据格式化为可读文本"""
+        parts = []
+        parts.append(f"现货价格: ${ctx.get('spot', 0):,.0f}")
+
+        dvol = ctx.get("dvol", {})
+        if dvol:
+            parts.append(f"DVOL: {dvol.get('current', 0):.1f} (Z-Score: {dvol.get('z_score', 0):.2f}, 信号: {dvol.get('signal', '')}, 趋势: {dvol.get('trend', '')})")
+
+        risk = ctx.get("risk", {})
+        if risk.get("status"):
+            parts.append(f"风险状态: {risk.get('label', '')} — {risk.get('desc', '')}")
+
+        onchain = ctx.get("onchain", {})
+        if onchain:
+            parts.append(f"链上指标: MVRV={onchain.get('mvrv', 'N/A')}, NUPL={onchain.get('nupl', 'N/A')}, 汇合评分={onchain.get('convergence_score', 'N/A')}")
+
+        deriv = ctx.get("derivatives", {})
+        if deriv:
+            parts.append(f"衍生品: Sharpe7d={deriv.get('sharpe_7d', 'N/A')}, 成交量比={deriv.get('vol_ratio', 'N/A')}, 过热={deriv.get('overheating', 'N/A')}")
+
+        macro = ctx.get("macro", {})
+        if macro:
+            fg = macro.get("fear_greed", {})
+            fr = macro.get("funding_rate", {})
+            parts.append(f"宏观: 恐惧贪婪={fg.get('value', 'N/A')}({fg.get('classification', '')}), 资金费率={fr.get('current_rate', 'N/A')}")
+
+        iv = ctx.get("iv_term", {})
+        if iv:
+            parts.append(f"IV期限结构: 状态={iv.get('state', 'N/A')}, 斜率={iv.get('slope', 'N/A')}, VRP={iv.get('vrp', 'N/A')}")
+
+        parts.append(f"最大痛点: ${ctx.get('max_pain', 0):,.0f}")
+
+        trades = ctx.get("large_trades", [])
+        parts.append(f"大单数量: {len(trades)}")
+        if trades:
+            for t in trades[:5]:
+                if isinstance(t, dict):
+                    parts.append(f"  {t.get('side', '')} ${t.get('notional_usd', 0):,.0f} @ {t.get('strike', '')}")
+
+        contracts = ctx.get("contracts", [])
+        parts.append(f"期权合约数: {len(contracts)}")
+
+        strategy = ctx.get("strategy_summary", {})
+        if strategy:
+            recs = strategy.get("top_recommendations", [])
+            if recs:
+                parts.append("策略引擎推荐 TOP3:")
+                for r in recs:
+                    parts.append(f"  Strike=${r.get('strike', 0):,.0f} Premium=${r.get('premium', 0):,.0f} APR={r.get('apr', 0):.1f}% Score={r.get('score', 0):.3f} → {r.get('rec', '')}")
+
+        return "\n".join(parts)
+
+    def _build_rule_summary(self, rule_reports: Dict) -> str:
+        """格式化规则引擎报告"""
+        parts = []
+        reports = rule_reports.get("reports", [])
+        for r in reports:
+            parts.append(f"[{r.get('name', '')}] 分数:{r.get('score', 0)} 置信度:{r.get('confidence', 0)}% 判定:{r.get('verdict', '')}")
+            for pt in r.get("key_points", []):
+                parts.append(f"  - {pt}")
+
+        synthesis = rule_reports.get("synthesis", {})
+        if synthesis:
+            parts.append(f"\n[规则引擎综合] 评分:{synthesis.get('overall_score', 0)} 建议:{synthesis.get('recommendation_label', '')} 共识:{synthesis.get('consensus', '')}")
+
+        return "\n".join(parts)
+
+    def _parse_json_response(self, response: str) -> Optional[Dict]:
+        """从 LLM 响应中提取 JSON"""
+        # 尝试直接解析
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试提取 ```json ... ``` 块
+        match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # 尝试找到第一个 { 到最后一个 }
+        start = response.find('{')
+        end = response.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(response[start:end + 1])
+            except json.JSONDecodeError:
+                pass
+
+        return None
 
     def _llm_debate(self, context: Dict, synthesis: Dict) -> Dict[str, Any]:
         """LLM 多空辩论 — 留给 Task 4 实现"""

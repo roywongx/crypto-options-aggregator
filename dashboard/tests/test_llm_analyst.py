@@ -79,3 +79,68 @@ class TestPrepareContext:
         assert "spot failed" in ctx["errors"]
         assert any("onchain" in e for e in ctx["errors"])
         assert any("derivatives" in e for e in ctx["errors"])
+
+
+class TestLlmSynthesize:
+    """Test _llm_synthesize LLM call"""
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_synthesize_parses_valid_json(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = json.dumps({
+            "market_assessment": "BTC 在关键支撑位",
+            "strategy_recommendation": "Sell Put 95000",
+            "risk_warning": "注意波动率上升",
+            "confidence": 75,
+        })
+
+        engine = LLMAnalystEngine()
+        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
+               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+               "strategy_summary": {}}
+        rule_reports = {"reports": [], "synthesis": {}, "market_summary": {}}
+
+        result = engine._llm_synthesize(ctx, rule_reports)
+
+        assert result["success"] is True
+        assert result["market_assessment"] == "BTC 在关键支撑位"
+        assert result["confidence"] == 75
+        mock_ai.assert_called_once()
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_synthesize_handles_llm_failure(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = None
+
+        engine = LLMAnalystEngine()
+        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
+               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+               "strategy_summary": {}}
+        rule_reports = {"reports": [], "synthesis": {}, "market_summary": {}}
+
+        result = engine._llm_synthesize(ctx, rule_reports)
+
+        assert result["success"] is False
+        assert "error" in result
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_synthesize_handles_malformed_json(self, mock_ai):
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = "这不是 JSON"
+
+        engine = LLMAnalystEngine()
+        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
+               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+               "strategy_summary": {}}
+        rule_reports = {"reports": [], "synthesis": {}, "market_summary": {}}
+
+        result = engine._llm_synthesize(ctx, rule_reports)
+
+        assert result["success"] is False
+        assert "raw_response" in result
