@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from models.contracts import StrategyRecommendRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["strategy"])
@@ -102,3 +103,68 @@ async def strategy_calc(params: StrategyCalcRequest):
 async def calculator_roll(params: StrategyCalcRequest):
     """滚仓计算器"""
     return await strategy_calc(params)
+
+
+@router.post("/strategy/recommend")
+async def strategy_recommend(params: StrategyRecommendRequest):
+    """策略推荐端点"""
+    from services.strategy_engine import StrategyEngine
+    from services.dvol_analyzer import get_dvol_from_deribit
+    from constants import get_dynamic_spot_price
+    from db.connection import execute_read
+    import json as _json
+
+    # Get spot price
+    spot = get_dynamic_spot_price(params.currency)
+
+    # Get DVOL data
+    dvol_raw = await run_in_threadpool(get_dvol_from_deribit, params.currency)
+    dvol_snapshot = {
+        "current": dvol_raw.get("current", 0),
+        "z_score": dvol_raw.get("z_score", 0),
+    }
+
+    # Read latest contracts from database
+    rows = execute_read(
+        "SELECT contracts_data FROM scan_records WHERE currency = ? ORDER BY timestamp DESC LIMIT 1",
+        (params.currency,)
+    )
+    contracts = []
+    if rows and rows[0][0]:
+        try:
+            contracts = _json.loads(rows[0][0])
+        except _json.JSONDecodeError:
+            pass
+
+    if not contracts:
+        return {
+            "success": False,
+            "currency": params.currency,
+            "spot_price": spot,
+            "filter_summary": {"reason": "no_contracts", "message": "暂无扫描数据，请先执行扫描"},
+            "recommendations": [],
+        }
+
+    engine = StrategyEngine()
+
+    if params.mode == "grid":
+        result = await run_in_threadpool(
+            engine.grid, contracts, params.currency, spot, params.capital,
+            params.grid_levels, params.grid_interval_pct, dvol_snapshot, params.overrides,
+        )
+    else:
+        result = await run_in_threadpool(
+            engine.recommend, contracts, params.currency, params.mode,
+            params.option_type, spot, params.capital, params.max_results,
+            dvol_snapshot, params.overrides, params.old_strike,
+        )
+
+    return {
+        "success": result.success,
+        "currency": result.currency,
+        "spot_price": result.spot_price,
+        "dvol_snapshot": result.dvol_snapshot,
+        "filter_summary": result.filter_summary,
+        "recommendations": result.recommendations,
+        "timestamp": result.timestamp,
+    }
