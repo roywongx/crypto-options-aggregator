@@ -1804,6 +1804,11 @@ function renderLLMRiskInsight(data) {
     document.getElementById('llmConfidenceText').textContent = conf + '%';
 }
 
+// Expose to global scope for onclick handlers (module scripts don't leak to window)
+window.setRiskTab = setRiskTab;
+window.loadLLMRiskInsight = loadLLMRiskInsight;
+window.renderLLMRiskInsight = renderLLMRiskInsight;
+
 function updateMacroIndicators(data) {
     const spotPrice = data.spot_price;
     const spotEl = document.getElementById('spotPrice');
