@@ -46,9 +46,9 @@ class DerivativeMetrics:
         )
         
         return {
-            "sharpe_ratio_7d": round(sharpe_7d, 2) if sharpe_7d is not None else None,
+            "sharpe_ratio_14d": round(sharpe_7d, 2) if sharpe_7d is not None else None,
             "sharpe_ratio_30d": round(sharpe_30d, 2) if sharpe_30d is not None else None,
-            "sharpe_signal_7d": cls._interpret_sharpe(sharpe_7d) if sharpe_7d is not None else None,
+            "sharpe_signal_14d": cls._interpret_sharpe(sharpe_7d) if sharpe_7d is not None else None,
             "sharpe_signal_30d": cls._interpret_sharpe(sharpe_30d) if sharpe_30d is not None else None,
             "funding_rate": round(funding_rate, 5) if funding_rate is not None else None,
             "funding_rate_pct": round(funding_rate * 100, 3) if funding_rate is not None else None,
@@ -100,7 +100,7 @@ class DerivativeMetrics:
             
             return sharpe_7d, sharpe_30d
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("Sharpe Ratio计算失败: {e}")
+            logger.warning("Sharpe Ratio计算失败: %s", e)
         
         return None, None
     
@@ -182,7 +182,7 @@ class DerivativeMetrics:
             
             return funding_rate, signal
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("资金费率获取失败: {e}")
+            logger.warning("资金费率获取失败: %s", e)
         
         return None, None
     
@@ -238,7 +238,7 @@ class DerivativeMetrics:
             
             return round(ratio, 2), signal
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("期货/现货比率获取失败: {e}")
+            logger.warning("期货/现货比率获取失败: %s", e)
         
         return None, None
     
@@ -258,20 +258,20 @@ class DerivativeMetrics:
         score = 0
         signals = []
         
-        # 1. Sharpe 7d 评分
+        # 1. Sharpe 14d 评分
         if sharpe_7d is not None:
             if sharpe_7d < -1:
                 score += 10
-                signals.append(("🔴", f"Sharpe 7d={sharpe_7d}（底部）", "bottom"))
+                signals.append(("🔴", f"Sharpe 14d={sharpe_7d}（底部）", "bottom"))
             elif sharpe_7d < 0:
                 score += 3
-                signals.append(("🟡", f"Sharpe 7d={sharpe_7d}（负值）", "neutral"))
+                signals.append(("🟡", f"Sharpe 14d={sharpe_7d}（负值）", "neutral"))
             elif sharpe_7d < 2:
                 score -= 2
-                signals.append(("🟢", f"Sharpe 7d={sharpe_7d}（正常）", "neutral"))
+                signals.append(("🟢", f"Sharpe 14d={sharpe_7d}（正常）", "neutral"))
             else:
                 score -= 10
-                signals.append(("⚠️", f"Sharpe 7d={sharpe_7d}（过热）", "top"))
+                signals.append(("⚠️", f"Sharpe 14d={sharpe_7d}（过热）", "top"))
         
         # 2. Sharpe 30d 评分
         if sharpe_30d is not None:

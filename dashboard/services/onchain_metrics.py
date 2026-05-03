@@ -236,7 +236,7 @@ class OnChainMetrics:
             days_remaining = int(blocks_remaining * 10 / (60 * 24))
             return max(0, days_remaining)
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("减半倒计时失败: {e}")
+            logger.warning("减半倒计时失败: %s", e)
         
         # 估算
         from datetime import datetime
@@ -308,7 +308,7 @@ class OnChainMetrics:
             
             return round(puell, 2), signal
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning("Puell Multiple计算失败: {e}")
+            logger.warning("Puell Multiple计算失败: %s", e)
         
         return None, None
     
@@ -388,7 +388,7 @@ class OnChainMetrics:
                 mayer = current_price / dma_200 if dma_200 > 0 else None
                 return dma_200, round(mayer, 3) if mayer else None
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("200DMA/Mayer计算失败: {e}")
+            logger.warning("200DMA/Mayer计算失败: %s", e)
         
         return None, None
     
@@ -409,7 +409,7 @@ class OnChainMetrics:
             elif "values" in data and data["values"]:
                 return [float(item.get("value", 0)) for item in data["values"] if item.get("value")]
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning("MVRV历史获取失败: {e}")
+            logger.warning("MVRV历史获取失败: %s", e)
         
         return []
     
@@ -505,7 +505,7 @@ class OnChainMetrics:
             }
             
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning("MVRV Z-Score计算失败: {e}")
+            logger.warning("MVRV Z-Score计算失败: %s", e)
         
         return result
     
@@ -528,7 +528,7 @@ class OnChainMetrics:
             nupl = (mvrv - 1) / mvrv
             return round(nupl, 3)
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-            logger.warning("NUPL计算失败: {e}")
+            logger.warning("NUPL计算失败: %s", e)
             return None
     
     @classmethod

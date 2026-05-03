@@ -193,7 +193,7 @@ class UnifiedRiskAssessor:
             logger.warning("Liquidity data fetch failed: %s", e)
             factors.append("流动性数据获取失败")
 
-        return {"score": score, "factors": factors}
+        return {"score": max(0, score), "factors": factors}
 
     def _generate_risk_recommendations(self, composite_score: float) -> list:
         if composite_score < 30:

@@ -37,7 +37,7 @@ class DynamicSupportCalculator:
                 "timestamp": datetime.now().isoformat()
             }
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.error("计算动态支撑位失败: {e}")
+            logger.error("计算动态支撑位失败: %s", e)
             fallback = get_spot_fallback(self.currency)
             return {
                 "regular": fallback * 0.75,
@@ -90,7 +90,7 @@ class DynamicSupportCalculator:
                     "low": low
                 }
         except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("计算斐波那契回撤位失败: {e}")
+            logger.warning("计算斐波那契回撤位失败: %s", e)
 
         spot = get_spot_fallback(self.currency)
         high, low = spot * 1.15, spot * 0.65
@@ -134,7 +134,7 @@ class DynamicSupportCalculator:
                         realized = price / mvrv
                         return round(realized, 2)
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.warning("获取链上价格失败: {e}")
+            logger.warning("获取链上价格失败: %s", e)
 
         fallback = get_spot_fallback(self.currency)
         return fallback * 0.5  # Realized Price 通常远低于现价

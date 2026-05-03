@@ -1330,7 +1330,7 @@ function updateRiskDashboardUI(data) {
     if (badge) { badge.textContent = statusText; badge.className = 'px-2 py-0.5 rounded text-xs font-medium ' + statusClass; }
 
     // Risk score
-    const score = data.risk_score || 0;
+    const score = data.composite_score || 0;
     const scoreBadge = document.getElementById('riskScoreBadge');
     if (scoreBadge) { scoreBadge.textContent = score; scoreBadge.style.color = getRiskColor(score); }
 
@@ -1338,8 +1338,8 @@ function updateRiskDashboardUI(data) {
     renderRiskGauge('riskGaugeCanvas', score);
 
     // Radar
-    const dims = data.dimensions || {};
-    renderRiskRadar('riskRadarCanvas', { 'Price': dims.price || 0, 'Volatility': dims.volatility || 0, 'Sentiment': dims.sentiment || 0, 'Liquidity': dims.liquidity || 0 });
+    const comp = data.components || {};
+    renderRiskRadar('riskRadarCanvas', { 'Price': (comp.price_risk || {}).score || 0, 'Volatility': (comp.volatility_risk || {}).score || 0, 'Sentiment': (comp.sentiment_risk || {}).score || 0, 'Liquidity': (comp.liquidity_risk || {}).score || 0 });
 
     // 5 Indicator Cards
     const spot = data.spot || 0;
@@ -1390,14 +1390,14 @@ function updateOnchainMetrics(onchain) {
     if (!grid) return;
 
     const indicators = [
-        { id: 'MVRV', value: onchain.mvrv, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#10b981' : v < 3.5 ? '#eab308' : '#ef4444' },
-        { id: 'MVRV Z-Score', value: onchain.mvrv_zscore, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0 ? '#10b981' : v < 7 ? '#eab308' : '#ef4444' },
+        { id: 'MVRV', value: onchain.mvrv_ratio, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#10b981' : v < 3.5 ? '#eab308' : '#ef4444' },
+        { id: 'MVRV Z-Score', value: onchain.mvrv_z_score, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0 ? '#10b981' : v < 7 ? '#eab308' : '#ef4444' },
         { id: 'NUPL', value: onchain.nupl, fmt: v => v != null ? (v * 100).toFixed(1) + '%' : '--', color: v => v < 0 ? '#ef4444' : v < 0.25 ? '#eab308' : v < 0.75 ? '#f97316' : '#10b981' },
         { id: 'Mayer', value: onchain.mayer_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#10b981' : v < 2.4 ? '#eab308' : '#ef4444' },
-        { id: '200WMA', value: onchain.wma_200, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
+        { id: '200WMA', value: onchain.price_200wma, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
         { id: 'Balanced Price', value: onchain.balanced_price, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
         { id: '200DMA', value: onchain.price_200dma, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
-        { id: 'Halving', value: onchain.halving_days, fmt: v => v != null ? v + ' 天' : '--', color: () => '#a78bfa' },
+        { id: 'Halving', value: onchain.halving_days_remaining, fmt: v => v != null ? v + ' 天' : '--', color: () => '#a78bfa' },
         { id: 'Puell', value: onchain.puell_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0.4 ? '#10b981' : v < 2.0 ? '#eab308' : '#ef4444' }
     ];
 
@@ -1501,7 +1501,7 @@ function updateDerivativeMetrics(deriv) {
 
     // 4 metric cards
     const metrics = [
-        { id: 'Sharpe 14d', value: deriv.sharpe_7d, fmt: v => v != null ? v.toFixed(2) : '--' },
+        { id: 'Sharpe 14d', value: deriv.sharpe_ratio_14d, fmt: v => v != null ? v.toFixed(2) : '--' },
         { id: 'Sharpe 30d', value: deriv.sharpe_30d, fmt: v => v != null ? v.toFixed(2) : '--' },
         { id: '资金费率', value: deriv.funding_rate, fmt: v => v != null ? (v * 100).toFixed(4) + '%' : '--' },
         { id: '期货/现货比', value: deriv.futures_spot_ratio, fmt: v => v != null ? v.toFixed(2) : '--' }
@@ -1589,11 +1589,12 @@ function updateSentimentAnalysis(sentiment) {
         income_generation: '收租', volatility_play: '波动率交易'
     };
 
+    const intentKey = da.name || '';
     let html = `<div class="flex items-center gap-4 mb-3">
-        <div><span class="text-xs text-gray-400">主导意图</span><div class="text-lg font-bold ${intentColors[da.intent] || 'text-white'}">${intentLabels[da.intent] || da.intent || '--'}</div></div>
+        <div><span class="text-xs text-gray-400">主导意图</span><div class="text-lg font-bold ${intentColors[intentKey] || 'text-white'}">${intentLabels[intentKey] || da.name || '--'}</div></div>
         <div><span class="text-xs text-gray-400">风险等级</span><div class="text-lg font-bold ${da.risk_level === 'HIGH' ? 'text-red-400' : da.risk_level === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400'}">${da.risk_level || '--'}</div></div>
-        <div><span class="text-xs text-gray-400">信心度</span><div class="text-lg font-bold text-white">${da.confidence || 0}%</div></div>
-        <div><span class="text-xs text-gray-400">AI 建议</span><div class="text-sm text-gray-300">${safeHTML(sentiment.recommendation || '--')}</div></div>
+        <div><span class="text-xs text-gray-400">信心度</span><div class="text-lg font-bold text-white">${sentiment.confidence || 0}%</div></div>
+        <div><span class="text-xs text-gray-400">AI 建议</span><div class="text-sm text-gray-300">${safeHTML(sentiment.ai_recommendation || '--')}</div></div>
     </div>`;
 
     // Put/Call ratio
@@ -1608,7 +1609,7 @@ function updateSentimentAnalysis(sentiment) {
     if (Object.keys(dist).length) {
         html += '<div class="space-y-1 mb-3">';
         Object.entries(dist).forEach(([key, val]) => {
-            const pct = typeof val === 'number' ? val : 0;
+            const pct = (typeof val === 'object' && val != null) ? (val.pct || 0) : (typeof val === 'number' ? val : 0);
             const label = intentLabels[key] || key;
             html += `<div class="flex items-center gap-2 text-xs">
                 <span class="w-24 text-gray-400">${label}</span>
@@ -1626,7 +1627,7 @@ function updateSentimentAnalysis(sentiment) {
         warnings.forEach(w => {
             const level = (w.level || '').toUpperCase();
             const icon = level === 'HIGH' ? '🔴' : level === 'MEDIUM' ? '🟡' : '🟢';
-            html += `<div class="text-sm text-gray-300">${icon} ${safeHTML(w.message || w)}</div>`;
+            html += `<div class="text-sm text-gray-300">${icon} ${safeHTML(w.text || w.message || w)}</div>`;
         });
         html += '</div>';
     }

@@ -125,7 +125,7 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
                 }
         return {}
     except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-        logger.warning("获取DVOL失败(简单版): {e}")
+        logger.warning("获取DVOL失败(简单版): %s", e)
         return {}
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
