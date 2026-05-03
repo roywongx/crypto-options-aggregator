@@ -375,8 +375,12 @@ class LLMAnalystEngine:
             if bull_resp:
                 parsed = self._parse_json_response(bull_resp)
                 if parsed:
-                    parsed["success"] = True
-                    bull_result = parsed
+                    required_bull = {"bullish_case", "key_drivers", "target_scenarios", "confidence"}
+                    if required_bull.issubset(parsed.keys()):
+                        parsed["success"] = True
+                        bull_result = parsed
+                    else:
+                        bull_result = {"success": False, "error": "bull response missing fields"}
         except Exception as e:
             logger.warning("bull agent failed: %s", e)
             bull_result = {"success": False, "error": str(e)}
@@ -389,8 +393,12 @@ class LLMAnalystEngine:
             if bear_resp:
                 parsed = self._parse_json_response(bear_resp)
                 if parsed:
-                    parsed["success"] = True
-                    bear_result = parsed
+                    required_bear = {"bearish_case", "key_risks", "downside_scenarios", "confidence"}
+                    if required_bear.issubset(parsed.keys()):
+                        parsed["success"] = True
+                        bear_result = parsed
+                    else:
+                        bear_result = {"success": False, "error": "bear response missing fields"}
         except Exception as e:
             logger.warning("bear agent failed: %s", e)
             bear_result = {"success": False, "error": str(e)}
@@ -420,8 +428,12 @@ class LLMAnalystEngine:
             if judge_resp:
                 parsed = self._parse_json_response(judge_resp)
                 if parsed:
-                    parsed["success"] = True
-                    judge_result = parsed
+                    required_judge = {"judge_verdict", "winner", "bull_confidence", "bear_confidence", "reasoning"}
+                    if required_judge.issubset(parsed.keys()):
+                        parsed["success"] = True
+                        judge_result = parsed
+                    else:
+                        judge_result = {"success": False, "error": "judge response missing fields"}
         except Exception as e:
             logger.warning("judge agent failed: %s", e)
             judge_result = {"success": False, "error": str(e)}
