@@ -363,7 +363,24 @@ python -m pytest tests/test_core.py -v
 
 ## 📝 更新日志
 
-### v5.5 — Greeks 计算修复与异步数据库优化（当前）
+### v5.6 — 大宗交易数据聚合修复（当前）
+
+#### 核心修复
+- **大宗交易买卖数据聚合修复**: 修复同一合约既有买又有卖时，非主导方向数据丢失的问题
+  - `services/large_trades_fetcher.py` - `_enrich_from_api` 现在累加同一合约的买卖数据，而不是覆盖
+  - 新增 `buy_notional`/`sell_notional`/`buy_count`/`sell_count` 字段记录双方真实数据
+- **AI 辩论资金流向分析师修复**: 修复 "大单买入/卖出占比 100%" 的错误显示
+  - `services/options_debate_engine.py` - `_flow_analyst` 使用 `buy_notional`/`sell_notional` 替代 `direction`+`notional_usd`
+  - `_bear_analyst` 修正 PCR 计算逻辑（买入Put/买入Call，而非买入Put/卖出Put）
+- **风向分析数据一致性修复**: `_fetch_wind_analysis` 从 OI 数据改为使用 `large_trades_history` 实际交易数据
+- **Wind Analysis API 修复**: `trades_api.py` 使用名义价值替代笔数计算比率
+- **AI Sentiment 修复**: `ai_sentiment.py` 使用名义价值替代笔数计算 Put/Call 比率
+- **前端 totalNotional 修复**: `app.js` 使用 API 返回的 `total_notional` 而非从 distribution 数组计算
+
+#### 异常处理
+- **修复 `httpx` 未导入错误**: `large_trades_fetcher.py` 中异常捕获改为通用 `Exception`
+
+### v5.5 — Greeks 计算修复与异步数据库优化
 
 #### 核心修复
 - **Greeks 计算修复**: 使用 Black-Scholes 模型实时计算 Greeks（Deribit API 不返回 Greeks 数据）

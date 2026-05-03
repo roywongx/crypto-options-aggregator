@@ -3186,8 +3186,7 @@ async function loadWindAnalysis() {
 
             const totalNotionalEl = document.getElementById('windTotalNotional');
             if (totalNotionalEl) {
-                const dist = data.distribution || [];
-                const totalNotional = dist.reduce((sum, d) => sum + (d.total || 0), 0);
+                const totalNotional = data.total_notional || 0;
                 totalNotionalEl.textContent = totalNotional > 0 ? `$${(totalNotional / 1000000).toFixed(1)}M` : '-';
             }
 
@@ -3199,10 +3198,10 @@ async function loadWindAnalysis() {
             if (flowBreakdownEl && data.flow_breakdown) {
                 flowBreakdownEl.innerHTML = data.flow_breakdown.map(f => {
                     const pct = f.count > 0 ? Math.round(f.count / (summary.total_trades || 1) * 100) : 0;
-                    const colorClass = f.type.includes('protective') || f.type.includes('put_buy') ? 'text-green-400' :
-                                      f.type.includes('speculative') || f.type.includes('call_momentum') ? 'text-blue-400' :
-                                      f.type.includes('covered') || f.type.includes('overwrite') ? 'text-yellow-400' :
-                                      f.type.includes('premium') ? 'text-purple-400' : 'text-gray-400';
+                    const colorClass = f.type === 'sell_put' ? 'text-green-400' :
+                                      f.type === 'buy_call' ? 'text-blue-400' :
+                                      f.type === 'buy_put' ? 'text-red-400' :
+                                      f.type === 'sell_call' ? 'text-yellow-400' : 'text-gray-400';
                     return `<div class="flex justify-between items-center text-xs">
                         <span class="${colorClass}">${safeHTML(f.label)}</span>
                         <span class="text-gray-300 font-mono">${f.count} <span class="text-gray-500">(${pct}%)</span></span>

@@ -353,28 +353,27 @@ def _bear_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
         score += 15
         points.append(f"DVOL Z-Score {z_score:.1f} 极端，市场恐慌情绪蔓延")
 
-    # 大单流向分析
-    buy_puts = [t for t in large_trades
-                if t.get("direction") == "buy"
-                and t.get("option_type", "").upper() in ("PUT", "P")]
-    sell_puts = [t for t in large_trades
-                 if t.get("direction") == "sell"
-                 and t.get("option_type", "").upper() in ("PUT", "P")]
-    buy_put_notional = sum(t.get("notional_usd", 0) for t in buy_puts)
-    sell_put_notional = sum(t.get("notional_usd", 0) for t in sell_puts)
+    # 大单流向分析 - 修正 PCR 计算（Put/Call Ratio = 买入Put名义价值 / 买入Call名义价值）
+    # 使用 buy_notional 字段而非 direction+notional_usd，避免丢失非主导方向数据
+    buy_put_notional = sum(t.get("buy_notional", 0) for t in large_trades
+                           if t.get("option_type", "").upper() in ("PUT", "P"))
+    buy_call_notional = sum(t.get("buy_notional", 0) for t in large_trades
+                            if t.get("option_type", "").upper() in ("CALL", "C"))
 
-    if buy_put_notional > 0 and sell_put_notional > 0:
-        pcr = buy_put_notional / sell_put_notional
+    if buy_put_notional > 0 or buy_call_notional > 0:
+        pcr = buy_put_notional / buy_call_notional if buy_call_notional > 0 else 999
         extra["put_call_ratio"] = round(pcr, 2)
         if pcr > 1.5:
             score += 20
-            points.append(f"大单 Put/Call 比 {pcr:.1f}，机构大量买入看跌期权")
+            points.append(f"大单 PCR {pcr:.1f} 极高，机构大量买入看跌期权")
         elif pcr > 1.0:
             score += 10
-            points.append(f"大单 Put/Call 比 {pcr:.1f}，看跌力量偏强")
+            points.append(f"大单 PCR {pcr:.1f} 偏高，看跌力量偏强")
         elif pcr < 0.5:
             score -= 10
-            points.append(f"大单 Put/Call 比 {pcr:.1f}，看涨力量主导")
+            points.append(f"大单 PCR {pcr:.1f} 极低，看涨力量主导")
+        else:
+            points.append(f"大单 PCR {pcr:.1f} 中性")
 
     # v2.0: 修正最大亏损计算
     # Sell Put 最大亏损 = strike - premium (当 spot→0)
@@ -558,12 +557,16 @@ def _flow_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
         return _make_report("🐋 资金流向分析师", 0, 10, "无数据", ["无大宗交易或合约数据"], extra)
 
     # 大单交易分析
+    # 注意：使用 buy_notional/sell_notional 字段而非 direction+notional_usd
+    # 因为 direction 只反映主导方向，会丢失非主导方向的数据
     if large_trades:
         total = len(large_trades)
-        buy_count = sum(1 for t in large_trades if t.get("direction") == "buy")
-        sell_count = sum(1 for t in large_trades if t.get("direction") == "sell")
-        buy_notional = sum(t.get("notional_usd", 0) for t in large_trades if t.get("direction") == "buy")
-        sell_notional = sum(t.get("notional_usd", 0) for t in large_trades if t.get("direction") == "sell")
+        # 优先使用 buy_count/sell_count 字段（聚合后的真实笔数）
+        buy_count = sum(t.get("buy_count", 0) for t in large_trades)
+        sell_count = sum(t.get("sell_count", 0) for t in large_trades)
+        # 优先使用 buy_notional/sell_notional 字段（聚合后的真实名义价值）
+        buy_notional = sum(t.get("buy_notional", 0) for t in large_trades)
+        sell_notional = sum(t.get("sell_notional", 0) for t in large_trades)
         total_notional = buy_notional + sell_notional
 
         extra["total_trades"] = total
@@ -587,11 +590,11 @@ def _flow_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 points.append(f"大单买卖均衡，买入占比 {buy_pct:.0f}%")
 
-        # PCR 分析
-        put_buy = sum(t.get("notional_usd", 0) for t in large_trades
-                      if t.get("direction") == "buy" and t.get("option_type", "").upper() in ("PUT", "P"))
-        call_buy = sum(t.get("notional_usd", 0) for t in large_trades
-                       if t.get("direction") == "buy" and t.get("option_type", "").upper() in ("CALL", "C"))
+        # PCR 分析 - 使用 buy_notional 按 option_type 分类
+        put_buy = sum(t.get("buy_notional", 0) for t in large_trades
+                      if t.get("option_type", "").upper() in ("PUT", "P"))
+        call_buy = sum(t.get("buy_notional", 0) for t in large_trades
+                       if t.get("option_type", "").upper() in ("CALL", "C"))
         if call_buy > 0:
             pcr = put_buy / call_buy
             extra["pcr"] = round(pcr, 2)

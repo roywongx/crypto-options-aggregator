@@ -27,38 +27,84 @@ def _build_large_trades_query(currency: str, days: int, limit: int):
 
 
 def _parse_db_rows(rows, spot: float, classify_fn, parse_inst_fn) -> tuple:
-    """解析数据库行，返回 (results, results_by_inst, seen)"""
+    """解析数据库行，返回 (results, results_by_inst, seen)
+    
+    注意：不再按 instrument_name 去重，而是汇总同一合约的买卖数据
+    """
     results = []
     seen = set()
     results_by_inst = {}
+    
+    # 先汇总同一合约的数据
+    inst_data = {}
     for r in rows:
         inst = (r[0] or '').strip()
         strike = r[4] or 0
         direction = r[1] or ''
         opt_type = r[5] or ''
-        if not inst or strike <= 100 or inst in seen:
+        if not inst or strike <= 100:
             continue
-        seen.add(inst)
-        fl = r[6] or ''
-        delta_val = r[7] or 0
-        if not fl or fl == 'unknown':
-            fl = classify_fn(direction, opt_type, float(delta_val), strike, spot)
-
+        
         notional = r[2] or 0
         if notional <= 0 and (r[3] or 0) > 0 and strike > 0:
             notional = float(r[3]) * spot
-
+        
+        if inst not in inst_data:
+            inst_data[inst] = {
+                "instrument_name": inst,
+                "strike": strike,
+                "option_type": opt_type,
+                "buy_notional": 0,
+                "sell_notional": 0,
+                "buy_count": 0,
+                "sell_count": 0,
+                "total_volume": 0,
+                "flow_label": r[6] or '',
+                "delta": r[7] or 0,
+                "premium_usd": r[8] or 0,
+                "severity": r[9] or ''
+            }
+        
+        if direction == 'buy':
+            inst_data[inst]["buy_notional"] += float(notional)
+            inst_data[inst]["buy_count"] += 1
+        else:
+            inst_data[inst]["sell_notional"] += float(notional)
+            inst_data[inst]["sell_count"] += 1
+        inst_data[inst]["total_volume"] += r[3] or 0
+    
+    # 转换为结果列表，使用净方向
+    for inst, data in inst_data.items():
+        seen.add(inst)
+        
+        # 确定主导方向
+        if data["buy_notional"] > data["sell_notional"]:
+            direction = "buy"
+            notional = data["buy_notional"]
+        else:
+            direction = "sell"
+            notional = data["sell_notional"]
+        
+        fl = data["flow_label"]
+        if not fl or fl == 'unknown':
+            fl = classify_fn(direction, data["option_type"], float(data["delta"]), data["strike"], spot)
+        
         entry = {
             "instrument_name": inst, "direction": direction,
             "notional_usd": round(float(notional), 2),
-            "volume": r[3] or 0,
-            "strike": strike, "option_type": opt_type, "flow_label": fl,
-            "delta": delta_val,
-            "premium_usd": r[8] or 0,
-            "severity": r[9] or ''
+            "volume": data["total_volume"],
+            "strike": data["strike"], "option_type": data["option_type"], "flow_label": fl,
+            "delta": data["delta"],
+            "premium_usd": data["premium_usd"],
+            "severity": data["severity"],
+            "buy_notional": round(data["buy_notional"], 2),
+            "sell_notional": round(data["sell_notional"], 2),
+            "buy_count": data["buy_count"],
+            "sell_count": data["sell_count"]
         }
         results.append(entry)
         results_by_inst[inst] = entry
+    
     return results, results_by_inst, seen
 
 
@@ -74,8 +120,15 @@ def _enrich_from_api(
     severity_fn,
     risk_emoji_fn
 ) -> List[dict]:
-    """从 Deribit API 补充数据并合并"""
-    results = list(trades)
+    """从 Deribit API 补充数据并合并
+    
+    重要：累加同一合约的买卖数据，而不是覆盖
+    """
+    # 保留原有的 DB 结果
+    results = list(results_by_inst.values())
+    
+    # 先汇总 API 数据（按合约 + 方向）
+    api_data = {}
     for t in trades:
         inst = t.get("instrument_name", "")
         if not inst:
@@ -101,42 +154,90 @@ def _enrich_from_api(
         if notional_usd < MIN_NOTIONAL:
             continue
 
-        trade_iv = float(t.get("iv") or 50)
-        delta_val = abs(calc_delta_fn(meta.strike, spot, trade_iv, meta.dte, meta.option_type))
-
-        fl = classify_fn(direction, meta.option_type, delta_val, meta.strike, spot)
-
-        is_block = t.get("block_trade", False) or t.get("block_trade_id") is not None
-
-        api_entry = {
-            "instrument_name": inst, "direction": direction,
-            "notional_usd": round(notional_usd, 2),
-            "premium_usd": round(premium_usd, 2),
-            "volume": round(trade_amount, 4),
-            "strike": meta.strike,
-            "option_type": meta.option_type,
-            "flow_label": fl,
-            "delta": delta_val,
-            "iv": round(trade_iv, 1),
-            "is_block": is_block,
-            "trade_price": option_price
-        }
-
+        if inst not in api_data:
+            api_data[inst] = {
+                "instrument_name": inst,
+                "strike": meta.strike,
+                "option_type": meta.option_type,
+                "buy_notional": 0,
+                "sell_notional": 0,
+                "buy_volume": 0,
+                "sell_volume": 0,
+                "premium_usd": 0,
+                "delta": 0,
+                "iv": 0,
+                "is_block": False,
+            }
+        
+        if direction == "buy":
+            api_data[inst]["buy_notional"] += notional_usd
+            api_data[inst]["buy_volume"] += trade_amount
+        else:
+            api_data[inst]["sell_notional"] += notional_usd
+            api_data[inst]["sell_volume"] += trade_amount
+        
+        api_data[inst]["premium_usd"] += premium_usd
+        api_data[inst]["is_block"] = api_data[inst]["is_block"] or t.get("block_trade", False) or t.get("block_trade_id") is not None
+    
+    # 合并到现有结果
+    for inst, data in api_data.items():
+        total_notional = data["buy_notional"] + data["sell_notional"]
+        if total_notional < MIN_NOTIONAL:
+            continue
+        
+        # 确定主导方向
+        if data["buy_notional"] > data["sell_notional"]:
+            direction = "buy"
+            dominant_notional = data["buy_notional"]
+            dominant_volume = data["buy_volume"]
+        else:
+            direction = "sell"
+            dominant_notional = data["sell_notional"]
+            dominant_volume = data["sell_volume"]
+        
+        trade_iv = float(data.get("iv") or 50)
+        delta_val = abs(calc_delta_fn(data["strike"], spot, trade_iv, meta.dte, data["option_type"]))
+        fl = classify_fn(direction, data["option_type"], delta_val, data["strike"], spot)
+        
         if inst in results_by_inst:
+            # 累加到现有条目
             db_entry = results_by_inst[inst]
+            db_entry["buy_notional"] = db_entry.get("buy_notional", 0) + data["buy_notional"]
+            db_entry["sell_notional"] = db_entry.get("sell_notional", 0) + data["sell_notional"]
+            db_entry["volume"] = db_entry.get("volume", 0) + data["buy_volume"] + data["sell_volume"]
+            
+            # 重新确定主导方向
+            if db_entry["buy_notional"] > db_entry["sell_notional"]:
+                db_entry["direction"] = "buy"
+                db_entry["notional_usd"] = round(db_entry["buy_notional"], 2)
+            else:
+                db_entry["direction"] = "sell"
+                db_entry["notional_usd"] = round(db_entry["sell_notional"], 2)
+            
             if not db_entry.get('premium_usd'):
-                db_entry['premium_usd'] = round(premium_usd, 2)
+                db_entry['premium_usd'] = round(data["premium_usd"], 2)
             if not db_entry.get('iv'):
                 db_entry['iv'] = round(trade_iv * 100, 1)
             if not db_entry.get('is_block'):
-                db_entry['is_block'] = is_block
-            if not db_entry.get('trade_price'):
-                db_entry['trade_price'] = option_price
-            if not db_entry.get('notional_usd') or db_entry['notional_usd'] < notional_usd:
-                db_entry['notional_usd'] = round(notional_usd, 2)
-                db_entry['volume'] = round(trade_amount, 4)
+                db_entry['is_block'] = data["is_block"]
         else:
             seen.add(inst)
+            api_entry = {
+                "instrument_name": inst, "direction": direction,
+                "notional_usd": round(dominant_notional, 2),
+                "premium_usd": round(data["premium_usd"], 2),
+                "volume": round(dominant_volume, 4),
+                "strike": data["strike"],
+                "option_type": data["option_type"],
+                "flow_label": fl,
+                "delta": delta_val,
+                "iv": round(trade_iv, 1),
+                "is_block": data["is_block"],
+                "buy_notional": data["buy_notional"],
+                "sell_notional": data["sell_notional"],
+                "buy_count": 1 if data["buy_notional"] > 0 else 0,
+                "sell_count": 1 if data["sell_notional"] > 0 else 0,
+            }
             results.append(api_entry)
             results_by_inst[inst] = api_entry
 
@@ -147,12 +248,19 @@ def _enrich_from_api(
 
 def _finalize_results(results: List[dict], limit: int, severity_fn, risk_emoji_fn) -> List[dict]:
     """填充 severity/risk_level 并排序截断"""
+    # 过滤掉 notional_usd 为 None 或 0 的无效数据
+    valid_results = []
     for t in results:
+        notional = t.get("notional_usd")
+        if notional is None or notional <= 0:
+            continue
         if not t.get("severity"):
-            t["severity"] = severity_fn(t.get("notional_usd", 0) or 0)
+            t["severity"] = severity_fn(notional)
         t["risk_level"] = risk_emoji_fn(abs(t.get("delta", 0) or 0))
-    results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
-    return results[:limit]
+        valid_results.append(t)
+    
+    valid_results.sort(key=lambda x: x.get("notional_usd", 0), reverse=True)
+    return valid_results[:limit]
 
 
 def _need_api_fallback(results: List[dict], limit: int) -> bool:
@@ -207,7 +315,7 @@ def fetch_large_trades_sync(
                 trades, results_by_inst, seen, spot, limit,
                 classify_fn, parse_inst_fn, calc_delta_fn, severity_fn, risk_emoji_fn
             )
-        except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+        except Exception as e:
             logger.error("Deribit live trades fallback error: %s", e)
 
     return _finalize_results(results, limit, severity_fn, risk_emoji_fn)

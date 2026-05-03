@@ -510,23 +510,29 @@ class AISentimentAnalyzer:
         total_premium = 0
         put_premium = 0
         call_premium = 0
+        put_notional = 0
+        call_notional = 0
         institutional_count = 0
         strong_signals = []
         
         for trade in large_trades[:50]:
             analysis = cls.analyze_trade_intent(trade, spot_price, market_iv)
             intents.append(analysis)
-            
+
             trade_type = trade.get("option_type", trade.get("type", "")).upper()
-            premium = trade.get("premium_usd", trade.get("premium", 0)) or trade.get("notional_usd", trade.get("notional", 0))
+            # 优先使用 notional_usd，如果没有则使用 premium_usd
+            notional = trade.get("notional_usd", trade.get("notional", 0)) or 0
+            premium = trade.get("premium_usd", trade.get("premium", 0)) or 0
             total_premium += premium
-            
+
             if trade_type in ("P", "PUT"):
                 put_count += 1
                 put_premium += premium
+                put_notional += notional
             else:
                 call_count += 1
                 call_premium += premium
+                call_notional += notional
             
             if analysis["intent"] == "institutional_hedging":
                 institutional_count += 1
@@ -541,8 +547,10 @@ class AISentimentAnalyzer:
                 })
         
         total_trades = put_count + call_count
-        put_pct = put_count / total_trades * 100 if total_trades > 0 else 50
-        call_pct = call_count / total_trades * 100 if total_trades > 0 else 50
+        # 使用名义价值计算 Put/Call 占比（与 _flow_analyst 保持一致）
+        total_notional = put_notional + call_notional
+        put_pct = put_notional / total_notional * 100 if total_notional > 0 else 50
+        call_pct = call_notional / total_notional * 100 if total_notional > 0 else 50
         
         # 意图分布统计
         intent_counts = {}

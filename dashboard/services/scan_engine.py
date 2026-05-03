@@ -600,57 +600,59 @@ async def quick_scan(params: QuickScanParams = None):
 
 
 def _fetch_wind_analysis(currency: str, days: int = 30):
-    """获取风向分析数据"""
-    from services.trades import fetch_deribit_summaries
-    from services.instrument import _parse_inst_name
+    """获取风向分析数据 - 使用 large_trades_history 实际交易数据而非 OI 数据"""
+    from db.connection import execute_read
 
     spot = get_spot_price(currency)
     if not spot:
         spot = get_spot_fallback(currency)
 
-    summaries = fetch_deribit_summaries(currency)
-    if not summaries:
-        return {"error": "无法获取Deribit数据", "buy_ratio": 0.5, "dominant_flow": "unknown"}
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    rows = execute_read("""
+        SELECT direction, option_type, notional_usd, volume
+        FROM large_trades_history
+        WHERE currency = ? AND timestamp >= ?
+    """, (currency, since))
 
     buy_puts = sell_puts = buy_calls = sell_calls = 0
-    total_premium = 0
-    put_premiums = []
+    buy_put_notional = sell_put_notional = buy_call_notional = sell_call_notional = 0
+    total_count = 0
 
-    for s in summaries:
-        meta = _parse_inst_name(s.get("instrument_name", ""))
-        if not meta or meta.dte < 1:
-            continue
-        oi = float(s.get("open_interest") or 0)
-        iv = float(s.get("mark_iv") or 0)
-        if oi < 10 or iv < 10:
-            continue
+    for row in rows:
+        direction = (row[0] or '').lower()
+        opt_type = (row[1] or 'PUT').upper()
+        notional = float(row[2] or 0)
+        volume = float(row[3] or 0)
 
-        delta = float(s.get("delta") or 0)
-        if abs(delta) < 0.01:
-            continue
+        total_count += 1
 
-        if meta.option_type == "P":
-            if delta < 0:
-                buy_puts += oi
+        if opt_type in ('PUT', 'P'):
+            if direction == 'buy':
+                buy_puts += 1
+                buy_put_notional += notional
             else:
-                sell_puts += oi
+                sell_puts += 1
+                sell_put_notional += notional
         else:
-            if delta > 0:
-                buy_calls += oi
+            if direction == 'buy':
+                buy_calls += 1
+                buy_call_notional += notional
             else:
-                sell_calls += oi
+                sell_calls += 1
+                sell_call_notional += notional
 
-        prem = float(s.get("mark_price") or 0) * oi
-        total_premium += prem
-        if meta.option_type == "P":
-            put_premiums.append(prem)
+    if total_count <= 0:
+        return {"error": "No valid trade data", "buy_ratio": 0.5, "dominant_flow": "unknown"}
 
-    total_oi = buy_puts + sell_puts + buy_calls + sell_calls
-    if total_oi <= 0:
-        return {"error": "No valid OI data", "buy_ratio": 0.5, "dominant_flow": "unknown"}
+    # 使用名义价值计算买入比率（与 _flow_analyst 保持一致）
+    total_buy_notional = buy_put_notional + buy_call_notional
+    total_sell_notional = sell_put_notional + sell_call_notional
+    total_notional = total_buy_notional + total_sell_notional
 
-    buy_ratio = (buy_puts + buy_calls) / total_oi
-    put_call_ratio = (buy_puts + sell_puts) / (buy_calls + sell_calls) if (buy_calls + sell_calls) > 0 else 1.0
+    buy_ratio = total_buy_notional / total_notional if total_notional > 0 else 0.5
+
+    # PCR = 买入 Put 名义价值 / 买入 Call 名义价值
+    put_call_ratio = buy_put_notional / buy_call_notional if buy_call_notional > 0 else 1.0
 
     sentiment_score = 50
     if buy_ratio > 0.6:
@@ -659,24 +661,18 @@ def _fetch_wind_analysis(currency: str, days: int = 30):
         sentiment_score = 70
 
     dominant = "neutral"
-    if put_call_ratio > 1.2 and buy_puts > sell_puts * 1.5:
+    if put_call_ratio > 1.2 and buy_put_notional > sell_put_notional * 1.5:
         dominant = "panic_buy_puts"
-    elif put_call_ratio > 1.2 and sell_puts > buy_puts * 1.5:
+    elif put_call_ratio > 1.2 and sell_put_notional > buy_put_notional * 1.5:
         dominant = "aggressive_sell_puts"
-    elif put_call_ratio < 0.8 and buy_calls > sell_calls * 1.5:
+    elif put_call_ratio < 0.8 and buy_call_notional > sell_call_notional * 1.5:
         dominant = "fomo_buy_calls"
-    elif put_call_ratio < 0.8 and sell_calls > buy_calls * 1.5:
+    elif put_call_ratio < 0.8 and sell_call_notional > buy_call_notional * 1.5:
         dominant = "covered_call_selling"
     elif buy_ratio > 0.55:
         dominant = "bullish"
     elif buy_ratio < 0.45:
         dominant = "bearish"
-
-    try:
-        spot = get_spot_price(currency)
-    except (RuntimeError, ValueError) as e:
-        logger.warning("Wind analysis spot price failed: %s", e)
-        spot = 0
 
     return {
         "currency": currency, "spot": spot, "days": days,
@@ -684,8 +680,13 @@ def _fetch_wind_analysis(currency: str, days: int = 30):
         "risk_level": RiskFramework.get_status(spot),
         "sentiment_score": sentiment_score,
         "sentiment_text": dominant,
-        "summary": {"total_trades": 0, "buy_puts": buy_puts,
-                    "sell_calls": sell_calls, "buy_calls": buy_calls, "sell_puts": sell_puts}
+        "summary": {"total_trades": total_count,
+                    "buy_puts": buy_puts, "sell_puts": sell_puts,
+                    "buy_calls": buy_calls, "sell_calls": sell_calls,
+                    "buy_put_notional": round(buy_put_notional, 0),
+                    "sell_put_notional": round(sell_put_notional, 0),
+                    "buy_call_notional": round(buy_call_notional, 0),
+                    "sell_call_notional": round(sell_call_notional, 0)}
     }
 
 
