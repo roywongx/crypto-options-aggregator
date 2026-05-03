@@ -1949,6 +1949,166 @@ function getRiskColor(score) {
     return 'text-red-400';
 }
 
+function renderRiskGauge(canvasId, score) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (window._riskGaugeChart) { window._riskGaugeChart.destroy(); }
+    let color;
+    if (score <= 30) color = '#10b981';
+    else if (score <= 60) color = '#eab308';
+    else if (score <= 80) color = '#f97316';
+    else color = '#ef4444';
+    window._riskGaugeChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            datasets: [{
+                data: [score, 100 - score],
+                backgroundColor: [color, '#1f2937'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            rotation: -90,
+            circumference: 180,
+            cutout: '75%',
+            responsive: false,
+            plugins: { legend: { display: false }, tooltip: { enabled: false } }
+        },
+        plugins: [{
+            id: 'gaugeCenter',
+            afterDraw(chart) {
+                const { ctx, chartArea } = chart;
+                const cx = (chartArea.left + chartArea.right) / 2;
+                const cy = chartArea.bottom - 10;
+                ctx.save();
+                ctx.textAlign = 'center';
+                ctx.fillStyle = color;
+                ctx.font = 'bold 32px sans-serif';
+                ctx.fillText(score, cx, cy - 8);
+                ctx.font = '12px sans-serif';
+                ctx.fillStyle = '#9ca3af';
+                const status = score <= 30 ? '低风险' : score <= 60 ? '中等' : score <= 80 ? '偏高' : '高风险';
+                ctx.fillText(status, cx, cy + 12);
+                ctx.restore();
+            }
+        }]
+    });
+}
+
+function renderRiskRadar(canvasId, dimensions) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (window._riskRadarChart) { window._riskRadarChart.destroy(); }
+    const labels = Object.keys(dimensions);
+    const values = Object.values(dimensions);
+    window._riskRadarChart = new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '风险维度',
+                data: values,
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                borderColor: 'rgba(239, 68, 68, 0.8)',
+                borderWidth: 2,
+                pointBackgroundColor: 'rgba(239, 68, 68, 1)',
+                pointRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                r: {
+                    min: 0, max: 100,
+                    ticks: { stepSize: 20, color: '#6b7280', backdropColor: 'transparent' },
+                    grid: { color: 'rgba(75, 85, 99, 0.3)' },
+                    angleLines: { color: 'rgba(75, 85, 99, 0.3)' },
+                    pointLabels: { color: '#d1d5db', font: { size: 12 } }
+                }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+}
+
+function renderSparkline(elementId, values) {
+    const el = document.getElementById(elementId);
+    if (!el || !values || values.length < 2) return;
+    const w = 80, h = 24;
+    const min = Math.min(...values), max = Math.max(...values);
+    const range = max - min || 1;
+    const points = values.map((v, i) => {
+        const x = (i / (values.length - 1)) * w;
+        const y = h - ((v - min) / range) * h;
+        return `${x},${y}`;
+    }).join(' ');
+    el.innerHTML = `<svg width="${w}" height="${h}" class="inline-block"><polyline points="${points}" fill="none" stroke="#60a5fa" stroke-width="1.5"/></svg>`;
+}
+
+function setRiskTab(tab) {
+    document.querySelectorAll('.risk-tab').forEach(btn => {
+        btn.classList.toggle('border-red-500', btn.dataset.tab === tab);
+        btn.classList.toggle('text-white', btn.dataset.tab === tab);
+        btn.classList.toggle('border-transparent', btn.dataset.tab !== tab);
+        btn.classList.toggle('text-gray-400', btn.dataset.tab !== tab);
+    });
+    document.querySelectorAll('.risk-tab-content').forEach(el => el.classList.add('hidden'));
+    const map = { onchain: 'riskTabOnchain', deriv: 'riskTabDeriv', pressure: 'riskTabPressure', sentiment: 'riskTabSentiment' };
+    const target = document.getElementById(map[tab]);
+    if (target) target.classList.remove('hidden');
+}
+
+async function loadLLMRiskInsight(currency) {
+    const btn = document.getElementById('llmInsightBtn');
+    const loading = document.getElementById('llmInsightLoading');
+    const result = document.getElementById('llmInsightResult');
+    if (btn) btn.disabled = true;
+    if (loading) loading.classList.remove('hidden');
+    if (result) result.classList.add('hidden');
+    try {
+        const resp = await safeFetch(`${API_BASE}/api/risk/llm-insight?currency=${currency}`, { timeout: 300000 });
+        const data = await resp.json();
+        renderLLMRiskInsight(data);
+    } catch (e) {
+        console.error('LLM insight failed:', e);
+        if (result) {
+            result.classList.remove('hidden');
+            document.getElementById('llmNarrative').textContent = 'LLM 分析失败: ' + e.message;
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+        if (loading) loading.classList.add('hidden');
+    }
+}
+
+function renderLLMRiskInsight(data) {
+    const result = document.getElementById('llmInsightResult');
+    if (!result) return;
+    result.classList.remove('hidden');
+    document.getElementById('llmNarrative').textContent = data.narrative || '';
+    const anomEl = document.getElementById('llmAnomalies');
+    if (data.anomalies && data.anomalies.length) {
+        anomEl.innerHTML = '<div class="text-xs text-yellow-400 font-medium mb-1">⚠️ 异常告警</div>' +
+            data.anomalies.map(a => `<div class="text-sm text-gray-300 mb-1">• ${safeHTML(a)}</div>`).join('');
+        anomEl.classList.remove('hidden');
+    } else {
+        anomEl.classList.add('hidden');
+    }
+    const recEl = document.getElementById('llmRecommendations');
+    if (data.recommendations && data.recommendations.length) {
+        recEl.innerHTML = '<div class="text-xs text-green-400 font-medium mb-1">✅ 操作建议</div>' +
+            data.recommendations.map(r => `<div class="text-sm text-gray-300 mb-1">• ${safeHTML(r)}</div>`).join('');
+        recEl.classList.remove('hidden');
+    } else {
+        recEl.classList.add('hidden');
+    }
+    const conf = data.confidence || 0;
+    document.getElementById('llmConfidenceBar').style.width = conf + '%';
+    document.getElementById('llmConfidenceText').textContent = conf + '%';
+}
+
 function updateMacroIndicators(data) {
     const spotPrice = data.spot_price;
     const spotEl = document.getElementById('spotPrice');
