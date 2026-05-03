@@ -114,15 +114,16 @@ function setupEventListeners() {
     const calcWheelBtn = document.getElementById('calcWheelBtn');
     if (calcWheelBtn) calcWheelBtn.addEventListener('click', calcWheelROI);
 
-    const modeRollBtn = document.getElementById('modeRollBtn');
-    if (modeRollBtn) modeRollBtn.addEventListener('click', () => setCalcMode('roll'));
-    const modeNewBtn = document.getElementById('modeNewBtn');
-    if (modeNewBtn) modeNewBtn.addEventListener('click', () => setCalcMode('new'));
-    const modeGridBtn = document.getElementById('modeGridBtn');
-    if (modeGridBtn) modeGridBtn.addEventListener('click', () => setCalcMode('grid'));
+    // Old strategy calc event listeners removed — new HTML uses inline onclick with setStrategyMode()
+    // const modeRollBtn = document.getElementById('modeRollBtn');
+    // if (modeRollBtn) modeRollBtn.addEventListener('click', () => setCalcMode('roll'));
+    // const modeNewBtn = document.getElementById('modeNewBtn');
+    // if (modeNewBtn) modeNewBtn.addEventListener('click', () => setCalcMode('new'));
+    // const modeGridBtn = document.getElementById('modeGridBtn');
+    // if (modeGridBtn) modeGridBtn.addEventListener('click', () => setCalcMode('grid'));
 
-    const scSubmitBtn = document.getElementById('scSubmitBtn');
-    if (scSubmitBtn) scSubmitBtn.addEventListener('click', submitStrategyCalc);
+    // const scSubmitBtn = document.getElementById('scSubmitBtn');
+    // if (scSubmitBtn) scSubmitBtn.addEventListener('click', submitStrategyCalc);
 
     const presetCon = document.getElementById('presetCon');
     if (presetCon) presetCon.addEventListener('click', () => applyPreset('conservative'));
@@ -196,6 +197,18 @@ function setupEventListeners() {
             if (e.target === aiSettingsModal) closeAiSettingsModal();
         });
     }
+
+    // Restore strategy preferences
+    try {
+        const savedMode = localStorage.getItem('strategy_mode');
+        if (savedMode && ['new', 'roll', 'wheel', 'grid'].includes(savedMode)) {
+            setStrategyMode(savedMode);
+        }
+        const savedDir = localStorage.getItem('strategy_direction');
+        if (savedDir && ['PUT', 'CALL'].includes(savedDir)) {
+            setStrategyDirection(savedDir);
+        }
+    } catch(_) {}
 }
 
 function updateParamDisplay() {
@@ -629,6 +642,210 @@ function displayGridResult(result, wrapper) {
     html += '</div>';
     wrapper.innerHTML = html;
 }
+
+// ========== 策略推荐中心 v2 ==========
+let _strMode = 'new';
+let _strDirection = 'PUT';
+
+window.setStrategyMode = function(mode) {
+    _strMode = mode;
+    const btns = {new: 'modeNewBtn', roll: 'modeRollBtn', wheel: 'modeWheelBtn', grid: 'modeGridBtn'};
+    const colors = {new: 'bg-blue-600', roll: 'bg-orange-600', wheel: 'bg-green-600', grid: 'bg-purple-600'};
+    Object.entries(btns).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.className = `px-3 py-1.5 rounded-lg text-sm font-medium ${k === mode ? colors[k] + ' text-white' : 'bg-gray-700 text-gray-300'}`;
+    });
+    const rollFields = document.getElementById('strRollFields');
+    const gridFields = document.getElementById('strGridFields');
+    if (rollFields) rollFields.classList.toggle('hidden', mode !== 'roll');
+    if (gridFields) gridFields.classList.toggle('hidden', mode !== 'grid');
+    try { localStorage.setItem('strategy_mode', mode); } catch(_) {}
+};
+
+window.setStrategyDirection = function(dir) {
+    _strDirection = dir;
+    const putBtn = document.getElementById('strDirPut');
+    const callBtn = document.getElementById('strDirCall');
+    if (putBtn) putBtn.className = `flex-1 px-2 py-1.5 rounded-lg text-sm font-medium ${dir === 'PUT' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`;
+    if (callBtn) callBtn.className = `flex-1 px-2 py-1.5 rounded-lg text-sm font-medium ${dir === 'CALL' ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-300'}`;
+    try { localStorage.setItem('strategy_direction', dir); } catch(_) {}
+};
+
+window.fetchStrategyRecommend = async function() {
+    const loading = document.getElementById('strLoading');
+    const empty = document.getElementById('strEmpty');
+    const wrapper = document.getElementById('strResultsWrapper');
+    const dvolWarn = document.getElementById('strDvolWarning');
+
+    if (loading) loading.classList.remove('hidden');
+    if (empty) empty.classList.add('hidden');
+    if (wrapper) wrapper.innerHTML = '';
+    if (dvolWarn) dvolWarn.classList.add('hidden');
+
+    const body = {
+        currency: document.getElementById('strCurrency')?.value || 'BTC',
+        mode: _strMode,
+        option_type: _strDirection,
+        capital: parseFloat(document.getElementById('strCapital')?.value) || 50000,
+        max_results: 10,
+        grid_levels: parseInt(document.getElementById('strGridLevels')?.value) || 5,
+        grid_interval_pct: parseFloat(document.getElementById('strGridInterval')?.value) || 3.0,
+        overrides: {},
+    };
+
+    const maxDelta = parseFloat(document.getElementById('strMaxDelta')?.value);
+    const minDte = parseInt(document.getElementById('strMinDte')?.value);
+    const maxDte = parseInt(document.getElementById('strMaxDte')?.value);
+    const minApr = parseFloat(document.getElementById('strMinApr')?.value);
+    if (!isNaN(maxDelta)) body.overrides.max_delta = maxDelta;
+    if (!isNaN(minDte)) body.overrides.min_dte = minDte;
+    if (!isNaN(maxDte)) body.overrides.max_dte = maxDte;
+    if (!isNaN(minApr)) body.overrides.min_apr = minApr;
+    if (Object.keys(body.overrides).length === 0) body.overrides = null;
+
+    if (_strMode === 'roll') {
+        body.old_strike = parseFloat(document.getElementById('strOldStrike')?.value) || null;
+        body.old_expiry = document.getElementById('strOldExpiry')?.value || null;
+        if (!body.old_strike) {
+            if (loading) loading.classList.add('hidden');
+            showAlert('滚仓模式必须填写当前行权价', 'error');
+            return;
+        }
+    }
+
+    try {
+        const res = await safeFetch('/api/strategy/recommend', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (loading) loading.classList.add('hidden');
+
+        if (!data.success || !data.recommendations?.length) {
+            if (empty) empty.classList.remove('hidden');
+            const msg = document.getElementById('strEmptyMessage');
+            if (msg) msg.textContent = data.filter_summary?.message || '当前条件下无可用合约';
+            if (wrapper) wrapper.innerHTML = renderStrFilterSummary(data.filter_summary);
+            return;
+        }
+
+        const z = data.dvol_snapshot?.z_score || 0;
+        if (Math.abs(z) > 2 && dvolWarn) {
+            dvolWarn.classList.remove('hidden');
+            dvolWarn.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> DVOL z-score ' + z.toFixed(1) + ' — 当前处于极端波动区间，建议谨慎操作';
+        }
+
+        renderStrategyResults(data);
+
+        if (window._strAutoRefreshTimer) clearInterval(window._strAutoRefreshTimer);
+        window._strAutoRefreshTimer = setInterval(() => {
+            if (!document.getElementById('strResultsWrapper')?.querySelector('table')) {
+                clearInterval(window._strAutoRefreshTimer);
+                return;
+            }
+            fetchStrategyRecommend();
+        }, 60000);
+    } catch (e) {
+        if (loading) loading.classList.add('hidden');
+        showAlert('策略推荐请求失败: ' + e.message, 'error');
+    }
+};
+
+function renderStrFilterSummary(summary) {
+    if (!summary) return '';
+    let html = '<div class="mb-3 p-3 bg-gray-800/50 rounded-lg text-xs text-gray-400">';
+    html += '<div class="flex flex-wrap gap-3 mb-2">';
+    html += '<span>总合约: <b class="text-white">' + (summary.total_contracts || 0) + '</b></span>';
+    html += '<span>→ 硬性过滤: <b class="text-white">' + (summary.after_hard_filter || 0) + '</b></span>';
+    html += '<span>→ DVOL过滤: <b class="text-white">' + (summary.after_dvol_filter || 0) + '</b></span>';
+    html += '<span>→ 策略过滤: <b class="text-orange-400">' + (summary.after_strategy_filter || 0) + '</b></span>';
+    html += '</div>';
+    const adj = summary.dvol_adjustments || {};
+    const adjEntries = Object.entries(adj).filter(([k]) => !k.startsWith('_'));
+    if (adjEntries.length) {
+        html += '<div class="text-gray-500">DVOL调整: ' + adjEntries.map(([k, v]) => k + ': ' + v).join(' | ') + '</div>';
+    }
+    if (adj._fallback) {
+        html += '<div class="text-yellow-500 mt-1"><i class="fas fa-exclamation-triangle mr-1"></i>' + adj._fallback + '</div>';
+    }
+    if (summary.reason === 'no_contracts') {
+        html += '<div class="text-red-400 mt-1">' + safeHTML(summary.message || '') + '</div>';
+    }
+    html += '</div>';
+    return html;
+}
+
+function renderStrategyResults(data) {
+    const wrapper = document.getElementById('strResultsWrapper');
+    if (!wrapper) return;
+
+    let html = renderStrFilterSummary(data.filter_summary);
+
+    html += '<div class="overflow-x-auto"><table class="w-full text-sm">';
+    html += '<thead><tr class="text-gray-400 border-b border-gray-700">';
+    html += '<th class="py-2 px-2 text-left">#</th>';
+    html += '<th class="py-2 px-2 text-left">平台</th>';
+    html += '<th class="py-2 px-2 text-left">方向</th>';
+    html += '<th class="py-2 px-2 text-right">行权价</th>';
+    html += '<th class="py-2 px-2 text-left">到期日</th>';
+    html += '<th class="py-2 px-2 text-right">DTE</th>';
+    html += '<th class="py-2 px-2 text-right">Delta</th>';
+    html += '<th class="py-2 px-2 text-right">权利金</th>';
+    html += '<th class="py-2 px-2 text-right">APR</th>';
+    html += '<th class="py-2 px-2 text-right">持仓量</th>';
+    html += '<th class="py-2 px-2 text-right">价差</th>';
+    html += '<th class="py-2 px-2 text-right">评分</th>';
+    html += '<th class="py-2 px-2 text-center">推荐</th>';
+    html += '</tr></thead><tbody>';
+
+    const recColors = {BEST:'text-green-400 bg-green-900/30', GOOD:'text-blue-400 bg-blue-900/30', OK:'text-gray-400 bg-gray-800/30', CAUTION:'text-orange-400 bg-orange-900/30', SKIP:'text-red-400 bg-red-900/30'};
+    const recLabels = {BEST:'强烈推荐', GOOD:'推荐', OK:'可考虑', CAUTION:'谨慎', SKIP:'不推荐'};
+
+    data.recommendations.forEach((r, i) => {
+        const sc = r.scores || {};
+        const color = recColors[sc.recommendation] || recColors.SKIP;
+        const label = recLabels[sc.recommendation] || sc.recommendation;
+        const rowBg = i === 0 ? 'bg-green-900/10' : 'hover:bg-gray-800/50';
+
+        html += '<tr class="border-b border-gray-800/50 ' + rowBg + ' cursor-pointer" onclick="toggleStrategyDetail(this)">';
+        html += '<td class="py-2 px-2">' + (i === 0 ? '1' : i + 1) + '</td>';
+        html += '<td class="py-2 px-2">' + safeHTML(r.platform) + '</td>';
+        html += '<td class="py-2 px-2">' + (r.option_type === 'PUT' ? '<span class="text-green-400">PUT</span>' : '<span class="text-red-400">CALL</span>') + '</td>';
+        html += '<td class="py-2 px-2 text-right font-mono">' + (r.strike || 0).toLocaleString() + '</td>';
+        html += '<td class="py-2 px-2 text-xs">' + safeHTML(r.expiry || '') + '</td>';
+        html += '<td class="py-2 px-2 text-right">' + r.dte + '</td>';
+        html += '<td class="py-2 px-2 text-right">' + (r.delta || 0).toFixed(3) + '</td>';
+        html += '<td class="py-2 px-2 text-right">$' + (r.premium_usd || 0).toLocaleString() + '</td>';
+        html += '<td class="py-2 px-2 text-right">' + (r.apr || 0).toFixed(1) + '%</td>';
+        html += '<td class="py-2 px-2 text-right">' + (r.open_interest || 0).toLocaleString() + '</td>';
+        html += '<td class="py-2 px-2 text-right">' + (r.spread_pct || 0).toFixed(1) + '%</td>';
+        html += '<td class="py-2 px-2 text-right font-mono">' + (sc.total || 0).toFixed(3) + '</td>';
+        html += '<td class="py-2 px-2 text-center"><span class="px-2 py-0.5 rounded text-xs ' + color + '">' + label + '</span></td>';
+        html += '</tr>';
+        html += '<tr class="hidden detail-row"><td colspan="13" class="px-4 py-3 bg-gray-900/50">';
+        html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">';
+        html += '<div><span class="text-gray-500">EV评分:</span> <span class="text-white">' + (sc.ev || 0).toFixed(3) + '</span></div>';
+        html += '<div><span class="text-gray-500">APR评分:</span> <span class="text-white">' + (sc.apr || 0).toFixed(3) + '</span></div>';
+        html += '<div><span class="text-gray-500">流动性:</span> <span class="text-white">' + (sc.liquidity || 0).toFixed(3) + '</span></div>';
+        html += '<div><span class="text-gray-500">Theta:</span> <span class="text-white">' + (sc.theta || 0).toFixed(3) + '</span></div>';
+        html += '<div><span class="text-gray-500">保证金:</span> <span class="text-white">$' + (r.margin_required || 0).toLocaleString() + '</span></div>';
+        html += '<div><span class="text-gray-500">资本效率:</span> <span class="text-white">' + (r.capital_efficiency || 0) + '%</span></div>';
+        html += '<div><span class="text-gray-500">最大亏损:</span> <span class="text-red-400">$' + (r.risk?.max_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div><span class="text-gray-500">盈亏平衡:</span> <span class="text-white">' + (r.risk?.breakeven || 0).toLocaleString() + '</span></div>';
+        html += '</div></td></tr>';
+    });
+
+    html += '</tbody></table></div>';
+    wrapper.innerHTML = html;
+}
+
+window.toggleStrategyDetail = function(row) {
+    const detail = row.nextElementSibling;
+    if (detail && detail.classList.contains('detail-row')) {
+        detail.classList.toggle('hidden');
+    }
+};
 
 async function calculateRecovery() {
     showAlert('请使用策略计算器', 'info');

@@ -98,3 +98,25 @@ export function getFieldName(field) {
     };
     return names[field] || field;
 }
+
+export function getRecommendationColor(rec) {
+    const colors = {
+        'BEST': 'text-green-400 bg-green-900/30',
+        'GOOD': 'text-blue-400 bg-blue-900/30',
+        'OK': 'text-gray-400 bg-gray-800/30',
+        'CAUTION': 'text-orange-400 bg-orange-900/30',
+        'SKIP': 'text-red-400 bg-red-900/30',
+    };
+    return colors[rec] || colors['SKIP'];
+}
+
+export function getRecommendationLabel(rec) {
+    const labels = {
+        'BEST': '强烈推荐',
+        'GOOD': '推荐',
+        'OK': '可考虑',
+        'CAUTION': '谨慎',
+        'SKIP': '不推荐',
+    };
+    return labels[rec] || rec;
+}
