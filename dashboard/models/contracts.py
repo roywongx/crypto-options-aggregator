@@ -84,3 +84,20 @@ class SandboxParams(BaseModel):
     min_apr: float = Field(default=5.0, ge=1)
     max_contracts: int = Field(default=20, ge=1)
     currency: str = Field(default="BTC")
+
+class StrategyRecommendRequest(BaseModel):
+    """策略推荐请求模型"""
+    currency: str = Field(default="BTC", pattern="^(BTC|ETH|SOL)$")
+    mode: str = Field(default="new", pattern="^(new|roll|wheel|grid)$")
+    option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$")
+    capital: float = Field(default=50000, ge=1000, description="可用资金 USDT")
+    max_results: int = Field(default=10, ge=1, le=50)
+    old_strike: Optional[float] = Field(default=None, description="当前持仓行权价（roll模式必填）")
+    old_expiry: Optional[str] = Field(default=None, description="当前持仓到期日（roll模式必填）")
+    grid_levels: int = Field(default=5, ge=2, le=20, description="网格层数（grid模式）")
+    grid_interval_pct: float = Field(default=3.0, ge=0.5, le=20.0, description="网格间隔百分比（grid模式）")
+    overrides: Optional[dict] = Field(default=None, description="覆盖DVOL自适应默认值")
+
+    def model_post_init(self, __context) -> None:
+        if self.mode == "roll" and self.old_strike is None:
+            raise ValueError("roll 模式必须提供 old_strike")
