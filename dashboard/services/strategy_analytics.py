@@ -145,6 +145,58 @@ class PayoffEngine:
             "legs": leg_results,
         }
 
+    def calc_probability_overlay(self, spot: float, dte: int, iv: float,
+                                 strikes: List[float] = None) -> Dict[str, Any]:
+        """到期价格概率分布（对数正态）"""
+        sigma = iv / 100
+        T = dte / 365.0
+        if T <= 0 or sigma <= 0:
+            return {"density": []}
+
+        mu = math.log(spot) - 0.5 * sigma**2 * T
+        std = sigma * math.sqrt(T)
+
+        low = spot * 0.5
+        high = spot * 1.5
+        n_points = 200
+        step = (high - low) / n_points
+
+        density = []
+        for i in range(n_points + 1):
+            price = low + i * step
+            if price <= 0:
+                density.append([round(price, 2), 0])
+                continue
+            ln_price = math.log(price)
+            z = (ln_price - mu) / std
+            prob = norm_pdf(z) / (price * std)
+            density.append([round(price, 2), round(prob * step, 6)])
+
+        return {"density": density, "mean": spot, "dte": dte}
+
+    def calc_time_decay(self, spot: float, strike: float, premium: float,
+                        option_type: str, iv: float,
+                        dte_max: int = 60) -> Dict[str, Any]:
+        """多时间点的期权价值曲线"""
+        ot = "P" if option_type.upper() in ("P", "PUT") else "C"
+        dte_values = [d for d in [60, 45, 30, 15, 7, 1] if d <= dte_max]
+
+        low = spot * 0.7
+        high = spot * 1.3
+        n_points = 100
+        step = (high - low) / n_points
+        prices = [round(low + i * step, 2) for i in range(n_points + 1)]
+
+        curves = []
+        for dte in dte_values:
+            points = []
+            for price in prices:
+                bs = black_scholes_price(ot, strike, price, dte, iv)
+                points.append([price, bs["premium"]])
+            curves.append({"dte": dte, "points": points})
+
+        return {"curves": curves, "prices": prices}
+
     def estimate_premium(self, spot: float, strike: float, dte: int,
                          iv: float, option_type: str) -> Dict[str, Any]:
         """BS 估算权利金 + Greeks"""

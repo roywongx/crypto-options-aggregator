@@ -88,3 +88,29 @@ class TestCalcMultiLegs:
         """空 legs 返回错误"""
         result = self.engine.calc_multi_legs(spot=100000, legs=[])
         assert result["success"] is False
+
+
+class TestProbabilityAndTimeDecay:
+    def setup_method(self):
+        self.engine = PayoffEngine()
+
+    def test_probability_overlay_returns_density(self):
+        """概率叠加返回概率密度"""
+        result = self.engine.calc_probability_overlay(
+            spot=100000, dte=30, iv=60, strikes=[95000, 100000, 105000]
+        )
+        assert "density" in result
+        assert len(result["density"]) > 0
+        total = sum(v for _, v in result["density"])
+        assert 0.9 < total < 1.1
+
+    def test_time_decay_multiple_dte(self):
+        """时间衰减返回多个 DTE 的价值曲线"""
+        result = self.engine.calc_time_decay(
+            spot=100000, strike=95000, premium=2000,
+            option_type="PUT", iv=60, dte_max=60
+        )
+        assert "curves" in result
+        assert len(result["curves"]) >= 4
+        for curve in result["curves"]:
+            assert len(curve["points"]) > 0
