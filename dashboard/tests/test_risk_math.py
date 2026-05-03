@@ -32,25 +32,42 @@ class TestVolgaFormula:
 
 
 class TestPOPCalculation:
-    """POP should use N(d2), not N(d1)."""
+    """POP (seller-side) uses N(-d2) for calls and N(d2) for puts.
+    Seller POP = P(option expires worthless) = probability of keeping premium.
+    Call seller: P(S_T ≤ K) = N(-d2).  Put seller: P(S_T ≥ K) = N(d2).
+    """
 
     def test_call_pop_otm(self):
-        """OTM Call (spot < strike): POP = 1-N(d2) should be < 0.5."""
+        """OTM Call (spot < strike): seller POP = N(d2) should be > 0.5 (likely to keep premium)."""
         from services.dvol_analyzer import calc_pop
         pop = calc_pop(delta_val=0.30, option_type="CALL", spot=100000, strike=105000, iv=50, dte=30)
-        assert pop < 0.5, f"OTM call POP should be < 0.5, got {pop}"
+        assert pop > 0.5, f"OTM call seller POP should be > 0.5, got {pop}"
 
     def test_put_pop_otm(self):
-        """OTM Put (spot > strike): POP = N(d2) should be < 0.5."""
+        """OTM Put (spot > strike): seller POP = N(-d2) should be > 0.5."""
         from services.dvol_analyzer import calc_pop
         pop = calc_pop(delta_val=-0.30, option_type="PUT", spot=100000, strike=95000, iv=50, dte=30)
-        assert pop < 0.5, f"OTM put POP should be < 0.5, got {pop}"
+        assert pop > 0.5, f"OTM put seller POP should be > 0.5, got {pop}"
 
     def test_put_pop_itm(self):
-        """ITM Put (spot < strike): POP = N(d2) should be > 0.5."""
+        """ITM Put (spot < strike): seller POP = N(-d2) should be < 0.5."""
         from services.dvol_analyzer import calc_pop
         pop = calc_pop(delta_val=-0.70, option_type="PUT", spot=100000, strike=110000, iv=50, dte=30)
-        assert pop > 0.5, f"ITM put POP should be > 0.5, got {pop}"
+        assert pop < 0.5, f"ITM put seller POP should be < 0.5, got {pop}"
+
+    def test_pop_exact_value(self):
+        """Verify POP matches exact BS formula: call seller = N(-d2), put seller = N(d2)."""
+        from services.dvol_analyzer import calc_pop
+        from scipy.stats import norm
+        import math
+        S, K, iv_pct, dte = 100000, 100000, 50, 30
+        iv = iv_pct / 100.0
+        T = dte / 365.0
+        d1 = (math.log(S / K) + (0.5 * iv ** 2) * T) / (iv * math.sqrt(T))
+        d2 = d1 - iv * math.sqrt(T)
+        for ot, expected in [("CALL", norm.cdf(-d2)), ("PUT", norm.cdf(d2))]:
+            pop = calc_pop(delta_val=0.5, option_type=ot, spot=S, strike=K, iv=iv_pct, dte=dte)
+            assert abs(pop - expected) < 1e-6, f"{ot} POP {pop} != expected {expected}"
 
     def test_pop_bounds(self):
         """POP should always be in [0, 1]."""

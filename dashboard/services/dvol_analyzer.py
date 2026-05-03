@@ -190,9 +190,9 @@ def calc_pop(delta_val: float, option_type: str, spot: float, strike: float, iv:
         d2 = d1 - iv_decimal * sqrt_t
 
         if option_type.upper() == "CALL":
-            pop = norm.cdf(d2)       # P(S_T > K) = N(d2)
+            pop = norm.cdf(-d2)      # seller POP = P(S_T ≤ K) = N(-d2)
         else:
-            pop = norm.cdf(-d2)      # P(S_T < K) = N(-d2)
+            pop = norm.cdf(d2)       # seller POP = P(S_T ≥ K) = N(d2)
 
         return max(0.0, min(1.0, pop))
     except (ImportError, ValueError, ZeroDivisionError) as e:
