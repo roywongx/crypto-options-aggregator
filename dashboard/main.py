@@ -251,7 +251,7 @@ app.mount("/static", CachedStaticFiles(directory=Path(__file__).parent / "static
 # 注册 api/ 目录路由模块
 from api import (
     scan_router, dashboard_router, paper_trading_router,
-    mcp_router, exchanges_router, datahub_router, copilot_router, health_router, macro_router,
+    mcp_router, exchanges_router, datahub_router, health_router, macro_router,
     refresh_router, strategy_router, sandbox_router, risk_router, payoff_router, debate_router,
     analytics_router,
     llm_analyst_router
@@ -273,7 +273,6 @@ app.include_router(paper_trading_router, dependencies=protected_dependencies)
 app.include_router(mcp_router, dependencies=protected_dependencies)
 app.include_router(exchanges_router, dependencies=protected_dependencies)
 app.include_router(datahub_router, dependencies=protected_dependencies)
-app.include_router(copilot_router, dependencies=protected_dependencies)
 app.include_router(macro_router, dependencies=protected_dependencies)
 app.include_router(refresh_router, dependencies=protected_dependencies)
 app.include_router(strategy_router, dependencies=protected_dependencies)

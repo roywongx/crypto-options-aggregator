@@ -8,7 +8,6 @@ API 路由模块
 - mcp.py: MCP Server 端点
 - exchanges.py: 交易所抽象层端点
 - datahub.py: DataHub 端点
-- copilot.py: AI Co-Pilot 端点
 - health.py: 健康检查端点
 - macro.py: 宏观数据端点
 - refresh.py: 数据刷新端点
@@ -27,7 +26,6 @@ from .paper_trading import router as paper_trading_router
 from .mcp import router as mcp_router
 from .exchanges import router as exchanges_router
 from .datahub import router as datahub_router
-from .copilot import router as copilot_router
 from .health import router as health_router
 from .macro import router as macro_router
 from .refresh import router as refresh_router
@@ -46,7 +44,6 @@ __all__ = [
     "mcp_router",
     "exchanges_router",
     "datahub_router",
-    "copilot_router",
     "health_router",
     "macro_router",
     "refresh_router",
