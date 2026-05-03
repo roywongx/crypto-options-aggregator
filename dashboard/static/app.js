@@ -1712,13 +1712,15 @@ function renderRiskRadar(canvasId, dimensions) {
         },
         options: {
             responsive: true,
+            maintainAspectRatio: true,
+            aspectRatio: 2.5,
             scales: {
                 r: {
                     min: 0, max: 100,
                     ticks: { stepSize: 20, color: '#6b7280', backdropColor: 'transparent' },
                     grid: { color: 'rgba(75, 85, 99, 0.3)' },
                     angleLines: { color: 'rgba(75, 85, 99, 0.3)' },
-                    pointLabels: { color: '#d1d5db', font: { size: 12 } }
+                    pointLabels: { color: '#d1d5db', font: { size: 11 } }
                 }
             },
             plugins: { legend: { display: false } }
