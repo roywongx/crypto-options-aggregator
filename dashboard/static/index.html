@@ -561,218 +561,190 @@
             </div>
         </section>
 
-        <!-- Payoff 可视化 & Wheel ROI (v8.0) -->
-        <section id="payoffSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-cyan-500">
+        <!-- 策略分析中心 v1.0 -->
+        <section id="analysisSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-cyan-500">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
                     <i class="fas fa-chart-area text-cyan-500"></i>
-                    <h3 class="font-semibold text-lg">Payoff 可视化 & Wheel ROI</h3>
+                    <h3 class="font-semibold text-lg">策略分析中心</h3>
+                    <span class="text-xs text-gray-400 ml-2">Payoff · Wheel 模拟 · 概率分析</span>
                 </div>
-                <div class="flex gap-2">
-                    <button id="payoffModeSingle" class="px-3 py-1 rounded text-sm font-medium bg-cyan-500/20 border border-cyan-500/50 text-cyan-400">单策略</button>
-                    <button id="payoffModeWheel" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">Wheel 策略</button>
-                    <button id="payoffModeCompare" class="px-3 py-1 rounded text-sm font-medium bg-gray-700/50 border border-gray-600 text-gray-400 hover:bg-gray-600/50">对比模式</button>
+                <div class="flex gap-1" id="analysisModeTabs">
+                    <button id="anaModePayoff" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-cyan-600 text-white">单腿 Payoff</button>
+                    <button id="anaModeMulti" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">组合 Payoff</button>
+                    <button id="anaModeWheel" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">Wheel 模拟</button>
+                    <button id="anaModeCompare" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">策略对比</button>
                 </div>
             </div>
 
-            <!-- 单策略模式 -->
-            <div id="payoffSingleMode">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <!-- 单腿 Payoff -->
+            <div id="anaPayoffMode">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
                     <div>
                         <label class="block text-gray-400 text-xs mb-1">方向</label>
-                        <select id="payoffDirection" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                        <select id="anaPayoffSide" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                             <option value="sell">卖出 (Sell)</option>
                             <option value="buy">买入 (Buy)</option>
                         </select>
                     </div>
                     <div>
                         <label class="block text-gray-400 text-xs mb-1">类型</label>
-                        <select id="payoffOptionType" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            <option value="P">Put</option>
-                            <option value="C">Call</option>
+                        <select id="anaPayoffType" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            <option value="PUT">Put</option>
+                            <option value="CALL">Call</option>
                         </select>
                     </div>
                     <div>
-                        <label class="block text-gray-400 text-xs mb-1">数量</label>
-                        <input type="number" id="payoffQuantity" value="1" min="0.1" step="0.1" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-                    <div>
                         <label class="block text-gray-400 text-xs mb-1">行权价 ($)</label>
-                        <input type="number" id="payoffStrike" value="80000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                        <input type="number" id="anaPayoffStrike" value="95000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
                     <div>
                         <label class="block text-gray-400 text-xs mb-1">权利金 ($)</label>
-                        <div class="flex gap-2">
-                            <input type="number" id="payoffPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            <button id="estimatePremiumBtn" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-lg text-sm font-medium" title="智能估算权利金">
+                        <div class="flex gap-1">
+                            <input type="number" id="anaPayoffPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                            <button id="anaEstimateBtn" class="bg-purple-500 hover:bg-purple-600 text-white px-2 py-2 rounded-lg text-sm" title="智能估算">
                                 <i class="fas fa-magic"></i>
                             </button>
                         </div>
                     </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
                     <div>
                         <label class="block text-gray-400 text-xs mb-1">DTE (天)</label>
-                        <input type="number" id="payoffDTE" value="30" min="1" max="365" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 hidden" id="advancedParams">
-                    <div>
-                        <label class="block text-gray-400 text-xs mb-1">隐含波动率 IV (%)</label>
-                        <input type="number" id="payoffIV" value="50" min="10" max="200" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                        <input type="number" id="anaPayoffDTE" value="30" min="1" max="365" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
                     <div>
-                        <label class="block text-gray-400 text-xs mb-1">现货价格 ($)</label>
-                        <input type="number" id="payoffSpot" value="" placeholder="自动获取" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                        <label class="block text-gray-400 text-xs mb-1">IV (%)</label>
+                        <input type="number" id="anaPayoffIV" value="60" min="10" max="200" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">数量</label>
+                        <input type="number" id="anaPayoffQty" value="1" min="0.1" step="0.1" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div class="flex items-end">
+                        <button id="anaCalcPayoffBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium w-full">
+                            <i class="fas fa-calculator mr-1"></i>计算 Payoff
+                        </button>
                     </div>
                 </div>
+            </div>
+
+            <!-- 组合 Payoff -->
+            <div id="anaMultiMode" class="hidden">
+                <div id="anaLegsList" class="space-y-2 mb-4"></div>
                 <div class="flex gap-2 mb-4">
-                    <button id="calcPayoffBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                        <i class="fas fa-calculator mr-1"></i>计算 Payoff
+                    <button id="anaAddLegBtn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm">
+                        <i class="fas fa-plus mr-1"></i>添加腿
                     </button>
-                    <button id="toggleAdvancedBtn" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                        <i class="fas fa-cog mr-1"></i>高级参数
+                    <button id="anaCalcMultiBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                        <i class="fas fa-calculator mr-1"></i>计算组合
                     </button>
                 </div>
-                
-                <!-- 策略评分和实操建议 -->
-                <div id="strategyAdviceCard" class="hidden mb-4 p-3 rounded-lg border">
-                    <div class="flex items-center justify-between mb-2">
-                        <div class="flex items-center gap-2">
-                            <span id="strategyRating" class="text-lg font-bold"></span>
-                            <span id="strategyScenario" class="text-xs text-gray-400"></span>
-                        </div>
-                        <div class="text-right">
-                            <div class="text-xs text-gray-400">策略评分</div>
-                            <div id="strategyScore" class="text-2xl font-bold text-cyan-400"></div>
-                        </div>
+            </div>
+
+            <!-- Wheel 模拟 -->
+            <div id="anaWheelMode" class="hidden">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">行权价 ($)</label>
+                        <input type="number" id="anaWheelStrike" value="95000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
-                    <div class="grid grid-cols-4 gap-2 mb-2 text-xs">
-                        <div class="bg-gray-800/50 rounded px-2 py-1">
-                            <div class="text-gray-500">收益性</div>
-                            <div id="scoreRoi" class="font-bold text-white"></div>
-                        </div>
-                        <div class="bg-gray-800/50 rounded px-2 py-1">
-                            <div class="text-gray-500">风险性</div>
-                            <div id="scoreRisk" class="font-bold text-white"></div>
-                        </div>
-                        <div class="bg-gray-800/50 rounded px-2 py-1">
-                            <div class="text-gray-500">胜率</div>
-                            <div id="scoreWinRate" class="font-bold text-white"></div>
-                        </div>
-                        <div class="bg-gray-800/50 rounded px-2 py-1">
-                            <div class="text-gray-500">流动性</div>
-                            <div id="scoreLiquidity" class="font-bold text-white"></div>
-                        </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">权利金 ($)</label>
+                        <input type="number" id="anaWheelPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                     </div>
-                    <div class="text-xs text-gray-300 mb-2" id="strategyAdviceText"></div>
-                    <div class="grid grid-cols-2 gap-3 text-xs">
-                        <div>
-                            <div class="text-red-400 font-semibold mb-1">⚠️ 主要风险</div>
-                            <ul id="strategyRisks" class="list-disc list-inside text-gray-400 space-y-0.5"></ul>
-                        </div>
-                        <div>
-                            <div class="text-green-400 font-semibold mb-1">💡 优化建议</div>
-                            <ul id="strategyOptimizations" class="list-disc list-inside text-gray-400 space-y-0.5"></ul>
-                        </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">资金 ($)</label>
+                        <input type="number" id="anaWheelCapital" value="100000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">Cycles</label>
+                        <input type="number" id="anaWheelCycles" value="6" min="1" max="24" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">IV</label>
+                        <input type="number" id="anaWheelIV" value="0.6" min="0.1" max="2.0" step="0.05" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 text-xs mb-1">模拟次数</label>
+                        <input type="number" id="anaWheelSims" value="1000" min="100" max="5000" step="100" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div class="flex items-end">
+                        <button id="anaCalcWheelBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium w-full">
+                            <i class="fas fa-sync-alt mr-1"></i>运行模拟
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <!-- Wheel 策略模式 -->
-            <div id="payoffWheelMode" class="hidden">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div class="p-3 bg-green-500/5 border border-green-500/20 rounded-lg">
-                        <h4 class="text-sm font-semibold text-green-400 mb-2">Step 1: Sell Put</h4>
-                        <div class="space-y-2">
-                            <div>
-                                <label class="block text-gray-400 text-xs">Put 行权价 ($)</label>
-                                <input type="number" id="wheelPutStrike" value="80000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-gray-400 text-xs">Put 权利金 ($)</label>
-                                <input type="number" id="wheelPutPremium" value="2000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-gray-400 text-xs">Put DTE (天)</label>
-                                <input type="number" id="wheelPutDTE" value="30" min="1" max="365" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
-                        <h4 class="text-sm font-semibold text-blue-400 mb-2">Step 2: Sell Call (被行权后)</h4>
-                        <div class="space-y-2">
-                            <div>
-                                <label class="block text-gray-400 text-xs">Call 行权价 ($)</label>
-                                <input type="number" id="wheelCallStrike" value="90000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-gray-400 text-xs">Call 权利金 ($)</label>
-                                <input type="number" id="wheelCallPremium" value="1500" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            </div>
-                            <div>
-                                <label class="block text-gray-400 text-xs">Call DTE (天)</label>
-                                <input type="number" id="wheelCallDTE" value="30" min="1" max="365" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
-                            </div>
-                        </div>
-                    </div>
+            <!-- 策略对比 -->
+            <div id="anaCompareMode" class="hidden">
+                <div id="anaCompareSlots" class="space-y-2 mb-4"></div>
+                <div class="flex gap-2 mb-4">
+                    <button id="anaAddCompareBtn" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm">
+                        <i class="fas fa-plus mr-1"></i>添加策略
+                    </button>
+                    <button id="anaCalcCompareBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                        <i class="fas fa-balance-scale mr-1"></i>对比分析
+                    </button>
                 </div>
-                <button id="calcWheelBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-medium mb-4">
-                    <i class="fas fa-sync-alt mr-1"></i>计算 Wheel ROI
-                </button>
+                <div id="anaCompareResult" class="hidden"></div>
             </div>
 
-            <!-- Payoff 图表 -->
-            <div class="h-72 mb-4">
-                <canvas id="payoffChart"></canvas>
-            </div>
-
-            <!-- 结果摘要（增强版） -->
-            <div id="payoffResult" class="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <!-- 指标卡 -->
+            <div id="anaMetricsRow" class="hidden grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">最大盈利</div>
-                    <div id="payoffMaxProfit" class="text-lg font-bold text-green-400">--</div>
+                    <div id="anaMaxProfit" class="text-lg font-bold text-green-400">--</div>
                 </div>
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">最大亏损</div>
-                    <div id="payoffMaxLoss" class="text-lg font-bold text-red-400">--</div>
+                    <div id="anaMaxLoss" class="text-lg font-bold text-red-400">--</div>
                 </div>
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
                     <div class="text-xs text-gray-400 mb-1">盈亏平衡</div>
-                    <div id="payoffBreakeven" class="text-lg font-bold text-yellow-400">--</div>
+                    <div id="anaBreakeven" class="text-lg font-bold text-yellow-400">--</div>
                 </div>
                 <div class="p-3 bg-gray-800/40 rounded-lg text-center">
-                    <div class="text-xs text-gray-400 mb-1">ROI</div>
-                    <div id="payoffROI" class="text-lg font-bold text-cyan-400">--</div>
-                </div>
-                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
-                    <div class="text-xs text-gray-400 mb-1">胜率</div>
-                    <div id="payoffWinRate" class="text-lg font-bold text-purple-400">--</div>
-                </div>
-                <div class="p-3 bg-gray-800/40 rounded-lg text-center">
-                    <div class="text-xs text-gray-400 mb-1">风险回报比</div>
-                    <div id="payoffRiskReward" class="text-lg font-bold text-orange-400">--</div>
+                    <div class="text-xs text-gray-400 mb-1">策略评分</div>
+                    <div id="anaScore" class="text-lg font-bold text-cyan-400">--</div>
                 </div>
             </div>
-            
-            <!-- Wheel 专用结果 -->
-            <div id="wheelResult" class="hidden mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+
+            <!-- Wheel 统计卡 -->
+            <div id="anaWheelStats" class="hidden grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
                 <div class="p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
-                    <div class="text-xs text-green-400 mb-1">Put 收入</div>
-                    <div id="wheelPutIncome" class="text-lg font-bold text-green-400">--</div>
+                    <div class="text-xs text-green-400 mb-1">平均 ROI</div>
+                    <div id="anaWheelMeanROI" class="text-lg font-bold text-green-400">--</div>
                 </div>
                 <div class="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-center">
-                    <div class="text-xs text-blue-400 mb-1">Call 收入</div>
-                    <div id="wheelCallIncome" class="text-lg font-bold text-blue-400">--</div>
+                    <div class="text-xs text-blue-400 mb-1">中位 ROI</div>
+                    <div id="anaWheelMedianROI" class="text-lg font-bold text-blue-400">--</div>
                 </div>
                 <div class="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg text-center">
-                    <div class="text-xs text-purple-400 mb-1">Wheel ROI</div>
-                    <div id="wheelROI" class="text-lg font-bold text-purple-400">--</div>
+                    <div class="text-xs text-purple-400 mb-1">胜率</div>
+                    <div id="anaWheelWinRate" class="text-lg font-bold text-purple-400">--</div>
                 </div>
                 <div class="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-center">
-                    <div class="text-xs text-yellow-400 mb-1">年化 ROI</div>
-                    <div id="wheelAnnualizedROI" class="text-lg font-bold text-yellow-400">--</div>
+                    <div class="text-xs text-yellow-400 mb-1">P10 / P90</div>
+                    <div id="anaWheelQuantiles" class="text-lg font-bold text-yellow-400">--</div>
                 </div>
+                <div class="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-center">
+                    <div class="text-xs text-red-400 mb-1">最大回撤</div>
+                    <div id="anaWheelDrawdown" class="text-lg font-bold text-red-400">--</div>
+                </div>
+            </div>
+
+            <!-- 图表区 -->
+            <div class="h-80 mb-4">
+                <canvas id="anaChart"></canvas>
+            </div>
+
+            <!-- Wheel 分布图 -->
+            <div id="anaWheelDistChart" class="hidden h-64 mb-4">
+                <canvas id="anaDistChart"></canvas>
             </div>
         </section>
 
