@@ -38,7 +38,11 @@ class LLMAnalystEngine:
         ctx: Dict[str, Any] = {"currency": currency, "errors": []}
 
         # 复用 debate engine 的数据收集
-        md = _gather_market_data(currency)
+        try:
+            md = _gather_market_data(currency)
+        except Exception as e:
+            logger.warning("llm analyst gather_market_data failed: %s", e)
+            md = {"spot": 0, "dvol": {}, "large_trades": [], "contracts": [], "max_pain": 0, "risk_status": "UNKNOWN", "risk_label": "", "risk_desc": "", "errors": [f"gather_market_data: {e}"]}
         ctx["spot"] = md.get("spot", 0)
         ctx["dvol"] = md.get("dvol", {})
         ctx["large_trades"] = md.get("large_trades", [])

@@ -50,7 +50,11 @@ class TestPrepareContext:
         assert "risk" in ctx
 
     @patch("services.llm_analyst._gather_market_data")
-    def test_prepare_context_handles_missing_data(self, mock_gather):
+    @patch("services.llm_analyst.OnChainMetrics")
+    @patch("services.llm_analyst.DerivativeMetrics")
+    @patch("services.llm_analyst.get_all_macro_data")
+    @patch("services.llm_analyst.IVTermStructureAnalyzer")
+    def test_prepare_context_handles_missing_data(self, mock_iv, mock_macro, mock_deriv, mock_onchain, mock_gather):
         from services.llm_analyst import LLMAnalystEngine
 
         mock_gather.return_value = {
@@ -58,6 +62,10 @@ class TestPrepareContext:
             "contracts": [], "max_pain": 0, "risk_status": "UNKNOWN",
             "risk_label": "", "risk_desc": "", "errors": ["spot failed"],
         }
+        mock_onchain.get_all_metrics.return_value = {}
+        mock_deriv.get_all_metrics.return_value = {}
+        mock_macro.return_value = {}
+        mock_iv.return_value.analyze.return_value = {}
 
         engine = LLMAnalystEngine()
         ctx = engine._prepare_context("BTC")
@@ -66,3 +74,6 @@ class TestPrepareContext:
         assert ctx["spot"] == 0
         assert isinstance(ctx["onchain"], dict)
         assert isinstance(ctx["derivatives"], dict)
+        assert isinstance(ctx["macro"], dict)
+        assert isinstance(ctx["iv_term"], dict)
+        assert "spot failed" in ctx["errors"]
