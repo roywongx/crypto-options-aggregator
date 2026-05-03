@@ -209,3 +209,45 @@ class PayoffEngine:
             "theta": bs["theta"],
             "vega": bs["vega"],
         }
+
+    def score_strategy(self, spot: float, strike: float, premium: float,
+                       option_type: str, dte: int,
+                       delta: float = None) -> Dict[str, Any]:
+        """策略评分 — 与 StrategyScorer 对齐"""
+        from services.strategy_engine import StrategyScorer
+        scorer = StrategyScorer()
+
+        is_put = option_type.upper() in ("P", "PUT")
+
+        if delta is None:
+            # 基于虚值距离估算 delta，避免固定值无法区分深 OTM 和近 ATM
+            otm_pct = abs(1 - strike / spot) if spot > 0 else 0.5
+            est = max(0.003, 0.50 * math.exp(-otm_pct * 50))
+            delta = -est if is_put else est
+
+        contract = {
+            "option_type": "P" if is_put else "C",
+            "strike": strike,
+            "premium_usd": premium,
+            "dte": dte,
+            "delta": delta,
+            "apr": (premium / strike * 365 / dte * 100) if dte > 0 and strike > 0 else 0,
+            "open_interest": 500,
+            "spread_pct": 2.0,
+        }
+
+        score = scorer.score(contract, spot)
+
+        # Delta-based risk penalty: 高 delta（近 ATM）策略即使 APR/theta 看起来好，也应降分
+        delta_abs = abs(delta)
+        risk_factor = max(0.3, 1.0 - delta_abs * 1.5)
+        adjusted_total = score.total * risk_factor
+
+        return {
+            "total": round(adjusted_total, 4),
+            "ev": round(score.ev, 4),
+            "apr": round(score.apr, 4),
+            "liquidity": round(score.liquidity, 4),
+            "theta": round(score.theta, 4),
+            "recommendation": scorer._classify_score(adjusted_total),
+        }

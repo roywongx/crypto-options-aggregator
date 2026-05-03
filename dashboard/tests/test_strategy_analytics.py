@@ -114,3 +114,34 @@ class TestProbabilityAndTimeDecay:
         assert len(result["curves"]) >= 4
         for curve in result["curves"]:
             assert len(curve["points"]) > 0
+
+
+class TestScoreStrategy:
+    def setup_method(self):
+        self.engine = PayoffEngine()
+
+    def test_sell_put_good_score(self):
+        """Sell Put 深度 OTM 应得高分"""
+        result = self.engine.score_strategy(
+            spot=100000, strike=90000, premium=1500,
+            option_type="PUT", dte=30
+        )
+        assert result["total"] > 0.5
+        assert result["recommendation"] in ("BEST", "GOOD")
+
+    def test_sell_put_risky_score(self):
+        """Sell Put 接近 spot 应得低分"""
+        result = self.engine.score_strategy(
+            spot=100000, strike=99000, premium=5000,
+            option_type="PUT", dte=7
+        )
+        assert result["recommendation"] in ("CAUTION", "SKIP", "OK")
+
+    def test_score_has_all_components(self):
+        """评分包含所有分量"""
+        result = self.engine.score_strategy(
+            spot=100000, strike=95000, premium=2000,
+            option_type="PUT", dte=30
+        )
+        for key in ("total", "ev", "apr", "liquidity", "theta", "recommendation"):
+            assert key in result
