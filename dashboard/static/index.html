@@ -785,13 +785,13 @@
                     <span class="text-xs text-gray-400 ml-2">统一筛选 · 多因子评分 · DVOL自适应</span>
                 </div>
                 <div class="flex gap-1" id="strategyModeTabs">
-                    <button onclick="setStrategyMode('new')" id="modeNewBtn"
+                    <button id="modeNewBtn"
                         class="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white">新建开仓</button>
-                    <button onclick="setStrategyMode('roll')" id="modeRollBtn"
+                    <button id="modeRollBtn"
                         class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">滚仓优化</button>
-                    <button onclick="setStrategyMode('wheel')" id="modeWheelBtn"
+                    <button id="modeWheelBtn"
                         class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">轮转策略</button>
-                    <button onclick="setStrategyMode('grid')" id="modeGridBtn"
+                    <button id="modeGridBtn"
                         class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">网格配置</button>
                 </div>
             </div>
@@ -810,9 +810,9 @@
                             <div>
                                 <label class="block text-[11px] text-gray-400 mb-0.5">方向</label>
                                 <div class="flex gap-1" id="strDirectionBtns">
-                                    <button onclick="setStrategyDirection('PUT')" id="strDirPut"
+                                    <button id="strDirPut"
                                         class="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white">PUT</button>
-                                    <button onclick="setStrategyDirection('CALL')" id="strDirCall"
+                                    <button id="strDirCall"
                                         class="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">CALL</button>
                                 </div>
                             </div>
@@ -875,7 +875,7 @@
                         </div>
                     </details>
 
-                    <button onclick="fetchStrategyRecommend()" id="strSubmitBtn"
+                    <button id="strSubmitBtn"
                         class="w-full btn-primary text-white py-2.5 rounded-xl font-bold flex justify-center items-center gap-2">
                         <i class="fas fa-search"></i> 获取推荐
                     </button>

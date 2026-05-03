@@ -125,6 +125,22 @@ function setupEventListeners() {
     // const scSubmitBtn = document.getElementById('scSubmitBtn');
     // if (scSubmitBtn) scSubmitBtn.addEventListener('click', submitStrategyCalc);
 
+    // Strategy Recommendation Center v2 event listeners
+    const strModeNewBtn = document.getElementById('modeNewBtn');
+    if (strModeNewBtn) strModeNewBtn.addEventListener('click', () => setStrategyMode('new'));
+    const strModeRollBtn = document.getElementById('modeRollBtn');
+    if (strModeRollBtn) strModeRollBtn.addEventListener('click', () => setStrategyMode('roll'));
+    const strModeWheelBtn = document.getElementById('modeWheelBtn');
+    if (strModeWheelBtn) strModeWheelBtn.addEventListener('click', () => setStrategyMode('wheel'));
+    const strModeGridBtn = document.getElementById('modeGridBtn');
+    if (strModeGridBtn) strModeGridBtn.addEventListener('click', () => setStrategyMode('grid'));
+    const strDirPutBtn = document.getElementById('strDirPut');
+    if (strDirPutBtn) strDirPutBtn.addEventListener('click', () => setStrategyDirection('PUT'));
+    const strDirCallBtn = document.getElementById('strDirCall');
+    if (strDirCallBtn) strDirCallBtn.addEventListener('click', () => setStrategyDirection('CALL'));
+    const strSubmitBtn = document.getElementById('strSubmitBtn');
+    if (strSubmitBtn) strSubmitBtn.addEventListener('click', fetchStrategyRecommend);
+
     const presetCon = document.getElementById('presetCon');
     if (presetCon) presetCon.addEventListener('click', () => applyPreset('conservative'));
     const presetStd = document.getElementById('presetStd');
@@ -672,6 +688,7 @@ window.setStrategyDirection = function(dir) {
 };
 
 window.fetchStrategyRecommend = async function() {
+    console.log('[Strategy] fetchStrategyRecommend called, mode=', _strMode, 'dir=', _strDirection);
     const loading = document.getElementById('strLoading');
     const empty = document.getElementById('strEmpty');
     const wrapper = document.getElementById('strResultsWrapper');
@@ -714,12 +731,14 @@ window.fetchStrategyRecommend = async function() {
     }
 
     try {
+        console.log('[Strategy] Sending request:', JSON.stringify(body));
         const res = await safeFetch('/api/strategy/recommend', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(body),
         });
         const data = await res.json();
+        console.log('[Strategy] Response:', data.success, 'recommendations:', data.recommendations?.length);
         if (loading) loading.classList.add('hidden');
 
         if (!data.success || !data.recommendations?.length) {
@@ -747,6 +766,7 @@ window.fetchStrategyRecommend = async function() {
             fetchStrategyRecommend();
         }, 60000);
     } catch (e) {
+        console.error('[Strategy] Error:', e);
         if (loading) loading.classList.add('hidden');
         showAlert('策略推荐请求失败: ' + e.message, 'error');
     }
@@ -808,10 +828,11 @@ function renderStrategyResults(data) {
         const label = recLabels[sc.recommendation] || sc.recommendation;
         const rowBg = i === 0 ? 'bg-green-900/10' : 'hover:bg-gray-800/50';
 
-        html += '<tr class="border-b border-gray-800/50 ' + rowBg + ' cursor-pointer" onclick="toggleStrategyDetail(this)">';
+        html += '<tr class="border-b border-gray-800/50 ' + rowBg + ' cursor-pointer strategy-row">';
         html += '<td class="py-2 px-2">' + (i === 0 ? '1' : i + 1) + '</td>';
         html += '<td class="py-2 px-2">' + safeHTML(r.platform) + '</td>';
-        html += '<td class="py-2 px-2">' + (r.option_type === 'PUT' ? '<span class="text-green-400">PUT</span>' : '<span class="text-red-400">CALL</span>') + '</td>';
+        const _isPut = r.option_type === 'P' || r.option_type === 'PUT';
+        html += '<td class="py-2 px-2">' + (_isPut ? '<span class="text-green-400">PUT</span>' : '<span class="text-red-400">CALL</span>') + '</td>';
         html += '<td class="py-2 px-2 text-right font-mono">' + (r.strike || 0).toLocaleString() + '</td>';
         html += '<td class="py-2 px-2 text-xs">' + safeHTML(r.expiry || '') + '</td>';
         html += '<td class="py-2 px-2 text-right">' + r.dte + '</td>';
@@ -838,6 +859,16 @@ function renderStrategyResults(data) {
 
     html += '</tbody></table></div>';
     wrapper.innerHTML = html;
+
+    // Event delegation for row click (CSP-safe, no inline onclick)
+    wrapper.querySelectorAll('.strategy-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const detail = row.nextElementSibling;
+            if (detail && detail.classList.contains('detail-row')) {
+                detail.classList.toggle('hidden');
+            }
+        });
+    });
 }
 
 window.toggleStrategyDetail = function(row) {

@@ -346,7 +346,7 @@ class StrategyEngine:
         margin = max(strike * 0.1, (strike - premium) * 0.2)
         return {
             "platform": contract.get("platform", ""),
-            "option_type": contract.get("option_type", "P"),
+            "option_type": "PUT" if contract.get("option_type", "P") in ("P", "PUT") else "CALL",
             "strike": strike,
             "expiry": contract.get("expiry", ""),
             "dte": contract.get("dte", 0),
