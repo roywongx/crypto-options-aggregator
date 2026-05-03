@@ -229,10 +229,14 @@ class LLMAnalystEngine:
             if parsed is None:
                 return {"success": False, "error": "LLM 返回格式异常", "raw_response": response[:500]}
 
+            required = {"market_assessment", "strategy_recommendation", "risk_warning", "confidence"}
+            if not required.issubset(parsed.keys()):
+                return {"success": False, "error": "LLM response missing required fields", "raw_response": response[:500]}
+
             parsed["success"] = True
             return parsed
 
-        except (RuntimeError, ConnectionError, TimeoutError, ValueError) as e:
+        except Exception as e:
             logger.error("llm_synthesize failed: %s", e)
             return {"success": False, "error": str(e)}
 
