@@ -1635,10 +1635,10 @@ function updateSentimentAnalysis(sentiment) {
 }
 
 function getRiskColor(score) {
-    if (score < 30) return 'text-green-400';
-    if (score < 60) return 'text-yellow-400';
-    if (score < 80) return 'text-orange-400';
-    return 'text-red-400';
+    if (score < 30) return '#10b981';
+    if (score < 60) return '#eab308';
+    if (score < 80) return '#f97316';
+    return '#ef4444';
 }
 
 function renderRiskGauge(canvasId, score) {
