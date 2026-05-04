@@ -79,11 +79,11 @@ class RiskFramework:
         regular = floors["regular"]
 
         if strike <= extreme:
-            return config.RISK_SCORE_EXTREME
+            return 0.70
         elif strike <= regular:
-            return config.RISK_SCORE_REGULAR
+            return 0.85
         elif strike > spot:
-            return config.RISK_SCORE_ABOVE_SPOT
+            return 0.80
         return 1.0
 
     @classmethod
@@ -137,12 +137,12 @@ class CalculationEngine:
     def weighted_score(apr: float, pop: float, breakeven_pct: float,
                        liquidity_score: float, iv_rank: float,
                        strike: float = 0, spot: float = 0) -> float:
-        a = min(max(apr, 0) / config.CALC_APR_MAX, 1.0)
-        p = min(max(pop, 0) / config.CALC_POP_MAX, 1.0)
+        a = min(max(apr, 0) / 100.0, 1.0)
+        p = min(max(pop, 0), 1.0)
         b = min(max(breakeven_pct, 0) / config.CALC_BREAKEVEN_MAX, 1.0)
         l = min(max(liquidity_score, 0) / config.CALC_LIQUIDITY_MAX, 1.0)
         ir = max(iv_rank, 0)
-        iv = 1.0 - abs(ir - 50) / 50.0
+        iv = 0.5 + (ir - 50) / 100.0
 
         score = (a * config.CALC_WEIGHT_APR +
                  p * config.CALC_WEIGHT_POP +
