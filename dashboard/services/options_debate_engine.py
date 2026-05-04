@@ -299,10 +299,10 @@ def _bull_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
 
     # DVOL 对卖方有利程度
     dvol_val = dvol.get("current", 50)
-    if dvol_val > 60:
+    if dvol_val > 70:
         score += 10
         points.append(f"DVOL {dvol_val:.0f}% 偏高，权利金溢价利于卖方")
-    elif dvol_val < 30:
+    elif dvol_val < 50:
         score -= 5
         points.append(f"DVOL {dvol_val:.0f}% 偏低，权利金收益有限")
 
@@ -344,7 +344,7 @@ def _bear_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
     elif dvol_val > 50:
         score += 10
         points.append(f"DVOL {dvol_val:.0f}% 偏高，波动率风险上升")
-    elif dvol_val < 30:
+    elif dvol_val < 50:
         score -= 10
         points.append(f"DVOL {dvol_val:.0f}% 低位，波动率风险较低")
 
