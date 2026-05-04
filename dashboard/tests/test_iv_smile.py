@@ -145,3 +145,66 @@ class TestMetrics:
             assert "skew_25d" in entry
             assert "form" in entry
             assert "point_count" in entry
+
+
+class TestSentiment:
+    def test_panic_on_extreme_put_skew(self):
+        sentiment = IVSmileAnalyzer._assess_sentiment(20, 35, -2)
+        assert sentiment["state"] == "PANIC"
+
+    def test_fear_on_high_put_skew(self):
+        sentiment = IVSmileAnalyzer._assess_sentiment(10, 18, -1)
+        assert sentiment["state"] == "FEAR"
+
+    def test_neutral_on_low_skew(self):
+        sentiment = IVSmileAnalyzer._assess_sentiment(1, 2, 1)
+        assert sentiment["state"] == "NEUTRAL"
+
+    def test_greed_on_negative_skew(self):
+        sentiment = IVSmileAnalyzer._assess_sentiment(-5, -2, 8)
+        assert sentiment["state"] == "GREED"
+
+    def test_euphoria_on_extreme_negative_skew(self):
+        sentiment = IVSmileAnalyzer._assess_sentiment(-12, -3, 20)
+        assert sentiment["state"] == "EUPHORIA"
+
+    def test_sentiment_has_required_fields(self):
+        sentiment = IVSmileAnalyzer._assess_sentiment(0, 0, 0)
+        for field in ["state", "label", "icon", "color"]:
+            assert field in sentiment
+
+
+class TestRecommendations:
+    def test_sell_put_on_fear(self):
+        sentiment = {"state": "FEAR", "label": "市场恐慌", "icon": "😰", "color": "#ef4444"}
+        metrics = {"atm_iv": 50, "skew_25d": 10, "put_skew_pct": 20, "call_skew_pct": -2, "skew_slope": 0.1, "curvature": 3}
+        recs = IVSmileAnalyzer._build_recommendations("put_skew", metrics, sentiment)
+        assert len(recs) > 0
+        assert any(r["type"] == "sell_put" for r in recs)
+
+    def test_high_confidence_on_extreme_skew(self):
+        sentiment = {"state": "FEAR", "label": "市场恐慌", "icon": "😰", "color": "#ef4444"}
+        metrics = {"atm_iv": 50, "skew_25d": 10, "put_skew_pct": 20, "call_skew_pct": -2, "skew_slope": 0.1, "curvature": 3}
+        recs = IVSmileAnalyzer._build_recommendations("put_skew", metrics, sentiment)
+        high_recs = [r for r in recs if r["confidence"] == "HIGH"]
+        assert len(high_recs) > 0
+
+    def test_recommendation_has_required_fields(self):
+        sentiment = {"state": "NEUTRAL", "label": "中性", "icon": "😐", "color": "#9497a9"}
+        metrics = {"atm_iv": 30, "skew_25d": 1, "put_skew_pct": 2, "call_skew_pct": 1, "skew_slope": 0.01, "curvature": 1}
+        recs = IVSmileAnalyzer._build_recommendations("flat", metrics, sentiment)
+        for r in recs:
+            for field in ["type", "title", "body", "action", "confidence"]:
+                assert field in r
+
+    def test_iron_condor_on_flat_high_iv(self):
+        sentiment = {"state": "NEUTRAL", "label": "中性", "icon": "😐", "color": "#9497a9"}
+        metrics = {"atm_iv": 55, "skew_25d": 1, "put_skew_pct": 2, "call_skew_pct": 1, "skew_slope": 0.01, "curvature": 1}
+        recs = IVSmileAnalyzer._build_recommendations("flat", metrics, sentiment)
+        assert any(r["type"] == "iron_condor" for r in recs)
+
+    def test_long_straddle_on_flat_low_iv(self):
+        sentiment = {"state": "NEUTRAL", "label": "中性", "icon": "😐", "color": "#9497a9"}
+        metrics = {"atm_iv": 20, "skew_25d": 0, "put_skew_pct": 1, "call_skew_pct": 1, "skew_slope": 0.005, "curvature": 0.5}
+        recs = IVSmileAnalyzer._build_recommendations("flat", metrics, sentiment)
+        assert any(r["type"] == "long_straddle" for r in recs)

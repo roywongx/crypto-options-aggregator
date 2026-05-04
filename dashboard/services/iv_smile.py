@@ -115,6 +115,92 @@ class IVSmileAnalyzer:
             return "call_skew"
         return "flat"
 
+    @staticmethod
+    def _assess_sentiment(skew_25d: float, put_skew_pct: float, call_skew_pct: float) -> dict:
+        if skew_25d > 15 or put_skew_pct > 30:
+            return {"state": "PANIC", "label": "极度恐慌", "icon": "😱", "color": "#ef4444"}
+        if skew_25d > 8 or put_skew_pct > 15:
+            return {"state": "FEAR", "label": "市场恐慌", "icon": "😰", "color": "#ef4444"}
+        if skew_25d > 3 or put_skew_pct > 5:
+            return {"state": "CAUTIOUS", "label": "偏谨慎", "icon": "🤔", "color": "#f59e0b"}
+        if skew_25d < -8 or call_skew_pct > 15:
+            return {"state": "EUPHORIA", "label": "极度狂热", "icon": "🚀", "color": "#7132f5"}
+        if skew_25d < -3 or call_skew_pct > 5:
+            return {"state": "GREED", "label": "市场贪婪", "icon": "🤑", "color": "#7132f5"}
+        return {"state": "NEUTRAL", "label": "中性", "icon": "😐", "color": "#9497a9"}
+
+    @classmethod
+    def _build_recommendations(cls, form: str, metrics: dict, sentiment: dict) -> list:
+        recs = []
+        atm_iv = metrics["atm_iv"]
+        put_skew = metrics["put_skew_pct"]
+        call_skew = metrics["call_skew_pct"]
+        state = sentiment["state"]
+
+        if form == "put_skew" and atm_iv > 40 and state in ("FEAR", "PANIC"):
+            recs.append({
+                "type": "sell_put", "title": "卖 OTM Put",
+                "body": f"下行 IV 显著偏高 ({put_skew:.1f}%)，卖出虚值 Put 可收取超额恐慌溢价",
+                "action": "Delta 0.15-0.25，DTE 7-14",
+                "confidence": "HIGH",
+            })
+        elif form == "put_skew" and atm_iv > 30:
+            recs.append({
+                "type": "put_spread", "title": "卖 Put Spread",
+                "body": f"下行 IV 偏高 ({put_skew:.1f}%)，用价差策略限制风险",
+                "action": "卖 Put Delta 0.20 / 买 Put Delta 0.10",
+                "confidence": "MEDIUM",
+            })
+
+        if form == "call_skew" and atm_iv > 40 and state in ("GREED", "EUPHORIA"):
+            recs.append({
+                "type": "sell_call", "title": "卖 OTM Call",
+                "body": f"上行 IV 显著偏高 ({call_skew:.1f}%)，卖出虚值 Call 收取狂热溢价",
+                "action": "Delta 0.15-0.25，DTE 7-14",
+                "confidence": "HIGH",
+            })
+
+        if form == "flat" and atm_iv > 45:
+            recs.append({
+                "type": "iron_condor", "title": "铁鹰策略",
+                "body": f"微笑平坦且 IV 偏高 ({atm_iv:.1f}%)，适合同时卖出虚值 Put 和 Call",
+                "action": "Put Delta 0.15 / Call Delta 0.10，DTE 14-30",
+                "confidence": "HIGH",
+            })
+        elif form == "flat" and atm_iv < 25:
+            recs.append({
+                "type": "long_straddle", "title": "买跨式",
+                "body": f"微笑平坦且 IV 偏低 ({atm_iv:.1f}%)，买入跨式赌波动率上升",
+                "action": "ATM Call + ATM Put，DTE 30+",
+                "confidence": "MEDIUM",
+            })
+
+        if form == "smile" and atm_iv > 40:
+            recs.append({
+                "type": "sell_strangle", "title": "卖宽跨式",
+                "body": "两端 IV 偏高，同时卖出虚值 Put 和 Call 收取双端溢价",
+                "action": "Put Delta 0.15 / Call Delta 0.15",
+                "confidence": "MEDIUM",
+            })
+
+        if abs(metrics["skew_25d"]) > 15:
+            if metrics["skew_25d"] > 0:
+                recs.append({
+                    "type": "risk_reversal", "title": "Risk Reversal (卖Put买Call)",
+                    "body": f"极端 put skew ({metrics['skew_25d']:.1f})，卖高IV端买低IV端",
+                    "action": "卖 OTM Put + 买 OTM Call",
+                    "confidence": "HIGH",
+                })
+            else:
+                recs.append({
+                    "type": "risk_reversal", "title": "Risk Reversal (卖Call买Put)",
+                    "body": f"极端 call skew ({metrics['skew_25d']:.1f})，卖高IV端买低IV端",
+                    "action": "卖 OTM Call + 买 OTM Put",
+                    "confidence": "HIGH",
+                })
+
+        return recs[:3]
+
     @classmethod
     def _build_analysis(cls, smiles: dict, spot: float) -> Optional[dict]:
         if not smiles or not spot:
@@ -157,8 +243,8 @@ class IVSmileAnalyzer:
             agg[key] = round(sum(m[key] / m["dte"] for m in expiry_metrics) / total_weight, 2)
 
         form = cls._classify_form(agg["put_skew_pct"], agg["call_skew_pct"])
-        sentiment = {"state": "NEUTRAL", "label": "中性", "icon": "😐", "color": "#9497a9"}
-        recommendations = []
+        sentiment = cls._assess_sentiment(agg["skew_25d"], agg["put_skew_pct"], agg["call_skew_pct"])
+        recommendations = cls._build_recommendations(form, agg, sentiment)
 
         return {
             "form": form,
