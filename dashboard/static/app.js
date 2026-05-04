@@ -4279,99 +4279,228 @@ function renderIVSmileAnalysis(container, analysis, spot) {
 }
 
 async function loadGreeksSummary() {
-    const container = document.getElementById('greeksGrid');
-    if (!container) return;
-    container.innerHTML = '<div class="text-gray-400 text-sm py-4 text-center">加载中...</div>';
+    const grid = document.getElementById('greeksGrid');
+    const statusBar = document.getElementById('greeksStatusBar');
+    const analysisDiv = document.getElementById('greeksAnalysis');
+    if (!grid) return;
+
+    grid.innerHTML = '<div class="text-gray-400 text-sm py-4 text-center">加载中...</div>';
 
     try {
         const currency = document.getElementById('greeksCurrency')?.value || 'BTC';
         const resp = await safeFetch(`${API_BASE}/api/charts/greeks-summary?currency=${currency}`);
         const data = await resp.json();
         if (data.error) {
-            container.innerHTML = `<div class="text-[#f59e0b] text-sm">${safeHTML(data.error)}</div>`;
+            grid.innerHTML = `<div class="text-[#f59e0b] text-sm">${safeHTML(data.error)}</div>`;
+            if (statusBar) statusBar.innerHTML = '';
+            if (analysisDiv) analysisDiv.innerHTML = '';
             return;
         }
 
-        // 兼容新旧 API 格式
-        const g = data.greeks_per_contract || data.greeks || {};
-        const total = data.total_greeks_exposure || {};
-        const risk = data.risk_assessment || {};
-        const spot = data.spot || 0;
-        const totalOi = data.total_oi || 0;
+        const gs = data.greeks_summary || {};
+        const per = gs.per_contract || {};
+        const total = gs.total_exposure || {};
+        const gex = data.gex || {};
+        const scenarios = data.scenarios || {};
+        const analysis = data.analysis;
 
-        // 基于单合约 Greeks 计算颜色阈值
-        const deltaColor = Math.abs(g.delta) > 0.5 ? 'text-[#ef4444]' : Math.abs(g.delta) > 0.2 ? 'text-[#f59e0b]' : 'text-[#149e61]';
-        const thetaColor = g.theta < -0.5 ? 'text-[#ef4444]' : g.theta < -0.1 ? 'text-[#f59e0b]' : 'text-[#149e61]';
+        // Status bar
+        if (analysis && statusBar) {
+            const gexR = analysis.gex_regime || {};
+            const pinR = analysis.pin_risk || {};
+            const ms = analysis.market_state || {};
+            const thetaPerDay = per.theta || 0;
+            const thetaColor = thetaPerDay < -100 ? '#ef4444' : thetaPerDay < -50 ? '#f59e0b' : '#149e61';
+            statusBar.innerHTML = `
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-lg">${gexR.icon || ''} ${gexR.label || '--'}</div>
+                    <div class="text-xs text-gray-400">GEX Regime</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-lg">${pinR.icon || ''} ${pinR.label || '--'}</div>
+                    <div class="text-xs text-gray-400">Pin Risk</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-lg" style="color:${ms.color || '#9497a9'}">${ms.icon || ''} ${ms.label || '--'}</div>
+                    <div class="text-xs text-gray-400">Market State</div>
+                </div>
+                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                    <div class="text-lg font-bold" style="color:${thetaColor}">$${thetaPerDay.toFixed(2)}/天</div>
+                    <div class="text-xs text-gray-400">Theta/Day</div>
+                </div>`;
+        }
 
-        container.innerHTML = `
+        // GEX Chart
+        renderGEXChart(gex, data.spot);
+
+        // Greeks Curves Chart
+        renderGreeksCurvesChart(data.by_expiry || []);
+
+        // Greeks Overview Grid
+        const riskRatings = analysis?.risk_ratings || {};
+        grid.innerHTML = `
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
-                    <div class="text-xs text-gray-400">Delta (Δ)</div>
-                    <div class="text-xl font-bold ${deltaColor}">${g.delta?.toFixed(4) || 0}</div>
-                    <div class="text-xs text-gray-500">每合约价格敏感度</div>
-                </div>
-                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
-                    <div class="text-xs text-gray-400">Gamma (Γ)</div>
-                    <div class="text-xl font-bold text-[#7132f5]">${g.gamma?.toFixed(6) || 0}</div>
-                    <div class="text-xs text-gray-500">Delta 变化率</div>
-                </div>
-                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
-                    <div class="text-xs text-gray-400">Theta (Θ)</div>
-                    <div class="text-xl font-bold ${thetaColor}">$${g.theta?.toFixed(4) || 0}</div>
-                    <div class="text-xs text-gray-500">每日时间损耗</div>
-                </div>
-                <div class="bg-gray-800/50 rounded-lg p-3 text-center">
-                    <div class="text-xs text-gray-400">Vega (V)</div>
-                    <div class="text-xl font-bold text-[#7132f5]">$${g.vega?.toFixed(4) || 0}</div>
-                    <div class="text-xs text-gray-500">IV 敏感度</div>
-                </div>
+                ${['delta', 'gamma', 'theta', 'vega'].map(g => {
+                    const rr = riskRatings[g] || {};
+                    const val = per[g] || 0;
+                    const color = rr.level === 'HIGH' ? '#ef4444' : rr.level === 'MEDIUM' ? '#f59e0b' : '#149e61';
+                    const labels = {delta: 'Delta (Δ)', gamma: 'Gamma (Γ)', theta: 'Theta (Θ)', vega: 'Vega (V)'};
+                    const fmt = g === 'gamma' ? val.toFixed(6) : g === 'delta' ? val.toFixed(4) : '$' + val.toFixed(2);
+                    return `<div class="bg-gray-800/50 rounded-lg p-3 text-center">
+                        <div class="text-xs text-gray-400">${labels[g]}</div>
+                        <div class="text-xl font-bold" style="color:${color}">${fmt}</div>
+                        <div class="text-xs" style="color:${color}">${rr.label || '--'}</div>
+                    </div>`;
+                }).join('')}
             </div>
             <div class="bg-gray-800/30 rounded-lg p-3 mb-3">
                 <div class="text-sm font-medium text-gray-300 mb-2">总风险敞口 (OI 加权)</div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                    <div class="text-center">
-                        <div class="text-gray-400">总 Delta</div>
-                        <div class="text-lg font-bold ${total.delta > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">${total.delta?.toLocaleString() || 0}</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="text-gray-400">总 Gamma</div>
-                        <div class="text-lg font-bold text-[#7132f5]">${total.gamma?.toFixed(4) || 0}</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="text-gray-400">总 Theta</div>
-                        <div class="text-lg font-bold ${total.theta > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">$${total.theta?.toLocaleString() || 0}</div>
-                    </div>
-                    <div class="text-center">
-                        <div class="text-gray-400">总 Vega</div>
-                        <div class="text-lg font-bold text-[#7132f5]">$${total.vega?.toLocaleString() || 0}</div>
-                    </div>
+                    <div class="text-center"><div class="text-gray-400">总 Delta</div>
+                        <div class="text-lg font-bold ${total.delta > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">${total.delta?.toLocaleString() || 0}</div></div>
+                    <div class="text-center"><div class="text-gray-400">总 Gamma</div>
+                        <div class="text-lg font-bold text-[#7132f5]">${total.gamma?.toFixed(4) || 0}</div></div>
+                    <div class="text-center"><div class="text-gray-400">总 Theta</div>
+                        <div class="text-lg font-bold ${total.theta > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">$${total.theta?.toLocaleString() || 0}</div></div>
+                    <div class="text-center"><div class="text-gray-400">总 Vega</div>
+                        <div class="text-lg font-bold text-[#7132f5]">$${total.vega?.toLocaleString() || 0}</div></div>
                 </div>
             </div>
             <div class="bg-gray-800/30 rounded-lg p-3">
                 <div class="text-sm font-medium text-gray-300 mb-2">情景分析</div>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                    <div class="flex justify-between">
-                        <span class="text-gray-400">若 ${currency} 下跌 10%</span>
-                        <span class="${risk.delta_pnl_if_down_10pct < 0 ? 'text-[#ef4444]' : 'text-[#149e61]'}">${risk.delta_pnl_if_down_10pct < 0 ? '' : '+'}$${risk.delta_pnl_if_down_10pct?.toLocaleString() || 0}</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-gray-400">若 ${currency} 上涨 10%</span>
-                        <span class="${risk.delta_pnl_if_up_10pct > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">+${risk.delta_pnl_if_up_10pct?.toLocaleString() || 0}</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-gray-400">若 IV 上升 5%</span>
-                        <span class="text-[#149e61]">+$${risk.vega_pnl_if_iv_up_5pct?.toLocaleString() || 0}</span>
-                    </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    <div class="flex justify-between"><span class="text-gray-400">若 ${currency} 下跌 10%</span>
+                        <span class="${scenarios.down_10pct < 0 ? 'text-[#ef4444]' : 'text-[#149e61]'}">${scenarios.down_10pct < 0 ? '' : '+'}$${scenarios.down_10pct?.toLocaleString() || 0}</span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">若 ${currency} 上涨 10%</span>
+                        <span class="${scenarios.up_10pct > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">+$${scenarios.up_10pct?.toLocaleString() || 0}</span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">若 IV 上升 5%</span>
+                        <span class="text-[#149e61]">+$${scenarios.iv_up_5pct?.toLocaleString() || 0}</span></div>
+                    <div class="flex justify-between"><span class="text-gray-400">若 IV 下降 5%</span>
+                        <span class="text-[#ef4444]">$${scenarios.iv_down_5pct?.toLocaleString() || 0}</span></div>
                 </div>
                 <div class="mt-2 text-xs text-gray-500">
-                    合约: ${data.contract_count}个 (${data.put_count} Put / ${data.call_count} Call) | 
-                    总 OI: ${totalOi.toLocaleString() || 0} | 
-                    Delta 风险: ${risk.delta_risk || '未知'}
+                    合约: ${data.contract_count}个 (${data.put_count} Put / ${data.call_count} Call) | 总 OI: ${(data.total_oi || 0).toLocaleString()}
                 </div>
             </div>`;
+
+        // Analysis Panel
+        if (analysis && analysisDiv) {
+            renderGreeksAnalysis(analysis);
+        } else if (analysisDiv) {
+            analysisDiv.innerHTML = '';
+        }
     } catch (e) {
-        container.innerHTML = `<div class="text-[#ef4444] text-sm">加载失败: ${e.message}</div>`;
+        grid.innerHTML = `<div class="text-[#ef4444] text-sm">加载失败: ${e.message}</div>`;
     }
+}
+
+function renderGEXChart(gex, spot) {
+    const canvas = document.getElementById('gexCanvas');
+    if (!canvas || !gex.by_strike || gex.by_strike.length === 0) return;
+
+    if (canvas._chart) canvas._chart.destroy();
+
+    const labels = gex.by_strike.map(e => e.strike.toLocaleString());
+    const callGex = gex.by_strike.map(e => e.call_gex);
+    const putGex = gex.by_strike.map(e => e.put_gex);
+    const netGex = gex.by_strike.map(e => e.net_gex);
+
+    canvas._chart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                { label: 'Call GEX', data: callGex, backgroundColor: 'rgba(20,158,97,0.7)', stack: 'gex' },
+                { label: 'Put GEX', data: putGex, backgroundColor: 'rgba(239,68,68,0.7)', stack: 'gex' },
+                { label: 'Net GEX', data: netGex, type: 'line', borderColor: '#3b82f6', borderWidth: 2, pointRadius: 3, fill: false, yAxisID: 'y' },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'GEX by Strike', color: '#9497a9', font: { size: 13 } },
+                legend: { labels: { color: '#9497a9', boxWidth: 12 } },
+            },
+            scales: {
+                x: { ticks: { color: '#686b82', maxRotation: 45 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { ticks: { color: '#686b82' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            }
+        }
+    });
+}
+
+function renderGreeksCurvesChart(byExpiry) {
+    const canvas = document.getElementById('greeksCurvesCanvas');
+    if (!canvas || byExpiry.length === 0) return;
+
+    if (canvas._chart) canvas._chart.destroy();
+
+    const labels = byExpiry.map(e => e.dte + 'D');
+    const deltaData = byExpiry.map(e => e.delta);
+    const gammaData = byExpiry.map(e => e.gamma);
+    const thetaData = byExpiry.map(e => e.theta);
+    const vegaData = byExpiry.map(e => e.vega);
+
+    canvas._chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                { label: 'Delta', data: deltaData, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: false, tension: 0.3 },
+                { label: 'Gamma', data: gammaData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: false, tension: 0.3, yAxisID: 'y' },
+                { label: 'Theta', data: thetaData, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', fill: false, tension: 0.3, yAxisID: 'y1' },
+                { label: 'Vega', data: vegaData, borderColor: '#149e61', backgroundColor: 'rgba(20,158,97,0.1)', fill: false, tension: 0.3, yAxisID: 'y1' },
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                title: { display: true, text: 'Greeks by Expiry', color: '#9497a9', font: { size: 13 } },
+                legend: { labels: { color: '#9497a9', boxWidth: 12 } },
+            },
+            scales: {
+                x: { ticks: { color: '#686b82' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y: { position: 'left', title: { display: true, text: 'Delta / Gamma', color: '#686b82' }, ticks: { color: '#686b82' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                y1: { position: 'right', title: { display: true, text: 'Theta / Vega ($)', color: '#686b82' }, ticks: { color: '#686b82' }, grid: { drawOnChartArea: false } },
+            }
+        }
+    });
+}
+
+function renderGreeksAnalysis(analysis) {
+    const div = document.getElementById('greeksAnalysis');
+    if (!div || !analysis) return;
+
+    let html = '<div class="card-glass rounded-xl p-4">';
+
+    // Interpretation
+    if (analysis.interpretation && analysis.interpretation.length > 0) {
+        html += '<div class="mb-3"><div class="text-sm font-medium text-gray-300 mb-2">📊 市场解读</div>';
+        for (const line of analysis.interpretation) {
+            html += `<div class="text-xs text-gray-400 mb-1">• ${safeHTML(line)}</div>`;
+        }
+        html += '</div>';
+    }
+
+    // Hedge Suggestions
+    if (analysis.hedge_suggestions && analysis.hedge_suggestions.length > 0) {
+        html += '<div><div class="text-sm font-medium text-gray-300 mb-2">💡 对冲建议</div>';
+        for (const s of analysis.hedge_suggestions) {
+            const confColor = s.confidence === 'HIGH' ? '#149e61' : '#f59e0b';
+            html += `<div class="bg-gray-800/30 rounded-lg p-3 mb-2 border-l-2" style="border-color:${confColor}">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-bold px-1.5 py-0.5 rounded" style="background:${confColor}22;color:${confColor}">${s.confidence}</span>
+                    <span class="text-sm font-medium text-gray-200">${safeHTML(s.title)}</span>
+                </div>
+                <div class="text-xs text-gray-400 mb-1">${safeHTML(s.body)}</div>
+                <div class="text-xs text-[#7132f5]">→ ${safeHTML(s.action)}</div>
+            </div>`;
+        }
+        html += '</div>';
+    }
+
+    html += '</div>';
+    div.innerHTML = html;
 }
 
 // 初始化
