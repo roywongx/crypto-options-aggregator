@@ -77,3 +77,59 @@ class TestExtractContracts:
         result = GreeksAnalyzer.analyze([], 100000)
         assert result["contract_count"] == 0
         assert result["analysis"] is None
+
+
+class TestGreeksCalculation:
+    def _make_contracts(self):
+        """Generate contracts across 2 expiries with known structure."""
+        contracts = []
+        spot = 100000
+        for dte in [7, 14]:
+            for strike_pct in [-10, -5, 0, 5, 10]:
+                strike = spot * (1 + strike_pct / 100)
+                contracts.append(_make_contract(strike, 45.0, dte, "P"))
+                contracts.append(_make_contract(strike, 38.0, dte, "C"))
+        return contracts
+
+    def test_greeks_summary_has_per_contract(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        gs = result["greeks_summary"]
+        assert "per_contract" in gs
+        for key in ["delta", "gamma", "theta", "vega"]:
+            assert key in gs["per_contract"]
+
+    def test_greeks_summary_has_total_exposure(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        gs = result["greeks_summary"]
+        assert "total_exposure" in gs
+        for key in ["delta", "gamma", "theta", "vega"]:
+            assert key in gs["total_exposure"]
+
+    def test_total_delta_nonzero(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        total = result["greeks_summary"]["total_exposure"]
+        assert total["delta"] != 0
+
+    def test_total_theta_negative(self):
+        """Theta should be negative (time decay)."""
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        total = result["greeks_summary"]["total_exposure"]
+        assert total["theta"] < 0
+
+    def test_by_expiry_populated(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        assert len(result["by_expiry"]) == 2
+        for entry in result["by_expiry"]:
+            assert "dte" in entry
+            assert "delta" in entry
+            assert "gamma" in entry
+            assert "theta" in entry
+            assert "vega" in entry
+            assert "atm_iv" in entry
+            assert "contract_count" in entry
+            assert "total_oi" in entry
+
+    def test_by_expiry_sorted_by_dte(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        dtes = [e["dte"] for e in result["by_expiry"]]
+        assert dtes == sorted(dtes)
