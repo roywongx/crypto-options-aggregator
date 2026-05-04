@@ -19,6 +19,77 @@ window.TABLE_PAGE_SIZE = TABLE_PAGE_SIZE;
 window.getApiKey = getApiKey;
 window.getFieldName = getFieldName;
 
+// Kraken Chart.js theme
+const KRAKEN_CHART_THEME = {
+    purple: '#7132f5',
+    purpleLight: 'rgba(113,50,245,0.2)',
+    positive: '#149e61',
+    positiveLight: 'rgba(20,158,97,0.2)',
+    negative: '#ef4444',
+    negativeLight: 'rgba(239,68,68,0.2)',
+    grid: 'rgba(71,73,85,0.15)',
+    text: '#9497a9',
+    textMuted: '#686b82',
+    surface: '#22232e',
+};
+window.KRAKEN_CHART_THEME = KRAKEN_CHART_THEME;
+
+// Toast notification system
+function showToast(message, type = 'info', duration = 4000) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const toast = document.createElement('div');
+    const icons = { success: 'fa-check-circle', warning: 'fa-exclamation-triangle', error: 'fa-times-circle', info: 'fa-info-circle' };
+    const colors = { success: 'border-l-4 border-[#149e61] bg-[#149e61]/10', warning: 'border-l-4 border-[#f59e0b] bg-[#f59e0b]/10', error: 'border-l-4 border-[#ef4444] bg-[#ef4444]/10', info: 'border-l-4 border-[#7132f5] bg-[#7132f5]/10' };
+    const textColors = { success: 'text-[#149e61]', warning: 'text-[#f59e0b]', error: 'text-[#ef4444]', info: 'text-[#7132f5]' };
+    toast.className = `flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg ${colors[type]} backdrop-blur-sm text-sm text-[#e4e4e7] transform transition-all duration-300 translate-x-full opacity-0 pointer-events-auto`;
+    toast.innerHTML = `<i class="fas ${icons[type]} ${textColors[type]}"></i><span>${safeHTML(message)}</span>`;
+    container.appendChild(toast);
+    requestAnimationFrame(() => { toast.classList.remove('translate-x-full', 'opacity-0'); toast.classList.add('translate-x-0', 'opacity-100'); });
+    setTimeout(() => {
+        toast.classList.remove('translate-x-0', 'opacity-100');
+        toast.classList.add('translate-x-full', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+window.showToast = showToast;
+
+// Density mode
+let _densityMode = 'standard';
+function setDensityMode(mode) {
+    _densityMode = mode;
+    const body = document.body;
+    body.classList.remove('density-compact', 'density-pro');
+    if (mode === 'compact') body.classList.add('density-compact');
+    else if (mode === 'pro') body.classList.add('density-pro');
+    document.querySelectorAll('.density-btn').forEach(btn => {
+        if (btn.dataset.density === mode) {
+            btn.classList.add('bg-[#7132f5]', 'text-white');
+            btn.classList.remove('bg-[#22232e]', 'text-[#9497a9]');
+        } else {
+            btn.classList.remove('bg-[#7132f5]', 'text-white');
+            btn.classList.add('bg-[#22232e]', 'text-[#9497a9]');
+        }
+    });
+    localStorage.setItem('densityMode', mode);
+}
+window.setDensityMode = setDensityMode;
+
+// Risk change detection
+let _lastRiskLevel = null;
+function checkRiskChange(riskLevel) {
+    if (!riskLevel || riskLevel === _lastRiskLevel) return;
+    if (_lastRiskLevel !== null) {
+        const levelMap = { 'LOW': '低', 'MEDIUM': '中', 'HIGH': '高', 'CRITICAL': '极高', 'NORMAL': '正常', 'NEAR_FLOOR': '临近底', 'ADVERSE': '逆境', 'PANIC': '恐慌' };
+        const from = levelMap[_lastRiskLevel] || _lastRiskLevel;
+        const to = levelMap[riskLevel] || riskLevel;
+        const type = ['HIGH', 'CRITICAL', 'PANIC', 'ADVERSE'].includes(riskLevel) ? 'warning' : 'info';
+        showToast(`风险等级变化: ${from} → ${to}`, type, 6000);
+    }
+    _lastRiskLevel = riskLevel;
+}
+window.checkRiskChange = checkRiskChange;
+
 // STRATEGY_PRESETS 已从 utils.js 导入
 let _currentPreset = 'standard';
 
@@ -49,7 +120,11 @@ document.addEventListener('DOMContentLoaded', () => {
     updateParamDisplay();
     setAutoRefresh(5);
     requestNotificationPermission();
-    
+
+    // Restore density mode
+    const savedDensity = localStorage.getItem('densityMode') || 'standard';
+    setDensityMode(savedDensity);
+
     window.addEventListener('online', () => {
         showAlert('网络连接已恢复', 'success');
         loadLatestData(false);
@@ -300,10 +375,10 @@ function setChartPeriod(chartType, hours) {
         const btnHours = parseInt(btn.dataset.period);
         if (btnHours === hours) {
             btn.classList.remove('bg-gray-700/50', 'hover:bg-gray-600');
-            btn.classList.add('bg-orange-500', 'text-white');
+            btn.classList.add('bg-[#7132f5]', 'text-white');
         } else {
-            btn.classList.add('bg-gray-700/50', 'hover:bg-gray-600');
-            btn.classList.remove('bg-orange-500', 'text-white');
+            btn.classList.add('bg-[#22232e]/50', 'hover:bg-[#2a2b38]');
+            btn.classList.remove('bg-[#7132f5]', 'text-white');
         }
     });
     if (chartType === 'dvol') loadDvolChartData();
@@ -350,6 +425,7 @@ async function triggerScan() {
 
         if (result.success) {
             showAlert(`扫描完成！发现 ${result.contracts_count} 个合约`, 'success');
+            showToast(`扫描完成, 发现 ${result.contracts_count} 个机会`, 'success');
             await loadLatestData(true, true);
             // 扫描完成后刷新图表
             const currency = document.getElementById('currencySelect')?.value || 'BTC';
@@ -398,13 +474,13 @@ function setCalcMode(mode) {
     optionTypeSelect.disabled = false;
 
     if (mode === 'roll') {
-        rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-orange-500/20 border border-orange-500/50 text-orange-400';
+        rollBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-[#7132f5]/20 border border-[#7132f5]/50 text-[#7132f5]';
         rollFields.classList.remove('hidden');
     } else if (mode === 'new') {
-        newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-blue-500/20 border border-blue-500/50 text-blue-400';
+        newBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-[#7132f5]/20 border border-[#7132f5]/50 text-[#7132f5]';
         newFields.classList.remove('hidden');
     } else if (mode === 'grid') {
-        gridBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-purple-500/20 border border-purple-500/50 text-purple-400';
+        gridBtn.className = 'px-4 py-2 rounded-lg font-medium text-sm transition-all bg-[#7132f5]/20 border border-[#7132f5]/50 text-[#7132f5]';
         gridFields.classList.remove('hidden');
         optionTypeSelect.disabled = true;
     }
@@ -444,7 +520,7 @@ async function submitStrategyCalc() {
 
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 计算中...';
-    wrapper.innerHTML = '<div class="text-center py-12 text-cyan-400"><i class="fas fa-spinner fa-spin text-3xl mb-2"></i><p>计算中...</p></div>';
+    wrapper.innerHTML = '<div class="text-center py-12 text-[#7132f5]"><i class="fas fa-spinner fa-spin text-3xl mb-2"></i><p>计算中...</p></div>';
 
     try {
         const response = await safeFetch(`${API_BASE}/api/strategy-calc`, {
@@ -455,12 +531,12 @@ async function submitStrategyCalc() {
         const result = await response.json();
 
         if (!result.success) {
-            wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>${safeHTML(result.error || '计算失败')}</p></div>`;
+            wrapper.innerHTML = `<div class="text-center py-12 text-[#ef4444]"><i class="fas fa-times-circle text-3xl mb-2"></i><p>${safeHTML(result.error || '计算失败')}</p></div>`;
         } else {
             displayStrategyCalcResult(result, wrapper);
         }
     } catch (error) {
-        wrapper.innerHTML = `<div class="text-center py-12 text-red-400"><i class="fas fa-times-circle text-3xl mb-2"></i><p>错误: ${safeHTML(error.message)}</p></div>`;
+        wrapper.innerHTML = `<div class="text-center py-12 text-[#ef4444]"><i class="fas fa-times-circle text-3xl mb-2"></i><p>错误: ${safeHTML(error.message)}</p></div>`;
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<i class="fas fa-magic"></i> 计算方案';
@@ -476,7 +552,7 @@ function displayStrategyCalcResult(result, wrapper) {
     const plans = result.plans || [];
     if (plans.length === 0) {
         const meta = result.meta || {};
-        wrapper.innerHTML = `<div class="text-center py-12 text-yellow-400">
+        wrapper.innerHTML = `<div class="text-center py-12 text-[#f59e0b]">
             <i class="fas fa-search text-3xl mb-2 opacity-50"></i>
             <p>未找到符合条件的方案</p>
             <p class="text-xs text-gray-500 mt-2">扫描了 ${meta.total_contracts_scanned || 0} 个合约</p>
@@ -504,15 +580,15 @@ function displayStrategyCalcResult(result, wrapper) {
     plans.forEach((plan, idx) => {
         const isBest = idx === 0;
         const metrics = plan.metrics || {};
-        html += `<tr class="hover:bg-white/5 transition ${isBest ? 'bg-green-500/10' : ''}">
-            <td class="py-3 px-2">${isBest ? '<i class="fas fa-crown text-yellow-400"></i>' : idx + 1}</td>
+        html += `<tr class="hover:bg-white/5 transition ${isBest ? 'bg-[#149e61]/10' : ''}">
+            <td class="py-3 px-2">${isBest ? '<i class="fas fa-crown text-[#f59e0b]"></i>' : idx + 1}</td>
             <td class="py-3 px-2"><span class="font-mono text-white">${safeHTML(plan.symbol)}</span><br><span class="text-[10px] text-gray-500">${safeHTML(plan.platform)}</span></td>
-            <td class="py-3 px-2 text-right font-mono text-orange-400">${plan.strike?.toLocaleString()}</td>
+            <td class="py-3 px-2 text-right font-mono text-[#7132f5]">${plan.strike?.toLocaleString()}</td>
             <td class="py-3 px-2 text-center">${plan.dte}</td>
             <td class="py-3 px-2 text-right">${metrics.delta?.toFixed(3)}</td>
-            <td class="py-3 px-2 text-right text-cyan-400">${metrics.win_rate?.toFixed(1)}%</td>
-            ${result.mode === 'roll' ? `<td class="py-3 px-2 text-right">${metrics.new_qty}</td><td class="py-3 px-2 text-right text-cyan-400">$${metrics.net_credit?.toFixed(2)}</td>` : `<td class="py-3 px-2 text-right">$${metrics.margin_required?.toFixed(2)}</td><td class="py-3 px-2 text-right text-green-400">$${metrics.gross_credit?.toFixed(2)}</td>`}
-            <td class="py-3 px-2 text-right text-yellow-400 font-bold">${metrics.roi?.toFixed(1)}%</td>
+            <td class="py-3 px-2 text-right text-[#7132f5]">${metrics.win_rate?.toFixed(1)}%</td>
+            ${result.mode === 'roll' ? `<td class="py-3 px-2 text-right">${metrics.new_qty}</td><td class="py-3 px-2 text-right text-[#7132f5]">$${metrics.net_credit?.toFixed(2)}</td>` : `<td class="py-3 px-2 text-right">$${metrics.margin_required?.toFixed(2)}</td><td class="py-3 px-2 text-right text-[#149e61]">$${metrics.gross_credit?.toFixed(2)}</td>`}
+            <td class="py-3 px-2 text-right text-[#f59e0b] font-bold">${metrics.roi?.toFixed(1)}%</td>
             <td class="py-3 px-2 text-right">${plan.score?.toFixed(4)}</td>
         </tr>`;
     });
@@ -530,16 +606,16 @@ function displayGridResult(result, wrapper) {
     
     // DVOL 信号
     html += `<div class="bg-gray-800/50 p-3 rounded-xl border border-gray-700">
-        <h4 class="text-xs font-semibold text-purple-400 mb-2"><i class="fas fa-chart-area mr-1"></i>波动率信号</h4>
+        <h4 class="text-xs font-semibold text-[#7132f5] mb-2"><i class="fas fa-chart-area mr-1"></i>波动率信号</h4>
         <div class="flex gap-4 text-xs">
             <span class="text-gray-400">信号: <span class="text-white font-bold">${safeHTML(result.dvol_signal || 'N/A')}</span></span>
             <span class="text-gray-400">推荐比例: <span class="text-white">${safeHTML(result.recommended_ratio || 'N/A')}</span></span>
-            <span class="text-gray-400">总潜在权利金: <span class="text-green-400 font-bold">$${result.total_potential_premium?.toFixed(2) || '0'}</span></span>
+            <span class="text-gray-400">总潜在权利金: <span class="text-[#149e61] font-bold">$${result.total_potential_premium?.toFixed(2) || '0'}</span></span>
         </div>
     </div>`;
 
     if (putLevels.length > 0) {
-        html += `<h4 class="text-sm font-semibold text-green-400"><i class="fas fa-arrow-down mr-1"></i>Put 网格档位 (${putLevels.length} 个)</h4>`;
+        html += `<h4 class="text-sm font-semibold text-[#149e61]"><i class="fas fa-arrow-down mr-1"></i>Put 网格档位 (${putLevels.length} 个)</h4>`;
         html += '<div class="overflow-x-auto"><table class="w-full text-xs">';
         html += '<thead class="bg-gray-800/80"><tr class="text-gray-400 border-b border-gray-700/50">';
         html += '<th class="text-left py-2 px-2 font-medium">等级</th><th class="text-right py-2 px-2 font-medium">Strike</th>';
@@ -553,16 +629,16 @@ function displayGridResult(result, wrapper) {
             const extra = level.extra || {};
             const score = level.score || 0;
             const recLevel = metrics.recommendation_level || 'OK';
-            const colorMap = { 'BEST': 'text-green-400', 'GOOD': 'text-blue-400', 'OK': 'text-yellow-400', 'CAUTION': 'text-orange-400', 'SKIP': 'text-red-400' };
+            const colorMap = { 'BEST': 'text-[#149e61]', 'GOOD': 'text-[#7132f5]', 'OK': 'text-[#f59e0b]', 'CAUTION': 'text-[#7132f5]', 'SKIP': 'text-[#ef4444]' };
             const color = colorMap[recLevel] || 'text-gray-400';
             
             html += `<tr class="hover:bg-white/5 transition">
                 <td class="py-2 px-2"><span class="${color} font-bold">${safeHTML(recLevel)}</span></td>
-                <td class="py-2 px-2 text-right font-mono text-orange-400">${level.strike?.toLocaleString()}</td>
+                <td class="py-2 px-2 text-right font-mono text-[#7132f5]">${level.strike?.toLocaleString()}</td>
                 <td class="py-2 px-2 text-center">${level.dte}</td>
-                <td class="py-2 px-2 text-right text-green-400">$${level.premium_usd?.toFixed(2)}</td>
-                <td class="py-2 px-2 text-right text-cyan-400">${metrics.win_rate?.toFixed(1)}%</td>
-                <td class="py-2 px-2 text-right text-yellow-400">${metrics.apr?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-[#149e61]">$${level.premium_usd?.toFixed(2)}</td>
+                <td class="py-2 px-2 text-right text-[#7132f5]">${metrics.win_rate?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-[#f59e0b]">${metrics.apr?.toFixed(1)}%</td>
                 <td class="py-2 px-2 text-right text-pink-400">${metrics.theta_decay?.toFixed(2) || 'N/A'}</td>
                 <td class="py-2 px-2 text-right">${score?.toFixed(4)}</td>
                 <td class="py-2 px-2 text-gray-400">${safeHTML(metrics.reason || '')}</td>
@@ -573,7 +649,7 @@ function displayGridResult(result, wrapper) {
     }
 
     if (callLevels.length > 0) {
-        html += `<h4 class="text-sm font-semibold text-red-400 mt-4"><i class="fas fa-arrow-up mr-1"></i>Call 网格档位 (${callLevels.length} 个)</h4>`;
+        html += `<h4 class="text-sm font-semibold text-[#ef4444] mt-4"><i class="fas fa-arrow-up mr-1"></i>Call 网格档位 (${callLevels.length} 个)</h4>`;
         html += '<div class="overflow-x-auto"><table class="w-full text-xs">';
         html += '<thead class="bg-gray-800/80"><tr class="text-gray-400 border-b border-gray-700/50">';
         html += '<th class="text-left py-2 px-2 font-medium">等级</th><th class="text-right py-2 px-2 font-medium">Strike</th>';
@@ -586,16 +662,16 @@ function displayGridResult(result, wrapper) {
             const metrics = level.metrics || {};
             const score = level.score || 0;
             const recLevel = metrics.recommendation_level || 'OK';
-            const colorMap = { 'BEST': 'text-green-400', 'GOOD': 'text-blue-400', 'OK': 'text-yellow-400', 'CAUTION': 'text-orange-400', 'SKIP': 'text-red-400' };
+            const colorMap = { 'BEST': 'text-[#149e61]', 'GOOD': 'text-[#7132f5]', 'OK': 'text-[#f59e0b]', 'CAUTION': 'text-[#7132f5]', 'SKIP': 'text-[#ef4444]' };
             const color = colorMap[recLevel] || 'text-gray-400';
             
             html += `<tr class="hover:bg-white/5 transition">
                 <td class="py-2 px-2"><span class="${color} font-bold">${safeHTML(recLevel)}</span></td>
-                <td class="py-2 px-2 text-right font-mono text-orange-400">${level.strike?.toLocaleString()}</td>
+                <td class="py-2 px-2 text-right font-mono text-[#7132f5]">${level.strike?.toLocaleString()}</td>
                 <td class="py-2 px-2 text-center">${level.dte}</td>
-                <td class="py-2 px-2 text-right text-green-400">$${level.premium_usd?.toFixed(2)}</td>
-                <td class="py-2 px-2 text-right text-cyan-400">${metrics.win_rate?.toFixed(1)}%</td>
-                <td class="py-2 px-2 text-right text-yellow-400">${metrics.apr?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-[#149e61]">$${level.premium_usd?.toFixed(2)}</td>
+                <td class="py-2 px-2 text-right text-[#7132f5]">${metrics.win_rate?.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right text-[#f59e0b]">${metrics.apr?.toFixed(1)}%</td>
                 <td class="py-2 px-2 text-right text-pink-400">${metrics.theta_decay?.toFixed(2) || 'N/A'}</td>
                 <td class="py-2 px-2 text-right">${score?.toFixed(4)}</td>
                 <td class="py-2 px-2 text-gray-400">${safeHTML(metrics.reason || '')}</td>
@@ -606,7 +682,7 @@ function displayGridResult(result, wrapper) {
     }
 
     if (putLevels.length === 0 && callLevels.length === 0) {
-        html += '<div class="text-center py-12 text-yellow-400"><i class="fas fa-search text-3xl mb-2 opacity-50"></i><p>未找到符合条件的网格配置</p></div>';
+        html += '<div class="text-center py-12 text-[#f59e0b]"><i class="fas fa-search text-3xl mb-2 opacity-50"></i><p>未找到符合条件的网格配置</p></div>';
     }
 
     html += '</div>';
@@ -620,7 +696,7 @@ let _strDirection = 'PUT';
 window.setStrategyMode = function(mode) {
     _strMode = mode;
     const btns = {new: 'modeNewBtn', roll: 'modeRollBtn', wheel: 'modeWheelBtn', grid: 'modeGridBtn'};
-    const colors = {new: 'bg-blue-600', roll: 'bg-orange-600', wheel: 'bg-green-600', grid: 'bg-purple-600'};
+    const colors = {new: 'bg-[#7132f5]', roll: 'bg-[#7132f5]', wheel: 'bg-[#149e61]', grid: 'bg-[#7132f5]'};
     Object.entries(btns).forEach(([k, id]) => {
         const el = document.getElementById(id);
         if (el) el.className = `px-3 py-1.5 rounded-lg text-sm font-medium ${k === mode ? colors[k] + ' text-white' : 'bg-gray-700 text-gray-300'}`;
@@ -636,8 +712,8 @@ window.setStrategyDirection = function(dir) {
     _strDirection = dir;
     const putBtn = document.getElementById('strDirPut');
     const callBtn = document.getElementById('strDirCall');
-    if (putBtn) putBtn.className = `flex-1 px-2 py-1.5 rounded-lg text-sm font-medium ${dir === 'PUT' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300'}`;
-    if (callBtn) callBtn.className = `flex-1 px-2 py-1.5 rounded-lg text-sm font-medium ${dir === 'CALL' ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-300'}`;
+    if (putBtn) putBtn.className = `flex-1 px-2 py-1.5 rounded-lg text-sm font-medium ${dir === 'PUT' ? 'bg-[#149e61] text-white' : 'bg-gray-700 text-gray-300'}`;
+    if (callBtn) callBtn.className = `flex-1 px-2 py-1.5 rounded-lg text-sm font-medium ${dir === 'CALL' ? 'bg-[#ef4444] text-white' : 'bg-gray-700 text-gray-300'}`;
     try { localStorage.setItem('strategy_direction', dir); } catch(_) {}
 };
 
@@ -730,7 +806,7 @@ function renderStrFilterSummary(summary) {
     html += '<span>总合约: <b class="text-white">' + (summary.total_contracts || 0) + '</b></span>';
     html += '<span>→ 硬性过滤: <b class="text-white">' + (summary.after_hard_filter || 0) + '</b></span>';
     html += '<span>→ DVOL过滤: <b class="text-white">' + (summary.after_dvol_filter || 0) + '</b></span>';
-    html += '<span>→ 策略过滤: <b class="text-orange-400">' + (summary.after_strategy_filter || 0) + '</b></span>';
+    html += '<span>→ 策略过滤: <b class="text-[#7132f5]">' + (summary.after_strategy_filter || 0) + '</b></span>';
     html += '</div>';
     const adj = summary.dvol_adjustments || {};
     const adjEntries = Object.entries(adj).filter(([k]) => !k.startsWith('_'));
@@ -738,10 +814,10 @@ function renderStrFilterSummary(summary) {
         html += '<div class="text-gray-500">DVOL调整: ' + adjEntries.map(([k, v]) => k + ': ' + v).join(' | ') + '</div>';
     }
     if (adj._fallback) {
-        html += '<div class="text-yellow-500 mt-1"><i class="fas fa-exclamation-triangle mr-1"></i>' + adj._fallback + '</div>';
+        html += '<div class="text-[#f59e0b] mt-1"><i class="fas fa-exclamation-triangle mr-1"></i>' + adj._fallback + '</div>';
     }
     if (summary.reason === 'no_contracts') {
-        html += '<div class="text-red-400 mt-1">' + safeHTML(summary.message || '') + '</div>';
+        html += '<div class="text-[#ef4444] mt-1">' + safeHTML(summary.message || '') + '</div>';
     }
     html += '</div>';
     return html;
@@ -770,20 +846,20 @@ function renderStrategyResults(data) {
     html += '<th class="py-2 px-2 text-center">推荐</th>';
     html += '</tr></thead><tbody>';
 
-    const recColors = {BEST:'text-green-400 bg-green-900/30', GOOD:'text-blue-400 bg-blue-900/30', OK:'text-gray-400 bg-gray-800/30', CAUTION:'text-orange-400 bg-orange-900/30', SKIP:'text-red-400 bg-red-900/30'};
+    const recColors = {BEST:'text-[#149e61] bg-[#149e61]/10', GOOD:'text-[#7132f5] bg-[#7132f5]/10', OK:'text-[#9497a9] bg-[#22232e]/30', CAUTION:'text-[#f59e0b] bg-[#f59e0b]/10', SKIP:'text-[#ef4444] bg-[#ef4444]/10'};
     const recLabels = {BEST:'强烈推荐', GOOD:'推荐', OK:'可考虑', CAUTION:'谨慎', SKIP:'不推荐'};
 
     data.recommendations.forEach((r, i) => {
         const sc = r.scores || {};
         const color = recColors[sc.recommendation] || recColors.SKIP;
         const label = recLabels[sc.recommendation] || sc.recommendation;
-        const rowBg = i === 0 ? 'bg-green-900/10' : 'hover:bg-gray-800/50';
+        const rowBg = i === 0 ? 'bg-[#149e61]/10' : 'hover:bg-gray-800/50';
 
         html += '<tr class="border-b border-gray-800/50 ' + rowBg + ' cursor-pointer strategy-row">';
         html += '<td class="py-2 px-2">' + (i === 0 ? '1' : i + 1) + '</td>';
         html += '<td class="py-2 px-2">' + safeHTML(r.platform) + '</td>';
         const _isPut = r.option_type === 'P' || r.option_type === 'PUT';
-        html += '<td class="py-2 px-2">' + (_isPut ? '<span class="text-green-400">PUT</span>' : '<span class="text-red-400">CALL</span>') + '</td>';
+        html += '<td class="py-2 px-2">' + (_isPut ? '<span class="text-[#149e61]">PUT</span>' : '<span class="text-[#ef4444]">CALL</span>') + '</td>';
         html += '<td class="py-2 px-2 text-right font-mono">' + (r.strike || 0).toLocaleString() + '</td>';
         html += '<td class="py-2 px-2 text-xs">' + safeHTML(r.expiry || '') + '</td>';
         html += '<td class="py-2 px-2 text-right">' + r.dte + '</td>';
@@ -803,7 +879,7 @@ function renderStrategyResults(data) {
         html += '<div><span class="text-gray-500">Theta:</span> <span class="text-white">' + (sc.theta || 0).toFixed(3) + '</span></div>';
         html += '<div><span class="text-gray-500">保证金:</span> <span class="text-white">$' + (r.margin_required || 0).toLocaleString() + '</span></div>';
         html += '<div><span class="text-gray-500">资本效率:</span> <span class="text-white">' + (r.capital_efficiency || 0) + '%</span></div>';
-        html += '<div><span class="text-gray-500">最大亏损:</span> <span class="text-red-400">$' + (r.risk?.max_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div><span class="text-gray-500">最大亏损:</span> <span class="text-[#ef4444]">$' + (r.risk?.max_loss || 0).toLocaleString() + '</span></div>';
         html += '<div><span class="text-gray-500">盈亏平衡:</span> <span class="text-white">' + (r.risk?.breakeven || 0).toLocaleString() + '</span></div>';
         html += '</div></td></tr>';
     });
@@ -839,34 +915,34 @@ function displayRecoveryResult(result) {
 
     const recommendedDiv = document.getElementById('recommendedPlan');
     if (recommended) {
-        const riskColor = recommended.risk_level === '低风险' ? 'text-green-400' : recommended.risk_level === '中风险' ? 'text-yellow-400' : recommended.risk_level === '高风险' ? 'text-orange-400' : 'text-red-400';
+        const riskColor = recommended.risk_level === '低风险' ? 'text-[#149e61]' : recommended.risk_level === '中风险' ? 'text-[#f59e0b]' : recommended.risk_level === '高风险' ? 'text-[#7132f5]' : 'text-[#ef4444]';
 
         recommendedDiv.innerHTML = `
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div class="text-center"><div class="text-xs text-gray-400 mb-1">推荐合约</div><div class="font-mono font-semibold text-white">${safeHTML(recommended.symbol)}</div><div class="text-xs text-gray-500">${safeHTML(recommended.platform)}</div></div>
-                <div class="text-center"><div class="text-xs text-gray-400 mb-1">卖出张数</div><div class="text-2xl font-bold text-orange-400">${recommended.num_contracts} 张</div></div>
+                <div class="text-center"><div class="text-xs text-gray-400 mb-1">卖出张数</div><div class="text-2xl font-bold text-[#7132f5]">${recommended.num_contracts} 张</div></div>
                 <div class="text-center"><div class="text-xs text-gray-400 mb-1">所需保证金</div><div class="text-xl font-semibold text-white">$${recommended.total_margin.toLocaleString()}</div></div>
-                <div class="text-center"><div class="text-xs text-gray-400 mb-1">预期净利润</div><div class="text-xl font-bold text-green-400">+$${recommended.net_profit.toLocaleString()}</div><div class="text-xs ${riskColor}">${safeHTML(recommended.risk_level)}</div></div>
+                <div class="text-center"><div class="text-xs text-gray-400 mb-1">预期净利润</div><div class="text-xl font-bold text-[#149e61]">+$${recommended.net_profit.toLocaleString()}</div><div class="text-xs ${riskColor}">${safeHTML(recommended.risk_level)}</div></div>
             </div>
-            <div class="mt-3 pt-3 border-t border-green-500/20 text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i>基于 ${recommended.apr.toFixed(1)}% APR，在 ${recommended.dte.toFixed(0)} 天内通过卖出 Put 期权获取权利金覆盖浮亏</div>
+            <div class="mt-3 pt-3 border-t border-[#149e61]/20 text-xs text-gray-400"><i class="fas fa-info-circle mr-1"></i>基于 ${recommended.apr.toFixed(1)}% APR，在 ${recommended.dte.toFixed(0)} 天内通过卖出 Put 期权获取权利金覆盖浮亏</div>
         `;
     }
 
     const tableBody = document.getElementById('recoveryPlansTable');
     if (plans.length > 0) {
         tableBody.innerHTML = plans.map((plan, index) => {
-            const riskColor = plan.risk_level === '低风险' ? 'text-green-400' : plan.risk_level === '中风险' ? 'text-yellow-400' : plan.risk_level === '高风险' ? 'text-orange-400' : 'text-red-400';
-            const profitColor = plan.net_profit >= 0 ? 'text-green-400' : 'text-red-400';
+            const riskColor = plan.risk_level === '低风险' ? 'text-[#149e61]' : plan.risk_level === '中风险' ? 'text-[#f59e0b]' : plan.risk_level === '高风险' ? 'text-[#7132f5]' : 'text-[#ef4444]';
+            const profitColor = plan.net_profit >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
 
-            return `<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition ${index === 0 ? 'bg-green-500/5' : ''}">
-                <td class="py-2 px-2">${index === 0 ? '<span class="text-green-400 font-bold"><i class="fas fa-crown"></i> 推荐</span>' : `<span class="text-gray-500">#${index + 1}</span>`}</td>
+            return `<tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition ${index === 0 ? 'bg-[#149e61]/5' : ''}">
+                <td class="py-2 px-2">${index === 0 ? '<span class="text-[#149e61] font-bold"><i class="fas fa-crown"></i> 推荐</span>' : `<span class="text-gray-500">#${index + 1}</span>`}</td>
                 <td class="py-2 px-2 font-mono text-xs">${safeHTML(plan.symbol)}</td>
                 <td class="py-2 px-2 text-center">${plan.dte.toFixed(0)}</td>
                 <td class="py-2 px-2 text-right font-mono">${Math.round(plan.strike).toLocaleString()}</td>
-                <td class="py-2 px-2 text-right font-mono text-green-400">${plan.apr.toFixed(1)}%</td>
+                <td class="py-2 px-2 text-right font-mono text-[#149e61]">${plan.apr.toFixed(1)}%</td>
                 <td class="py-2 px-2 text-right font-mono font-semibold">${plan.num_contracts}</td>
                 <td class="py-2 px-2 text-right font-mono">$${plan.total_margin.toLocaleString()}</td>
-                <td class="py-2 px-2 text-right font-mono text-blue-400">$${plan.expected_premium.toLocaleString()}</td>
+                <td class="py-2 px-2 text-right font-mono text-[#7132f5]">$${plan.expected_premium.toLocaleString()}</td>
                 <td class="py-2 px-2 text-right font-mono ${profitColor} font-semibold">${plan.net_profit >= 0 ? '+' : ''}$${plan.net_profit.toLocaleString()}</td>
                 <td class="py-2 px-2 text-center ${riskColor} text-xs">${safeHTML(plan.risk_level)}</td>
             </tr>`;
@@ -997,11 +1073,11 @@ function updateWindUI(data) {
         
         const score = data.sentiment_score || 0;
         let icon, scoreLabel, scoreClass;
-        if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-green-500/20 text-green-300'; }
-        else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-green-900/30 text-green-400'; }
+        if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-[#149e61]/20 text-[#149e61]'; }
+        else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-[#149e61]/10 text-[#149e61]'; }
         else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
-        else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-red-900/30 text-red-400'; }
-        else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-red-500/20 text-red-300'; }
+        else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-[#ef4444]/10 text-[#ef4444]'; }
+        else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-[#ef4444]/20 text-[#ef4444]'; }
         
         const iconEl = document.getElementById('windSentimentIcon');
         if (iconEl) iconEl.textContent = icon;
@@ -1061,9 +1137,9 @@ function updateTermStructureUI(data) {
         if (best && bestDiff <= maxAllowedDiff) {
             const iv = best.avg_iv;
             el.textContent = iv.toFixed(1) + '%';
-            if (iv > 70) el.className = 'font-mono text-sm font-bold text-red-400';
-            else if (iv > 55) el.className = 'font-mono text-sm font-bold text-yellow-400';
-            else el.className = 'font-mono text-sm font-bold text-cyan-400';
+            if (iv > 70) el.className = 'font-mono text-sm font-bold text-[#ef4444]';
+            else if (iv > 55) el.className = 'font-mono text-sm font-bold text-[#f59e0b]';
+            else el.className = 'font-mono text-sm font-bold text-[#7132f5]';
             if (dteEl) dteEl.textContent = best.dte !== target ? `DTE ${best.dte}` : '';
         } else {
             el.textContent = '--';
@@ -1083,14 +1159,14 @@ function updateTermStructureUI(data) {
         if (frontIv && backIv) {
             if (frontIv > backIv) {
                 structLabel.textContent = 'Backwardation';
-                structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium';
+                structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-[#ef4444]/20 text-[#ef4444] font-medium';
             } else {
                 structLabel.textContent = 'Contango';
-                structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium';
+                structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-[#149e61]/20 text-[#149e61] font-medium';
             }
             const slope = ((backIv - frontIv) / frontIv * 100).toFixed(1);
             slopeLabel.textContent = (slope > 0 ? '+' : '') + slope + '%';
-            slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+            slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-[#149e61]/10 text-[#149e61]' : 'bg-[#ef4444]/10 text-[#ef4444]');
         }
     }
     
@@ -1155,8 +1231,8 @@ function updateMaxPainUI(data) {
         if (statusCard) {
             statusCard.classList.remove('hidden');
             statusCard.className = 'mb-3 p-3 rounded-lg border ' + 
-                (gammaStatus.region === 'long' ? 'border-emerald-500/30 bg-emerald-500/5' :
-                 gammaStatus.region === 'short' ? 'border-red-500/30 bg-red-500/5' :
+                (gammaStatus.region === 'long' ? 'border-[#149e61]/30 bg-[#149e61]/5' :
+                 gammaStatus.region === 'short' ? 'border-[#ef4444]/30 bg-[#ef4444]/5' :
                  'border-gray-500/30 bg-gray-500/5');
         }
         
@@ -1169,8 +1245,8 @@ function updateMaxPainUI(data) {
         if (textEl && gammaStatus.region_cn) {
             textEl.textContent = gammaStatus.region_cn;
             textEl.className = 'text-sm font-bold ' + 
-                (gammaStatus.region === 'long' ? 'text-emerald-400' :
-                 gammaStatus.region === 'short' ? 'text-red-400' : 'text-gray-400');
+                (gammaStatus.region === 'long' ? 'text-[#149e61]' :
+                 gammaStatus.region === 'short' ? 'text-[#ef4444]' : 'text-gray-400');
         }
         
         const distEl = document.getElementById('gammaDistance');
@@ -1194,8 +1270,8 @@ function updateMaxPainUI(data) {
         if (regionDistEl && gammaStatus.distance_pct !== undefined) {
             regionDistEl.textContent = (gammaStatus.distance_pct > 0 ? '+' : '') + gammaStatus.distance_pct.toFixed(1) + '%';
             regionDistEl.className = 'font-mono text-xs ' + 
-                (gammaStatus.distance_pct > 5 ? 'text-emerald-400' :
-                 gammaStatus.distance_pct < -5 ? 'text-red-400' : 'text-gray-400');
+                (gammaStatus.distance_pct > 5 ? 'text-[#149e61]' :
+                 gammaStatus.distance_pct < -5 ? 'text-[#ef4444]' : 'text-gray-400');
         }
     }
     
@@ -1206,8 +1282,8 @@ function updateMaxPainUI(data) {
         if (adviceCard) {
             adviceCard.classList.remove('hidden');
             adviceCard.className = 'mb-3 p-2.5 rounded-lg border ' + 
-                (gammaStatus && gammaStatus.region === 'long' ? 'border-emerald-500/20 bg-emerald-500/5' :
-                 gammaStatus && gammaStatus.region === 'short' ? 'border-red-500/20 bg-red-500/5' :
+                (gammaStatus && gammaStatus.region === 'long' ? 'border-[#149e61]/20 bg-[#149e61]/5' :
+                 gammaStatus && gammaStatus.region === 'short' ? 'border-[#ef4444]/20 bg-[#ef4444]/5' :
                  'border-gray-500/20 bg-gray-500/5');
         }
         
@@ -1237,8 +1313,8 @@ function updateMaxPainUI(data) {
     if (firstExpiry && firstExpiry.mm_signal && mmEl) {
         mmEl.classList.remove('hidden');
         mmEl.className = firstExpiry.mm_signal.includes('DANGER') || firstExpiry.mm_signal.includes('危险') ? 
-            'mb-3 p-2 rounded text-xs bg-red-900/40 border border-red-500/50 text-red-300' : 
-            'mb-3 p-2 rounded text-xs bg-green-900/30 border border-green-500/30 text-green-300';
+            'mb-3 p-2 rounded text-xs bg-[#ef4444]/10 border border-[#ef4444]/50 text-[#ef4444]' : 
+            'mb-3 p-2 rounded text-xs bg-[#149e61]/10 border border-[#149e61]/30 text-[#149e61]';
         mmEl.textContent = firstExpiry.mm_signal;
     } else if (mmEl) {
         mmEl.classList.add('hidden');
@@ -1296,15 +1372,15 @@ function updateDvolDisplay(data) {
 
         if (interp) {
             dvolSignal.textContent = interp;
-            dvolSignal.className = trend.includes('上涨') ? 'text-xs mt-1 text-red-400 font-medium' : trend.includes('下跌') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+            dvolSignal.className = trend.includes('上涨') ? 'text-xs mt-1 text-[#ef4444] font-medium' : trend.includes('下跌') ? 'text-xs mt-1 text-[#149e61] font-medium' : 'text-xs mt-1 text-gray-400';
         } else if (signal) {
             dvolSignal.textContent = signal;
-            dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-red-400 font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+            dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-[#ef4444] font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-[#149e61] font-medium' : 'text-xs mt-1 text-gray-400';
         } else if (zScore !== null && zScore !== undefined) {
-            if (zScore > 2) { dvolSignal.textContent = '异常偏高 ⚠️'; dvolSignal.className = 'text-xs mt-1 text-red-400 font-medium'; }
-            else if (zScore > 1) { dvolSignal.textContent = '偏高'; dvolSignal.className = 'text-xs mt-1 text-yellow-400 font-medium'; }
-            else if (zScore < -2) { dvolSignal.textContent = '异常偏低'; dvolSignal.className = 'text-xs mt-1 text-green-400 font-medium'; }
-            else if (zScore < -1) { dvolSignal.textContent = '偏低'; dvolSignal.className = 'text-xs mt-1 text-blue-400 font-medium'; }
+            if (zScore > 2) { dvolSignal.textContent = '异常偏高 ⚠️'; dvolSignal.className = 'text-xs mt-1 text-[#ef4444] font-medium'; }
+            else if (zScore > 1) { dvolSignal.textContent = '偏高'; dvolSignal.className = 'text-xs mt-1 text-[#f59e0b] font-medium'; }
+            else if (zScore < -2) { dvolSignal.textContent = '异常偏低'; dvolSignal.className = 'text-xs mt-1 text-[#149e61] font-medium'; }
+            else if (zScore < -1) { dvolSignal.textContent = '偏低'; dvolSignal.className = 'text-xs mt-1 text-[#7132f5] font-medium'; }
             else { dvolSignal.textContent = '正常区间'; dvolSignal.className = 'text-xs mt-1 text-gray-400'; }
         }
     }
@@ -1325,16 +1401,41 @@ function updateRiskDashboardUI(data) {
     if (!data) return;
 
     // Status badge
-    const statusMap = { 'NORMAL': ['正常', 'bg-green-900/50 text-green-400'], 'NEAR_FLOOR': ['接近支撑', 'bg-yellow-900/50 text-yellow-400'], 'ADVERSE': ['逆境', 'bg-orange-900/50 text-orange-400'], 'PANIC': ['恐慌', 'bg-red-900/50 text-red-400'] };
+    const statusMap = { 'NORMAL': ['正常', 'bg-[#149e61]/10 text-[#149e61]'], 'NEAR_FLOOR': ['接近支撑', 'bg-[#f59e0b]/10 text-[#f59e0b]'], 'ADVERSE': ['逆境', 'bg-[#f59e0b]/10 text-[#7132f5]'], 'PANIC': ['恐慌', 'bg-[#ef4444]/10 text-[#ef4444]'] };
     const status = data.status || 'NORMAL';
     const [statusText, statusClass] = statusMap[status] || ['--', 'bg-gray-700 text-gray-300'];
     const badge = document.getElementById('rfStatusBadge');
     if (badge) { badge.textContent = statusText; badge.className = 'px-2 py-0.5 rounded text-xs font-medium ' + statusClass; }
 
+    // Risk change detection
+    checkRiskChange(data.risk_level || status);
+
     // Risk score
     const score = data.composite_score || 0;
     const scoreBadge = document.getElementById('riskScoreBadge');
     if (scoreBadge) { scoreBadge.textContent = score; scoreBadge.style.color = getRiskColor(score); }
+
+    // Pulse effect on risk score + update card
+    const riskCardEl = document.getElementById('riskScoreCard');
+    if (riskCardEl) {
+        riskCardEl.textContent = score;
+        riskCardEl.style.color = getRiskColor(score);
+        riskCardEl.classList.add('pulse-update');
+        setTimeout(() => riskCardEl.classList.remove('pulse-update'), 1000);
+    }
+    const riskLevelEl = document.getElementById('riskLevelCard');
+    if (riskLevelEl) riskLevelEl.textContent = data.risk_level || '综合风险';
+
+    // Support distance card
+    const supportDistEl = document.getElementById('supportDistCard');
+    if (supportDistEl && data.floors && data.spot) {
+        const regularFloor = data.floors.regular || 0;
+        if (regularFloor > 0) {
+            const distPct = ((data.spot - regularFloor) / regularFloor * 100).toFixed(1);
+            supportDistEl.textContent = distPct + '%';
+            supportDistEl.style.color = parseFloat(distPct) < 5 ? '#ef4444' : parseFloat(distPct) < 15 ? '#f59e0b' : '#149e61';
+        }
+    }
 
     // Gauge
     renderRiskGauge('riskGaugeCanvas', score);
@@ -1345,8 +1446,8 @@ function updateRiskDashboardUI(data) {
 
     // 5 Indicator Cards
     const spot = data.spot || 0;
-    if (data.max_pain && data.max_pain.price) {
-        const mp = data.max_pain.price;
+    if (data.max_pain) {
+        const mp = typeof data.max_pain === 'number' ? data.max_pain : data.max_pain.price || 0;
         const elMaxPain = document.getElementById('cardMaxPain');
         if (elMaxPain) elMaxPain.textContent = '$' + mp.toLocaleString();
         const elMaxPainDist = document.getElementById('cardMaxPainDist');
@@ -1404,15 +1505,15 @@ function updateOnchainMetrics(onchain) {
     if (!grid) return;
 
     const indicators = [
-        { id: 'MVRV', value: onchain.mvrv_ratio, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#10b981' : v < 3.5 ? '#eab308' : '#ef4444' },
-        { id: 'MVRV Z-Score', value: onchain.mvrv_z_score, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0 ? '#10b981' : v < 7 ? '#eab308' : '#ef4444' },
-        { id: 'NUPL', value: onchain.nupl, fmt: v => v != null ? (v * 100).toFixed(1) + '%' : '--', color: v => v < 0 ? '#ef4444' : v < 0.25 ? '#eab308' : v < 0.75 ? '#f97316' : '#10b981' },
-        { id: 'Mayer', value: onchain.mayer_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#10b981' : v < 2.4 ? '#eab308' : '#ef4444' },
-        { id: '200WMA', value: onchain.price_200wma, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
-        { id: 'Balanced Price', value: onchain.balanced_price, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
-        { id: '200DMA', value: onchain.price_200dma, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#60a5fa' },
-        { id: 'Halving', value: onchain.halving_days_remaining, fmt: v => v != null ? v + ' 天' : '--', color: () => '#a78bfa' },
-        { id: 'Puell', value: onchain.puell_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0.4 ? '#10b981' : v < 2.0 ? '#eab308' : '#ef4444' }
+        { id: 'MVRV', value: onchain.mvrv_ratio, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#149e61' : v < 3.5 ? '#7132f5' : '#ef4444' },
+        { id: 'MVRV Z-Score', value: onchain.mvrv_z_score, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0 ? '#149e61' : v < 7 ? '#7132f5' : '#ef4444' },
+        { id: 'NUPL', value: onchain.nupl, fmt: v => v != null ? (v * 100).toFixed(1) + '%' : '--', color: v => v < 0 ? '#ef4444' : v < 0.25 ? '#7132f5' : v < 0.75 ? '#7132f5' : '#149e61' },
+        { id: 'Mayer', value: onchain.mayer_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 1 ? '#149e61' : v < 2.4 ? '#7132f5' : '#ef4444' },
+        { id: '200WMA', value: onchain.price_200wma, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#7132f5' },
+        { id: 'Balanced Price', value: onchain.balanced_price, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#7132f5' },
+        { id: '200DMA', value: onchain.price_200dma, fmt: v => v != null ? '$' + v.toLocaleString() : '--', color: () => '#7132f5' },
+        { id: 'Halving', value: onchain.halving_days_remaining, fmt: v => v != null ? v + ' 天' : '--', color: () => '#8b5cf6' },
+        { id: 'Puell', value: onchain.puell_multiple, fmt: v => v != null ? v.toFixed(2) : '--', color: v => v < 0.4 ? '#149e61' : v < 2.0 ? '#7132f5' : '#ef4444' }
     ];
 
     grid.innerHTML = indicators.map(ind => {
@@ -1455,9 +1556,9 @@ function updateConvergenceDashboard(convergence) {
     if (convergence.signals && convergence.signals.length > 0) {
         signalsEl.innerHTML = convergence.signals.map(([icon, name, type]) => {
             const colors = {
-                'bottom': 'text-green-400 bg-green-500/10 border-green-500/30',
-                'top': 'text-red-400 bg-red-500/10 border-red-500/30',
-                'neutral': 'text-yellow-400 bg-yellow-500/10 border-yellow-500/30'
+                'bottom': 'text-[#149e61] bg-[#149e61]/10 border-[#149e61]/30',
+                'top': 'text-[#ef4444] bg-[#ef4444]/10 border-[#ef4444]/30',
+                'neutral': 'text-[#f59e0b] bg-[#f59e0b]/10 border-[#f59e0b]/30'
             };
             const c = colors[type] || colors.neutral;
             return `<div class="p-2 rounded border ${c}">${safeHTML(icon)} ${safeHTML(name)}</div>`;
@@ -1469,12 +1570,12 @@ function updateConvergenceDashboard(convergence) {
 
 function getConvergenceBg(level) {
     const bgMap = {
-        'STRONG_BOTTOM': 'bg-red-500/20',
-        'BOTTOM': 'bg-yellow-500/20',
-        'ACCUMULATION': 'bg-green-500/20',
+        'STRONG_BOTTOM': 'bg-[#ef4444]/20',
+        'BOTTOM': 'bg-[#f59e0b]/20',
+        'ACCUMULATION': 'bg-[#149e61]/20',
         'NEUTRAL': 'bg-gray-500/20',
-        'DISTRIBUTION': 'bg-orange-500/20',
-        'TOP': 'bg-red-500/20'
+        'DISTRIBUTION': 'bg-[#7132f5]/20',
+        'TOP': 'bg-[#ef4444]/20'
     };
     return bgMap[level] || 'bg-gray-500/20';
 }
@@ -1507,7 +1608,7 @@ function updateDerivativeMetrics(deriv) {
     // Overheating assessment
     const oh = deriv.overheating_assessment || {};
     const level = oh.level || 'NORMAL';
-    const levelColors = { NORMAL: 'bg-green-900/50 text-green-400', WARM: 'bg-yellow-900/50 text-yellow-400', HOT: 'bg-orange-900/50 text-orange-400', OVERHEATED: 'bg-red-900/50 text-red-400' };
+    const levelColors = { NORMAL: 'bg-[#149e61]/10 text-[#149e61]', WARM: 'bg-[#f59e0b]/10 text-[#f59e0b]', HOT: 'bg-[#f59e0b]/10 text-[#7132f5]', OVERHEATED: 'bg-[#ef4444]/10 text-[#ef4444]' };
     section.innerHTML = `<div class="flex items-center gap-3 mb-2">
         <span class="px-2 py-0.5 rounded text-xs font-medium ${levelColors[level] || levelColors.NORMAL}">${level}</span>
         <span class="text-sm text-gray-300">${oh.advice || ''}</span>
@@ -1529,11 +1630,11 @@ function updateDerivativeMetrics(deriv) {
 
 function getDerivBg(level) {
     const bgMap = {
-        'STRONG_BOTTOM': 'bg-red-500/20',
-        'BOTTOM': 'bg-yellow-500/20',
+        'STRONG_BOTTOM': 'bg-[#ef4444]/20',
+        'BOTTOM': 'bg-[#f59e0b]/20',
         'NEUTRAL': 'bg-gray-500/20',
-        'OVERHEATED': 'bg-orange-500/20',
-        'EXTREME_OVERHEAT': 'bg-red-500/20'
+        'OVERHEATED': 'bg-[#7132f5]/20',
+        'EXTREME_OVERHEAT': 'bg-[#ef4444]/20'
     };
     return bgMap[level] || 'bg-gray-500/20';
 }
@@ -1545,7 +1646,7 @@ function updatePressureTest(pt) {
     if (!section) return;
 
     const ra = pt.risk_assessment || {};
-    const levelColors = { HIGH: 'text-red-400', MEDIUM: 'text-yellow-400', LOW: 'text-green-400' };
+    const levelColors = { HIGH: 'text-[#ef4444]', MEDIUM: 'text-[#f59e0b]', LOW: 'text-[#149e61]' };
     const level = ra.risk_level || 'LOW';
 
     let html = `<div class="flex items-center gap-3 mb-3">
@@ -1570,7 +1671,7 @@ function updatePressureTest(pt) {
         </tr></thead><tbody>`;
         scenarios.forEach(s => {
             const risk = s.risk_assessment || {};
-            const rowColor = risk.risk_level === 'HIGH' ? 'text-red-400' : risk.risk_level === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400';
+            const rowColor = risk.risk_level === 'HIGH' ? 'text-[#ef4444]' : risk.risk_level === 'MEDIUM' ? 'text-[#f59e0b]' : 'text-[#149e61]';
             html += `<tr class="border-b border-gray-800 ${rowColor}">
                 <td class="py-1.5 px-2">${safeHTML(s.scenario || '')}</td>
                 <td class="text-right py-1.5 px-2 font-mono">${(s.delta || 0).toFixed(4)}</td>
@@ -1593,9 +1694,9 @@ function updateSentimentAnalysis(sentiment) {
 
     const da = sentiment.dominant_intent || {};
     const intentColors = {
-        directional_speculation: 'text-red-400', institutional_hedging: 'text-blue-400',
-        arbitrage: 'text-purple-400', market_maker_adjust: 'text-yellow-400',
-        income_generation: 'text-green-400', volatility_play: 'text-orange-400'
+        directional_speculation: 'text-[#ef4444]', institutional_hedging: 'text-[#7132f5]',
+        arbitrage: 'text-[#7132f5]', market_maker_adjust: 'text-[#f59e0b]',
+        income_generation: 'text-[#149e61]', volatility_play: 'text-[#7132f5]'
     };
     const intentLabels = {
         directional_speculation: '方向投机', institutional_hedging: '机构对冲',
@@ -1606,7 +1707,7 @@ function updateSentimentAnalysis(sentiment) {
     const intentKey = da.name || '';
     let html = `<div class="flex items-center gap-4 mb-3">
         <div><span class="text-xs text-gray-400">主导意图</span><div class="text-lg font-bold ${intentColors[intentKey] || 'text-white'}">${intentLabels[intentKey] || da.name || '--'}</div></div>
-        <div><span class="text-xs text-gray-400">风险等级</span><div class="text-lg font-bold ${da.risk_level === 'HIGH' ? 'text-red-400' : da.risk_level === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400'}">${da.risk_level || '--'}</div></div>
+        <div><span class="text-xs text-gray-400">风险等级</span><div class="text-lg font-bold ${da.risk_level === 'HIGH' ? 'text-[#ef4444]' : da.risk_level === 'MEDIUM' ? 'text-[#f59e0b]' : 'text-[#149e61]'}">${da.risk_level || '--'}</div></div>
         <div><span class="text-xs text-gray-400">信心度</span><div class="text-lg font-bold text-white">${sentiment.confidence || 0}%</div></div>
         <div><span class="text-xs text-gray-400">AI 建议</span><div class="text-sm text-gray-300">${safeHTML(sentiment.ai_recommendation || '--')}</div></div>
     </div>`;
@@ -1614,8 +1715,8 @@ function updateSentimentAnalysis(sentiment) {
     // Put/Call ratio
     const pc = sentiment.put_call_ratio || {};
     html += `<div class="flex gap-4 mb-3 text-sm">
-        <span class="text-red-400">Put: ${(pc.put_pct || 0).toFixed(1)}%</span>
-        <span class="text-green-400">Call: ${(pc.call_pct || 0).toFixed(1)}%</span>
+        <span class="text-[#ef4444]">Put: ${(pc.put_pct || 0).toFixed(1)}%</span>
+        <span class="text-[#149e61]">Call: ${(pc.call_pct || 0).toFixed(1)}%</span>
     </div>`;
 
     // Intent distribution
@@ -1627,7 +1728,7 @@ function updateSentimentAnalysis(sentiment) {
             const label = intentLabels[key] || key;
             html += `<div class="flex items-center gap-2 text-xs">
                 <span class="w-24 text-gray-400">${label}</span>
-                <div class="flex-1 bg-gray-700 rounded-full h-2"><div class="bg-blue-500 h-2 rounded-full" style="width:${Math.min(pct, 100)}%"></div></div>
+                <div class="flex-1 bg-[#22232e] rounded-full h-2"><div class="bg-[#7132f5] h-2 rounded-full" style="width:${Math.min(pct, 100)}%"></div></div>
                 <span class="text-gray-400 w-10 text-right">${pct.toFixed(0)}</span>
             </div>`;
         });
@@ -1650,9 +1751,9 @@ function updateSentimentAnalysis(sentiment) {
 }
 
 function getRiskColor(score) {
-    if (score < 30) return '#10b981';
-    if (score < 60) return '#eab308';
-    if (score < 80) return '#f97316';
+    if (score < 30) return '#149e61';
+    if (score < 60) return '#7132f5';
+    if (score < 80) return '#f59e0b';
     return '#ef4444';
 }
 
@@ -1662,16 +1763,16 @@ function renderRiskGauge(canvasId, score) {
     const ctx = canvas.getContext('2d');
     if (window._riskGaugeChart) { window._riskGaugeChart.destroy(); }
     let color;
-    if (score <= 30) color = '#10b981';
-    else if (score <= 60) color = '#eab308';
-    else if (score <= 80) color = '#f97316';
+    if (score <= 30) color = '#149e61';
+    else if (score <= 60) color = '#7132f5';
+    else if (score <= 80) color = '#f59e0b';
     else color = '#ef4444';
     window._riskGaugeChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
             datasets: [{
                 data: [score, 100 - score],
-                backgroundColor: [color, '#1f2937'],
+                backgroundColor: [color, '#22232e'],
                 borderWidth: 0
             }]
         },
@@ -1694,7 +1795,7 @@ function renderRiskGauge(canvasId, score) {
                 ctx.font = 'bold 32px sans-serif';
                 ctx.fillText(score, cx, cy - 8);
                 ctx.font = '12px sans-serif';
-                ctx.fillStyle = '#9ca3af';
+                ctx.fillStyle = '#9497a9';
                 const status = score <= 30 ? '低风险' : score <= 60 ? '中等' : score <= 80 ? '偏高' : '高风险';
                 ctx.fillText(status, cx, cy + 12);
                 ctx.restore();
@@ -1753,20 +1854,30 @@ function renderSparkline(elementId, values) {
         const y = h - ((v - min) / range) * h;
         return `${x},${y}`;
     }).join(' ');
-    el.innerHTML = `<svg width="${w}" height="${h}" class="inline-block"><polyline points="${points}" fill="none" stroke="#60a5fa" stroke-width="1.5"/></svg>`;
+    el.innerHTML = `<svg width="${w}" height="${h}" class="inline-block"><polyline points="${points}" fill="none" stroke="#7132f5" stroke-width="1.5"/></svg>`;
 }
 
 function setRiskTab(tab) {
     document.querySelectorAll('.risk-tab').forEach(btn => {
-        btn.classList.toggle('border-red-500', btn.dataset.tab === tab);
+        btn.classList.toggle('border-[#7132f5]', btn.dataset.tab === tab);
         btn.classList.toggle('text-white', btn.dataset.tab === tab);
         btn.classList.toggle('border-transparent', btn.dataset.tab !== tab);
-        btn.classList.toggle('text-gray-400', btn.dataset.tab !== tab);
+        btn.classList.toggle('text-[#9497a9]', btn.dataset.tab !== tab);
     });
     document.querySelectorAll('.risk-tab-content').forEach(el => el.classList.add('hidden'));
     const map = { onchain: 'riskTabOnchain', deriv: 'riskTabDeriv', pressure: 'riskTabPressure', sentiment: 'riskTabSentiment' };
     const target = document.getElementById(map[tab]);
-    if (target) target.classList.remove('hidden');
+    if (target) {
+        target.classList.remove('hidden');
+        // Fade-in animation
+        target.style.opacity = '0';
+        target.style.transform = 'translateY(4px)';
+        requestAnimationFrame(() => {
+            target.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+            target.style.opacity = '1';
+            target.style.transform = 'translateY(0)';
+        });
+    }
 }
 
 async function loadLLMRiskInsight(currency) {
@@ -1799,7 +1910,7 @@ function renderLLMRiskInsight(data) {
     document.getElementById('llmNarrative').textContent = data.narrative || '';
     const anomEl = document.getElementById('llmAnomalies');
     if (data.anomalies && data.anomalies.length) {
-        anomEl.innerHTML = '<div class="text-xs text-yellow-400 font-medium mb-1">⚠️ 异常告警</div>' +
+        anomEl.innerHTML = '<div class="text-xs text-[#f59e0b] font-medium mb-1">⚠️ 异常告警</div>' +
             data.anomalies.map(a => `<div class="text-sm text-gray-300 mb-1">• ${safeHTML(a)}</div>`).join('');
         anomEl.classList.remove('hidden');
     } else {
@@ -1807,7 +1918,7 @@ function renderLLMRiskInsight(data) {
     }
     const recEl = document.getElementById('llmRecommendations');
     if (data.recommendations && data.recommendations.length) {
-        recEl.innerHTML = '<div class="text-xs text-green-400 font-medium mb-1">✅ 操作建议</div>' +
+        recEl.innerHTML = '<div class="text-xs text-[#149e61] font-medium mb-1">✅ 操作建议</div>' +
             data.recommendations.map(r => `<div class="text-sm text-gray-300 mb-1">• ${safeHTML(r)}</div>`).join('');
         recEl.classList.remove('hidden');
     } else {
@@ -1833,6 +1944,9 @@ function updateMacroIndicators(data) {
         spotEl.textContent = `$${Math.round(spotPrice).toLocaleString()}`;
         spotEl.classList.remove('text-gray-500');
         currentSpotPrice = spotPrice;
+        // Pulse effect on price update
+        spotEl.classList.add('pulse-update');
+        setTimeout(() => spotEl.classList.remove('pulse-update'), 1000);
     } else {
         spotEl.textContent = '--';
     }
@@ -1850,15 +1964,15 @@ function updateMacroIndicators(data) {
     if (dvolSignal) {
         if (dvolInterp) {
             dvolSignal.textContent = dvolInterp;
-            dvolSignal.className = dvolTrend.includes('上涨') ? 'text-xs mt-1 text-red-400 font-medium' : dvolTrend.includes('下跌') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+            dvolSignal.className = dvolTrend.includes('上涨') ? 'text-xs mt-1 text-[#ef4444] font-medium' : dvolTrend.includes('下跌') ? 'text-xs mt-1 text-[#149e61] font-medium' : 'text-xs mt-1 text-gray-400';
         } else if (signal) {
             dvolSignal.textContent = signal;
-            dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-red-400 font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-green-400 font-medium' : 'text-xs mt-1 text-gray-400';
+            dvolSignal.className = signal.includes('偏高') ? 'text-xs mt-1 text-[#ef4444] font-medium' : signal.includes('偏低') ? 'text-xs mt-1 text-[#149e61] font-medium' : 'text-xs mt-1 text-gray-400';
         } else if (zScore !== null && zScore !== undefined) {
-            if (zScore > 2) { dvolSignal.textContent = '异常偏高 ⚠️'; dvolSignal.className = 'text-xs mt-1 text-red-400 font-medium'; }
-            else if (zScore > 1) { dvolSignal.textContent = '偏高'; dvolSignal.className = 'text-xs mt-1 text-yellow-400 font-medium'; }
-            else if (zScore < -2) { dvolSignal.textContent = '异常偏低'; dvolSignal.className = 'text-xs mt-1 text-green-400 font-medium'; }
-            else if (zScore < -1) { dvolSignal.textContent = '偏低'; dvolSignal.className = 'text-xs mt-1 text-blue-400 font-medium'; }
+            if (zScore > 2) { dvolSignal.textContent = '异常偏高 ⚠️'; dvolSignal.className = 'text-xs mt-1 text-[#ef4444] font-medium'; }
+            else if (zScore > 1) { dvolSignal.textContent = '偏高'; dvolSignal.className = 'text-xs mt-1 text-[#f59e0b] font-medium'; }
+            else if (zScore < -2) { dvolSignal.textContent = '异常偏低'; dvolSignal.className = 'text-xs mt-1 text-[#149e61] font-medium'; }
+            else if (zScore < -1) { dvolSignal.textContent = '偏低'; dvolSignal.className = 'text-xs mt-1 text-[#7132f5] font-medium'; }
             else { dvolSignal.textContent = '正常区间'; dvolSignal.className = 'text-xs mt-1 text-gray-400'; }
         } else {
             dvolSignal.textContent = '--';
@@ -1866,8 +1980,6 @@ function updateMacroIndicators(data) {
         }
     }
 
-    const largeTradesEl = document.getElementById('largeTradesCount');
-    if (largeTradesEl) largeTradesEl.textContent = data.large_trades_count || 0;
 }
 
 let _expandedRow = null;
@@ -1916,8 +2028,8 @@ function renderTablePage() {
 
     let highRiskContracts = [];
     const rowsHtml = displayContracts.map((contract, idx) => {
-        const platformColor = contract.platform === 'Deribit' ? 'text-blue-400' : 'text-yellow-400';
-        const liqColor = contract.liquidity_score >= 70 ? 'text-green-400' : contract.liquidity_score >= 40 ? 'text-yellow-400' : 'text-red-400';
+        const platformColor = contract.platform === 'Deribit' ? 'text-[#7132f5]' : 'text-[#f59e0b]';
+        const liqColor = contract.liquidity_score >= 70 ? 'text-[#149e61]' : contract.liquidity_score >= 40 ? 'text-[#f59e0b]' : 'text-[#ef4444]';
         const deltaAbs = Math.abs(Number(contract.delta) || 0);
 
         const symbol = safeHTML(contract.symbol || contract.instrument_name || 'N/A');
@@ -1937,22 +2049,22 @@ function renderTablePage() {
 
         if (isHighDelta && isNearStrike) {
             riskClass = 'risk-alert-high';
-            riskBadge = '<span class="risk-badge bg-red-500 text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation-triangle"></i> 极高</span>';
+            riskBadge = '<span class="risk-badge bg-[#ef4444] text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation-triangle"></i> 极高</span>';
             highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` });
         } else if (isHighDelta) {
             riskClass = 'risk-alert-high';
-            riskBadge = '<span class="risk-badge bg-red-500 text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation"></i> 高</span>';
+            riskBadge = '<span class="risk-badge bg-[#ef4444] text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation"></i> 高</span>';
             highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45` });
         } else if (isNearStrike) {
             riskClass = 'risk-alert-medium';
-            riskBadge = '<span class="bg-orange-500 text-[10px] text-white px-1.5 py-0.5 rounded"><i class="fas fa-exclamation-circle"></i> 接近</span>';
+            riskBadge = '<span class="bg-[#f59e0b] text-[10px] text-white px-1.5 py-0.5 rounded"><i class="fas fa-exclamation-circle"></i> 接近</span>';
         } else if (deltaAbs > 0.35) {
-            riskBadge = '<span class="bg-yellow-500/80 text-[10px] text-white px-1.5 py-0.5 rounded">警告</span>';
+            riskBadge = '<span class="bg-[#f59e0b]/100 text-[10px] text-white px-1.5 py-0.5 rounded">警告</span>';
         } else {
-            riskBadge = '<span class="bg-green-500/50 text-[10px] text-white px-1.5 py-0.5 rounded">正常</span>';
+            riskBadge = '<span class="bg-[#149e61]/50 text-[10px] text-white px-1.5 py-0.5 rounded">正常</span>';
         }
 
-        const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-orange-400' : 'text-gray-400';
+        const spreadColor = (contract.spread_pct || 0) > 5 ? 'text-[#7132f5]' : 'text-gray-400';
         const lossVal = Math.abs(Number(contract.loss_at_10pct) || 0);
         const breakeven = Number(contract.breakeven) || 0;
         const oi = Number(contract.open_interest) || 0;
@@ -1976,29 +2088,29 @@ function renderTablePage() {
 
         return `<tr class="hover:bg-white/[0.02] transition ${riskClass}">
             <td class="py-2 px-3 text-center"><span class="${platformColor} text-xs font-semibold">${safeHTML(contract.platform)}</span></td>
-            <td class="py-2 px-2 text-center"><span class="${isPut ? 'text-green-400' : 'text-blue-400'} text-xs font-bold">${safeHTML(contract.option_type || 'PUT')}</span></td>
+            <td class="py-2 px-2 text-center"><span class="${isPut ? 'text-[#149e61]' : 'text-[#7132f5]'} text-xs font-bold">${safeHTML(contract.option_type || 'PUT')}</span></td>
             <td class="py-2 px-2 text-center font-mono text-xs tabular-nums">${safeHTML(symbol.split('-')[1] || '')}</td>
             <td class="py-2 px-2 text-center text-xs tabular-nums">${dte.toFixed(0)}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums">$${Math.round(strikeVal).toLocaleString()}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-red-400' : deltaAbs > 0.25 ? 'text-yellow-400' : 'text-green-400'}">${deltaAbs.toFixed(4)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${theta > 5 ? 'text-emerald-400' : theta > 0 ? 'text-green-300' : 'text-gray-500'}" title="每日时间价值衰减">${theta > 0 ? '+' : ''}${theta.toFixed(2)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-orange-400' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-yellow-400' : 'text-gray-300'}">${vega.toFixed(1)}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${iv ? (iv >= 80 ? 'text-red-400' : iv >= 50 ? 'text-yellow-400' : 'text-emerald-400') : 'text-gray-300'}">${iv ? iv.toFixed(1) + '%' : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-green-400 tabular-nums">${apr.toFixed(1)}%</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (isPut ? (pop >= 70 ? 'text-emerald-400' : pop >= 50 ? 'text-yellow-300' : 'text-orange-400') : (pop <= 30 ? 'text-emerald-400' : pop <= 50 ? 'text-yellow-300' : 'text-red-400')) : 'text-gray-500'}" title="${isPut ? '到期不被行权概率' : '被行权概率(卖飞风险)'}">${pop ? (isPut ? pop.toFixed(0) + '%' : (100 - pop).toFixed(0) + '%飞') : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-yellow-300/90">$${premium.toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${deltaAbs > 0.35 ? 'text-[#ef4444]' : deltaAbs > 0.25 ? 'text-[#f59e0b]' : 'text-[#149e61]'}">${deltaAbs.toFixed(4)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${theta > 5 ? 'text-[#149e61]' : theta > 0 ? 'text-[#149e61]' : 'text-gray-500'}" title="每日时间价值衰减">${theta > 0 ? '+' : ''}${theta.toFixed(2)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${gamma > 0.15 ? 'text-[#7132f5]' : 'text-gray-300'}">${gamma.toFixed(4)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${vega > 50 ? 'text-[#f59e0b]' : 'text-gray-300'}">${vega.toFixed(1)}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${iv ? (iv >= 80 ? 'text-[#ef4444]' : iv >= 50 ? 'text-[#f59e0b]' : 'text-[#149e61]') : 'text-gray-300'}">${iv ? iv.toFixed(1) + '%' : '-'}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs font-bold text-[#149e61] tabular-nums">${apr.toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${pop ? (isPut ? (pop >= 70 ? 'text-[#149e61]' : pop >= 50 ? 'text-[#f59e0b]' : 'text-[#7132f5]') : (pop <= 30 ? 'text-[#149e61]' : pop <= 50 ? 'text-[#f59e0b]' : 'text-[#ef4444]')) : 'text-gray-500'}" title="${isPut ? '到期不被行权概率' : '被行权概率(卖飞风险)'}">${pop ? (isPut ? pop.toFixed(0) + '%' : (100 - pop).toFixed(0) + '%飞') : '-'}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-[#f59e0b]/90">$${premium.toLocaleString(undefined, {maximumFractionDigits: 2})}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-400" title="开仓保证金需求">$${marginReq.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${capEff >= 15 ? 'text-emerald-400' : capEff >= 8 ? 'text-green-300' : 'text-gray-400'}" title="权利金/保证金">${capEff.toFixed(1)}%</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${supportDist !== null && supportDist !== undefined ? (supportDist >= 10 ? 'text-emerald-400' : supportDist >= 5 ? 'text-yellow-300' : 'text-red-400') : 'text-gray-600'}" title="PUT行权价到支撑位距离">${supportDist !== null && supportDist !== undefined ? supportDist.toFixed(1) + '%' : (isPut ? '-' : 'N/A')}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums font-semibold ${capEff >= 15 ? 'text-[#149e61]' : capEff >= 8 ? 'text-[#149e61]' : 'text-gray-400'}" title="权利金/保证金">${capEff.toFixed(1)}%</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${supportDist !== null && supportDist !== undefined ? (supportDist >= 10 ? 'text-[#149e61]' : supportDist >= 5 ? 'text-[#f59e0b]' : 'text-[#ef4444]') : 'text-gray-600'}" title="PUT行权价到支撑位距离">${supportDist !== null && supportDist !== undefined ? supportDist.toFixed(1) + '%' : (isPut ? '-' : 'N/A')}</td>
             <td class="py-2 px-2 text-center"><span class="${liqColor} text-xs font-medium">${liquidityScore}</span></td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-red-400/80">$${lossVal.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-blue-300/80">$${breakeven.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${bePct ? (bePct >= 10 ? 'text-emerald-400' : bePct >= 5 ? 'text-yellow-300' : 'text-orange-400') : 'text-gray-500'}">${bePct ? bePct.toFixed(1) + '%' : '-'}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-[#ef4444]/80">$${lossVal.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-[#8b5cf6]/80">$${breakeven.toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${bePct ? (bePct >= 10 ? 'text-[#149e61]' : bePct >= 5 ? 'text-[#f59e0b]' : 'text-[#7132f5]') : 'text-gray-500'}">${bePct ? bePct.toFixed(1) + '%' : '-'}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums text-gray-400">${oi.toLocaleString()}</td>
             <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${spreadColor}">${spreadPct.toFixed(2)}%</td>
-            <td class="py-2 px-2 text-center font-mono text-xs tabular-nums ${ivRank ? (ivRank >= 70 ? 'text-red-400' : ivRank <= 30 ? 'text-emerald-400' : 'text-gray-400') : 'text-gray-500'}">${ivRank ? String(ivRank).split('.')[0] : '-'}</td>
-            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${score !== undefined ? (score >= 0.7 ? "text-emerald-400 font-bold" : score >= 0.5 ? "text-green-300" : score >= 0.3 ? "text-yellow-300" : "text-gray-500") : "text-gray-500"}" title="加权评分: APR(25%)+POP(25%)+安全垫(20%)+流动性(15%)+IV中性(15%)">${score !== undefined ? score.toFixed(3) : "-"}</td>
+            <td class="py-2 px-2 text-center font-mono text-xs tabular-nums ${ivRank ? (ivRank >= 70 ? 'text-[#ef4444]' : ivRank <= 30 ? 'text-[#149e61]' : 'text-gray-400') : 'text-gray-500'}">${ivRank ? String(ivRank).split('.')[0] : '-'}</td>
+            <td class="py-2 px-2 text-right font-mono text-xs tabular-nums ${score !== undefined ? (score >= 0.7 ? "text-[#149e61] font-bold" : score >= 0.5 ? "text-[#149e61]" : score >= 0.3 ? "text-[#f59e0b]" : "text-gray-500") : "text-gray-500"}" title="加权评分: APR(25%)+POP(25%)+安全垫(20%)+流动性(15%)+IV中性(15%)">${score !== undefined ? score.toFixed(3) : "-"}</td>
             <td class="py-2 px-3 text-center">${riskBadge}</td>
         </tr>`;
     }).join('');
@@ -2014,6 +2126,9 @@ function renderTablePage() {
             body: `检测到 ${highRiskContracts.length} 个高风险合约，建议执行滚仓操作`,
             icon: '/static/favicon.ico'
         });
+    }
+    if (highRiskContracts.length > 0) {
+        showToast(`高风险预警! ${highRiskContracts.length} 个合约 Delta 过高`, 'error', 8000);
     }
 }
 
@@ -2050,9 +2165,9 @@ function showRollSuggestion(idx) {
 
     let alternativesHtml = '';
     if (alternatives.length > 0) {
-        alternativesHtml = `<div class="mt-4"><h4 class="font-semibold text-green-400 mb-2">建议滚仓至：</h4>${alternatives.map(alt => `
+        alternativesHtml = `<div class="mt-4"><h4 class="font-semibold text-[#149e61] mb-2">建议滚仓至：</h4>${alternatives.map(alt => `
             <div class="bg-gray-800/50 rounded-lg p-3 mb-2">
-                <div class="flex justify-between"><span class="font-mono">${safeHTML(alt.symbol)}</span><span class="text-green-400">${alt.apr.toFixed(1)}% APR</span></div>
+                <div class="flex justify-between"><span class="font-mono">${safeHTML(alt.symbol)}</span><span class="text-[#149e61]">${alt.apr.toFixed(1)}% APR</span></div>
                 <div class="text-xs text-gray-400 mt-1">Strike: ${Math.round(alt.strike).toLocaleString()} | DTE: ${alt.dte.toFixed(0)} | Delta: ${Math.abs(alt.delta).toFixed(3)}</div>
             </div>
         `).join('')}</div>`;
@@ -2060,19 +2175,19 @@ function showRollSuggestion(idx) {
 
     content.innerHTML = `
         <div class="space-y-4">
-            <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                <h4 class="font-semibold text-red-400 mb-2">当前持仓风险</h4>
+            <div class="bg-[#ef4444]/10 border border-[#ef4444]/30 rounded-lg p-4">
+                <h4 class="font-semibold text-[#ef4444] mb-2">当前持仓风险</h4>
                 <div class="grid grid-cols-2 gap-4 text-sm">
                     <div><span class="text-gray-400">合约:</span> <span class="font-mono">${safeHTML(contract.symbol)}</span></div>
-                    <div><span class="text-gray-400">Delta:</span> <span class="text-red-400 font-bold">${contract.delta.toFixed(3)}</span></div>
+                    <div><span class="text-gray-400">Delta:</span> <span class="text-[#ef4444] font-bold">${contract.delta.toFixed(3)}</span></div>
                     <div><span class="text-gray-400">行权价:</span> $${Math.round(contract.strike).toLocaleString()}</div>
-                    <div><span class="text-gray-400">距离现货:</span> <span class="${distancePct < 2 ? 'text-red-400' : ''}">${distancePct.toFixed(1)}%</span></div>
+                    <div><span class="text-gray-400">距离现货:</span> <span class="${distancePct < 2 ? 'text-[#ef4444]' : ''}">${distancePct.toFixed(1)}%</span></div>
                 </div>
-                <div class="mt-2 text-sm"><span class="text-gray-400">-10%亏损预估:</span> <span class="text-red-400 font-bold">-$${estimatedLoss.toLocaleString()}</span></div>
+                <div class="mt-2 text-sm"><span class="text-gray-400">-10%亏损预估:</span> <span class="text-[#ef4444] font-bold">-$${estimatedLoss.toLocaleString()}</span></div>
             </div>
             ${alternativesHtml}
-            <div class="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-                <h4 class="font-semibold text-blue-400 mb-2">操作建议</h4>
+            <div class="bg-[#7132f5]/10 border border-[#7132f5]/30 rounded-lg p-4">
+                <h4 class="font-semibold text-[#7132f5] mb-2">操作建议</h4>
                 <p class="sm:text-gray-300">建议平仓当前合约，卖出更低行权价的远期Put，获取更高权利金的同时下移防线。</p>
             </div>
         </div>
@@ -2098,6 +2213,10 @@ const flowSugg = {
 function updateLargeTrades(trades, count) {
     const container = document.getElementById('largeTradesList');
     const titleCount = document.getElementById('largeTradesTitleCount');
+
+    // Update top-level card
+    const largeTradesEl = document.getElementById('largeTradesCount');
+    if (largeTradesEl) largeTradesEl.textContent = count || 0;
 
     if (!container) { console.warn('大单风向标: container not found'); return; }
 
@@ -2164,10 +2283,10 @@ function updateLargeTrades(trades, count) {
     }
 
     const sevStyles = {
-        mega:   { border: 'border-l-red-500',    bg: 'bg-red-500/15',    badge: 'bg-red-600 text-white',       label: '巨鲸', icon: '🐋' },
-        high:   { border: 'border-l-orange-500',  bg: 'bg-orange-500/10', badge: 'bg-orange-500 text-white',    label: '大单', icon: '🔥' },
-        medium: { border: 'border-l-yellow-500',  bg: 'bg-yellow-500/8',  badge: 'bg-yellow-500 text-gray-900', label: '中单', icon: '⚡' },
-        low:    { border: 'border-l-blue-400',    bg: 'bg-blue-500/5',    badge: 'bg-blue-500 text-white',      label: '小单', icon: '📊' },
+        mega:   { border: 'border-l-[#ef4444]',    bg: 'bg-[#ef4444]/15',    badge: 'bg-[#ef4444] text-white',       label: '巨鲸', icon: '🐋' },
+        high:   { border: 'border-l-[#f59e0b]',  bg: 'bg-[#7132f5]/10', badge: 'bg-[#f59e0b] text-white',    label: '大单', icon: '🔥' },
+        medium: { border: 'border-l-[#f59e0b]',  bg: 'bg-[#f59e0b]/10',  badge: 'bg-[#f59e0b] text-gray-900', label: '中单', icon: '⚡' },
+        low:    { border: 'border-l-[#7132f5]',    bg: 'bg-[#7132f5]/5',    badge: 'bg-[#7132f5] text-white',      label: '小单', icon: '📊' },
         info:   { border: 'border-l-gray-600',    bg: 'bg-gray-800/30',   badge: 'bg-gray-600 text-white',      label: '',     icon: '' }
     };
 
@@ -2190,9 +2309,9 @@ function updateLargeTrades(trades, count) {
 
         let dirIcon, dirColor, dirLabel;
         if (dir === 'buy') {
-            dirIcon = '▲'; dirColor = 'text-red-400'; dirLabel = '买';
+            dirIcon = '▲'; dirColor = 'text-[#ef4444]'; dirLabel = '买';
         } else if (dir === 'sell') {
-            dirIcon = '▼'; dirColor = 'text-green-400'; dirLabel = '卖';
+            dirIcon = '▼'; dirColor = 'text-[#149e61]'; dirLabel = '卖';
         } else {
             dirIcon = '—'; dirColor = 'text-gray-400'; dirLabel = '';
         }
@@ -2200,7 +2319,7 @@ function updateLargeTrades(trades, count) {
         const optIsPut = optType && optType.toUpperCase().startsWith('P');
         const optTag = optType
             ? '<span class="px-1 py-0.5 rounded text-[10px] font-bold ' +
-              (optIsPut ? 'bg-purple-500/30 text-purple-300' : 'bg-emerald-500/30 text-emerald-300') +
+              (optIsPut ? 'bg-[#7132f5]/30 text-[#8b5cf6]' : 'bg-[#149e61]/30 text-[#149e61]') +
               '">' + (optIsPut ? 'P' : 'C') + '</span>'
             : '';
 
@@ -2240,12 +2359,12 @@ function updateLargeTrades(trades, count) {
                 <span class="font-mono text-white font-medium truncate" style="max-width:130px" title="${inst}">${inst || '--'}</span>
                 ${optTag}${blockTag}
                 <span class="text-gray-500">${strikeStr}</span>
-                <span class="text-yellow-300 font-bold ml-auto">${notionalStr}</span>
+                <span class="text-[#f59e0b] font-bold ml-auto">${notionalStr}</span>
                 ${sevStyle.label ? '<span class="' + sevStyle.badge + ' text-[10px] px-1.5 py-0.5 rounded font-bold ml-1">' + sevStyle.icon + ' ' + sevStyle.label + '</span>' : ''}
             </div>
             <div class="flex items-center gap-1.5 mt-0.5 text-[11px]">
                 <span class="${dirColor}">${dirLabel}</span>
-                ${flowCN ? '<span class="text-cyan-300">' + flowCN + '</span>' : ''}
+                ${flowCN ? '<span class="text-[#8b5cf6]">' + flowCN + '</span>' : ''}
                 ${flowHint ? '<span class="text-gray-500">· ' + flowHint + '</span>' : ''}
                 ${premiumStr ? '<span class="text-gray-400 ml-1">权利金' + premiumStr + '</span>' : ''}
                 ${volStr ? '<span class="text-gray-500">' + volStr + '</span>' : ''}
@@ -2279,8 +2398,8 @@ async function loadMacroData() {
             if (val !== null) {
                 fgEl.textContent = val;
                 fgEl.className = 'text-2xl font-bold ' + (
-                    val <= 20 ? 'text-red-400' : val <= 40 ? 'text-orange-400' : 
-                    val <= 60 ? 'text-yellow-400' : val <= 80 ? 'text-green-400' : 'text-emerald-400'
+                    val <= 20 ? 'text-[#ef4444]' : val <= 40 ? 'text-[#7132f5]' : 
+                    val <= 60 ? 'text-[#f59e0b]' : val <= 80 ? 'text-[#149e61]' : 'text-[#149e61]'
                 );
                 fgLabel.textContent = label;
             }
@@ -2294,7 +2413,7 @@ async function loadMacroData() {
             if (rate !== null) {
                 frEl.textContent = rate.toFixed(4) + '%';
                 frEl.className = 'text-2xl font-bold ' + (
-                    rate < -0.1 ? 'text-red-400' : rate > 0.1 ? 'text-emerald-400' : 'text-gray-300'
+                    rate < -0.1 ? 'text-[#ef4444]' : rate > 0.1 ? 'text-[#149e61]' : 'text-gray-300'
                 );
                 frLabel.textContent = sentiment;
             }
@@ -2369,7 +2488,7 @@ async function loadStats() {
 
 let alertQueue = [];
 function showAlert(message, type = 'info') {
-    const colors = { success: 'border-green-500 bg-green-500/10 text-green-400', error: 'border-red-500 bg-red-500/10 text-red-400', warning: 'border-yellow-500 bg-yellow-500/10 text-yellow-400', info: 'border-blue-500 bg-blue-500/10 text-blue-400' };
+    const colors = { success: 'border-[#149e61] bg-[#149e61]/10 text-[#149e61]', error: 'border-[#ef4444] bg-[#ef4444]/10 text-[#ef4444]', warning: 'border-[#f59e0b] bg-[#f59e0b]/10 text-[#f59e0b]', info: 'border-[#7132f5] bg-[#7132f5]/10 text-[#7132f5]' };
     const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
     const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
@@ -2450,7 +2569,7 @@ function switchView(viewName) {
     });
     const activeBtn = document.getElementById('view' + viewName.charAt(0).toUpperCase() + viewName.slice(1));
     if (activeBtn) {
-        const colors = { sellput: 'bg-green-500/20 text-green-400 border-green-500/30', coveredcall: 'bg-blue-500/20 text-blue-400 border-blue-500/30', wheel: 'bg-purple-500/20 text-purple-400 border-purple-500/30', all: 'bg-orange-500/20 text-orange-400 border-orange-500/30' };
+        const colors = { sellput: 'bg-[#149e61]/20 text-[#149e61] border-[#149e61]/30', coveredcall: 'bg-[#7132f5]/20 text-[#7132f5] border-[#7132f5]/30', wheel: 'bg-[#7132f5]/20 text-[#7132f5] border-[#7132f5]/30', all: 'bg-[#7132f5]/20 text-[#7132f5] border-[#7132f5]/30' };
         activeBtn.className = `px-2.5 py-1 rounded text-xs font-medium ${colors[viewName] || ''} border transition`;
     }
 
@@ -2546,7 +2665,7 @@ function updateSortIcons(activeField, direction) {
 
         const field = th.dataset.sort;
         if (field === activeField) {
-            icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} text-xs text-orange-400`;
+            icon.className = `fas fa-sort-${direction === 'asc' ? 'up' : 'down'} text-xs text-[#7132f5]`;
         } else {
             icon.className = 'fas fa-sort text-xs opacity-50';
         }
@@ -2570,14 +2689,13 @@ function applyPreset(presetName) {
     // 更新按钮激活状态
     ['Con', 'Std', 'Agg'].forEach(id => {
         const btn = document.getElementById('preset' + id);
-        btn.classList.remove('ring-1', 'bg-blue-500/15', 'text-blue-300', 'ring-blue-500/30',
-            'bg-green-500/15', 'text-green-300', 'ring-green-500/30',
-            'bg-orange-500/15', 'text-orange-300', 'ring-orange-500/30');
+        btn.classList.remove('ring-1', 'bg-[#7132f5]/15', 'text-[#8b5cf6]', 'ring-[#7132f5]/30',
+            'bg-[#149e61]/15', 'text-[#149e61]', 'ring-[#149e61]/30');
     });
 
     const activeBtn = document.getElementById('preset' +
         (presetName === 'conservative' ? 'Con' : presetName === 'standard' ? 'Std' : 'Agg'));
-    const colorMap = {conservative: 'green', standard: 'blue', aggressive: 'orange'};
+    const colorMap = {conservative: '#149e61', standard: '#7132f5', aggressive: '#7132f5'};
     const c = colorMap[presetName];
     activeBtn.classList.add(`bg-${c}-500/15`, `text-${c}-300`, `ring-1`, `ring-${c}-500/30`);
 
@@ -2643,10 +2761,10 @@ async function showDvolAdvice(currency) {
 
             if (level === 'conservative') {
                 badge.textContent = '已收紧参数';
-                badge.className = 'ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300';
+                badge.className = 'ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[#ef4444]/20 text-[#ef4444]';
             } else if (level === 'aggressive') {
                 badge.textContent = '已放宽参数';
-                badge.className = 'ml-auto text-[10px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-300';
+                badge.className = 'ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[#149e61]/20 text-[#149e61]';
             } else {
                 badge.textContent = '';
             }
@@ -2676,11 +2794,11 @@ async function loadWindAnalysis() {
             summaryCard?.classList.remove('hidden');
             const score = data.sentiment_score || 0;
             let icon, scoreLabel, scoreClass;
-            if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-green-500/20 text-green-300'; }
-            else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-green-900/30 text-green-400'; }
+            if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-[#149e61]/20 text-[#149e61]'; }
+            else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-[#149e61]/10 text-[#149e61]'; }
             else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
-            else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-red-900/30 text-red-400'; }
-            else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-red-500/20 text-red-300'; }
+            else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-[#ef4444]/10 text-[#ef4444]'; }
+            else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-[#ef4444]/20 text-[#ef4444]'; }
 
             const iconEl = document.getElementById('windSentimentIcon');
             if (iconEl) iconEl.textContent = icon;
@@ -2708,10 +2826,10 @@ async function loadWindAnalysis() {
             if (flowBreakdownEl && data.flow_breakdown) {
                 flowBreakdownEl.innerHTML = data.flow_breakdown.map(f => {
                     const pct = f.count > 0 ? Math.round(f.count / (summary.total_trades || 1) * 100) : 0;
-                    const colorClass = f.type === 'sell_put' ? 'text-green-400' :
-                                      f.type === 'buy_call' ? 'text-blue-400' :
-                                      f.type === 'buy_put' ? 'text-red-400' :
-                                      f.type === 'sell_call' ? 'text-yellow-400' : 'text-gray-400';
+                    const colorClass = f.type === 'sell_put' ? 'text-[#149e61]' :
+                                      f.type === 'buy_call' ? 'text-[#7132f5]' :
+                                      f.type === 'buy_put' ? 'text-[#ef4444]' :
+                                      f.type === 'sell_call' ? 'text-[#f59e0b]' : 'text-gray-400';
                     return `<div class="flex justify-between items-center text-xs">
                         <span class="${colorClass}">${safeHTML(f.label)}</span>
                         <span class="text-gray-300 font-mono">${f.count} <span class="text-gray-500">(${pct}%)</span></span>
@@ -2816,9 +2934,9 @@ async function _loadTermStructure(retryCount = 0) {
             if (best && bestDiff <= maxAllowedDiff) {
                 const iv = best.avg_iv;
                 el.textContent = iv.toFixed(1) + '%';
-                if (iv > 70) el.className = 'font-mono text-sm font-bold text-red-400';
-                else if (iv > 55) el.className = 'font-mono text-sm font-bold text-yellow-400';
-                else el.className = 'font-mono text-sm font-bold text-cyan-400';
+                if (iv > 70) el.className = 'font-mono text-sm font-bold text-[#ef4444]';
+                else if (iv > 55) el.className = 'font-mono text-sm font-bold text-[#f59e0b]';
+                else el.className = 'font-mono text-sm font-bold text-[#7132f5]';
                 if (dteEl) dteEl.textContent = best.dte !== target ? `DTE ${best.dte}` : '';
             } else {
                 el.textContent = '--';
@@ -2835,14 +2953,14 @@ async function _loadTermStructure(retryCount = 0) {
             if (frontIv && backIv) {
                 if (frontIv > backIv) {
                     structLabel.textContent = 'Backwardation';
-                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium';
+                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-[#ef4444]/20 text-[#ef4444] font-medium';
                 } else {
                     structLabel.textContent = 'Contango';
-                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium';
+                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-[#149e61]/20 text-[#149e61] font-medium';
                 }
                 const slope = ((backIv - frontIv) / frontIv * 100).toFixed(1);
                 slopeLabel.textContent = (slope > 0 ? '+' : '') + slope + '%';
-                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-[#149e61]/10 text-[#149e61]' : 'bg-[#ef4444]/10 text-[#ef4444]');
             }
         }
 
@@ -2885,7 +3003,7 @@ async function _loadTermStructure(retryCount = 0) {
             if (!errDiv) {
                 errDiv = document.createElement('div');
                 errDiv.id = 'termStructureError';
-                errDiv.className = 'text-yellow-500 text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
+                errDiv.className = 'text-[#f59e0b] text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
                 ctx.parentElement.appendChild(errDiv);
             }
             errDiv.textContent = '⚠️ Chart.js 未加载';
@@ -2973,7 +3091,7 @@ async function _loadTermStructure(retryCount = 0) {
             if (slopeLabel && analysis.slope) {
                 const s = analysis.slope;
                 slopeLabel.textContent = (s.percent > 0 ? '+' : '') + s.percent + '%';
-                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (s.percent >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (s.percent >= 0 ? 'bg-[#149e61]/10 text-[#149e61]' : 'bg-[#ef4444]/10 text-[#ef4444]');
             }
             // 市场状态
             const msEl = document.getElementById('ivMarketState');
@@ -2989,7 +3107,7 @@ async function _loadTermStructure(retryCount = 0) {
             const vrpDesc = document.getElementById('ivVRPDesc');
             if (vrpEl && analysis.vrp) {
                 const v = analysis.vrp;
-                const vrpColor = v.signal && v.signal.includes('SELL') ? 'text-green-400' : v.signal === 'BUY_EDGE' ? 'text-blue-400' : 'text-gray-400';
+                const vrpColor = v.signal && v.signal.includes('SELL') ? 'text-[#149e61]' : v.signal === 'BUY_EDGE' ? 'text-[#7132f5]' : 'text-gray-400';
                 vrpEl.textContent = (v.value > 0 ? '+' : '') + v.value + '%';
                 vrpEl.className = 'text-lg font-bold ' + vrpColor;
                 if (vrpDesc) vrpDesc.textContent = v.description;
@@ -2999,23 +3117,23 @@ async function _loadTermStructure(retryCount = 0) {
             if (slopeGrade && analysis.slope) {
                 const s = analysis.slope;
                 slopeGrade.textContent = s.grade || '--';
-                slopeGrade.className = 'text-xs font-bold ' + (s.grade === 'SEVERELY_INVERTED' || s.grade === 'INVERTED' ? 'text-red-400' : s.grade === 'STEEP' || s.grade === 'VERY_STEEP' ? 'text-green-400' : 'text-gray-400');
+                slopeGrade.className = 'text-xs font-bold ' + (s.grade === 'SEVERELY_INVERTED' || s.grade === 'INVERTED' ? 'text-[#ef4444]' : s.grade === 'STEEP' || s.grade === 'VERY_STEEP' ? 'text-[#149e61]' : 'text-gray-400');
             }
             const curvEl = document.getElementById('ivCurvatureType');
             if (curvEl && analysis.curvature) {
                 curvEl.textContent = analysis.curvature.type || '--';
-                curvEl.className = 'text-xs font-bold ' + (analysis.curvature.type === 'HUMP' ? 'text-yellow-400' : 'text-gray-400');
+                curvEl.className = 'text-xs font-bold ' + (analysis.curvature.type === 'HUMP' ? 'text-[#f59e0b]' : 'text-gray-400');
             }
             const regEl = document.getElementById('ivRegime');
             if (regEl && analysis.iv_levels) {
                 const il = analysis.iv_levels;
                 regEl.textContent = il.avg_iv + '%';
-                regEl.className = 'text-xs font-bold ' + (il.regime === 'EXTREME' ? 'text-red-400' : il.regime === 'HIGH' ? 'text-orange-400' : il.regime === 'LOW' || il.regime === 'VERY_LOW' ? 'text-blue-400' : 'text-green-400');
+                regEl.className = 'text-xs font-bold ' + (il.regime === 'EXTREME' ? 'text-[#ef4444]' : il.regime === 'HIGH' ? 'text-[#7132f5]' : il.regime === 'LOW' || il.regime === 'VERY_LOW' ? 'text-[#7132f5]' : 'text-[#149e61]');
             }
             // 策略建议
             const recsEl = document.getElementById('ivRecommendations');
             if (recsEl && analysis.recommendations && analysis.recommendations.length > 0) {
-                const typeColors = {'warning': 'border-red-500/30 bg-red-500/5', 'opportunity': 'border-green-500/30 bg-green-500/5', 'info': 'border-blue-500/30 bg-blue-500/5'};
+                const typeColors = {'warning': 'border-[#ef4444]/30 bg-[#ef4444]/5', 'opportunity': 'border-[#149e61]/30 bg-[#149e61]/5', 'info': 'border-[#7132f5]/30 bg-[#7132f5]/5'};
                 const fragment = document.createDocumentFragment();
                 analysis.recommendations.forEach(r => {
                     const div = document.createElement('div');
@@ -3032,7 +3150,7 @@ async function _loadTermStructure(retryCount = 0) {
                     div.appendChild(body);
 
                     const action = document.createElement('div');
-                    action.className = 'text-[11px] text-cyan-300 mt-1 font-medium';
+                    action.className = 'text-[11px] text-[#8b5cf6] mt-1 font-medium';
                     action.textContent = '→ ' + (r.action || '');
                     div.appendChild(action);
 
@@ -3064,7 +3182,7 @@ function _showTermStructureError(message) {
             errDiv.className = 'text-gray-500 text-center py-8 text-xs absolute inset-0 bg-gray-900/90 z-10';
             el.parentElement.appendChild(errDiv);
         }
-        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
+        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-[#f59e0b] text-2xl mb-2"></i><br>' +
             '数据加载失败: ' + safeHTML(message) + '<br>' +
             '<button onclick="window.loadTermStructure()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
             '<i class="fas fa-redo mr-1"></i>重试</button>';
@@ -3109,15 +3227,15 @@ async function _loadMaxPain(retryCount = 0) {
         if (exp.gamma_status && statusCard) {
             statusCard.classList.remove('hidden');
             statusCard.className = 'mb-3 p-3 rounded-lg border ' + 
-                (exp.gamma_status.region === 'long' ? 'border-emerald-500/30 bg-emerald-500/5' :
-                 exp.gamma_status.region === 'short' ? 'border-red-500/30 bg-red-500/5' :
+                (exp.gamma_status.region === 'long' ? 'border-[#149e61]/30 bg-[#149e61]/5' :
+                 exp.gamma_status.region === 'short' ? 'border-[#ef4444]/30 bg-[#ef4444]/5' :
                  'border-gray-500/30 bg-gray-500/5');
             
             document.getElementById('gammaStatusIcon').textContent = exp.gamma_status.icon || '⚖️';
             document.getElementById('gammaStatusText').textContent = exp.gamma_status.region_cn || '中性区域';
             document.getElementById('gammaStatusText').className = 'text-sm font-bold ' + 
-                (exp.gamma_status.region === 'long' ? 'text-emerald-400' :
-                 exp.gamma_status.region === 'short' ? 'text-red-400' : 'text-gray-400');
+                (exp.gamma_status.region === 'long' ? 'text-[#149e61]' :
+                 exp.gamma_status.region === 'short' ? 'text-[#ef4444]' : 'text-gray-400');
             
             const distText = exp.gamma_status.distance_pct ? 
                 (exp.gamma_status.region === 'long' ? '现货高于 Flip 点 ' : '现货低于 Flip 点 ') + exp.gamma_status.distance_pct.toFixed(1) + '%' : '';
@@ -3130,8 +3248,8 @@ async function _loadMaxPain(retryCount = 0) {
             if (regionDistEl && exp.gamma_status.distance_pct !== undefined) {
                 regionDistEl.textContent = (exp.gamma_status.distance_pct > 0 ? '+' : '') + exp.gamma_status.distance_pct.toFixed(1) + '%';
                 regionDistEl.className = 'font-mono text-xs ' + 
-                    (exp.gamma_status.distance_pct > 5 ? 'text-emerald-400' :
-                     exp.gamma_status.distance_pct < -5 ? 'text-red-400' : 'text-gray-400');
+                    (exp.gamma_status.distance_pct > 5 ? 'text-[#149e61]' :
+                     exp.gamma_status.distance_pct < -5 ? 'text-[#ef4444]' : 'text-gray-400');
             }
         }
         
@@ -3139,8 +3257,8 @@ async function _loadMaxPain(retryCount = 0) {
         if (exp.gamma_advice && adviceCard) {
             adviceCard.classList.remove('hidden');
             adviceCard.className = 'mb-3 p-2.5 rounded-lg border ' + 
-                (exp.gamma_status && exp.gamma_status.region === 'long' ? 'border-emerald-500/20 bg-emerald-500/5' :
-                 exp.gamma_status && exp.gamma_status.region === 'short' ? 'border-red-500/20 bg-red-500/5' :
+                (exp.gamma_status && exp.gamma_status.region === 'long' ? 'border-[#149e61]/20 bg-[#149e61]/5' :
+                 exp.gamma_status && exp.gamma_status.region === 'short' ? 'border-[#ef4444]/20 bg-[#ef4444]/5' :
                  'border-gray-500/20 bg-gray-500/5');
             
             document.getElementById('gammaAdviceText').textContent = exp.gamma_advice.text || '';
@@ -3153,7 +3271,7 @@ async function _loadMaxPain(retryCount = 0) {
         const mmEl = document.getElementById('mmAlert');
         if (exp.mm_signal && mmEl) {
             mmEl.classList.remove('hidden');
-            mmEl.className = exp.mm_signal.includes('DANGER') || exp.mm_signal.includes('危险') ? 'mb-3 p-2 rounded text-xs bg-red-900/40 border border-red-500/50 text-red-300' : 'mb-3 p-2 rounded text-xs bg-green-900/30 border border-green-500/30 text-green-300';
+            mmEl.className = exp.mm_signal.includes('DANGER') || exp.mm_signal.includes('危险') ? 'mb-3 p-2 rounded text-xs bg-[#ef4444]/10 border border-[#ef4444]/50 text-[#ef4444]' : 'mb-3 p-2 rounded text-xs bg-[#149e61]/10 border border-[#149e61]/30 text-[#149e61]';
             mmEl.textContent = exp.mm_signal;
         } else if (mmEl) {
             mmEl.classList.add('hidden');
@@ -3174,7 +3292,7 @@ async function _loadMaxPain(retryCount = 0) {
             if (!errDiv) {
                 errDiv = document.createElement('div');
                 errDiv.id = 'maxPainError';
-                errDiv.className = 'text-yellow-500 text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
+                errDiv.className = 'text-[#f59e0b] text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
                 ctx.parentElement.appendChild(errDiv);
             }
             errDiv.textContent = '⚠️ Chart.js 未加载';
@@ -3225,13 +3343,13 @@ async function _loadMaxPain(retryCount = 0) {
                         label: '痛点曲线 (归一化)',
                         data: normPain,
                         type: 'line',
-                        borderColor: '#f97316',
+                        borderColor: '#7132f5',
                         backgroundColor: 'rgba(249,115,22,0.1)',
                         fill: true,
                         tension: 0.3,
                         pointRadius: 0,
                         pointHoverRadius: 5,
-                        pointHoverBackgroundColor: '#f97316',
+                        pointHoverBackgroundColor: '#7132f5',
                         yAxisID: 'y',
                         order: 1
                     }
@@ -3242,8 +3360,8 @@ async function _loadMaxPain(retryCount = 0) {
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
                     legend: { 
-                        labels: { color: '#9ca3af', boxWidth: 12, padding: 15, font: { size: 11 } },
-                        title: { display: true, text: '最大痛点 $' + mpStrike.toLocaleString() + ' | 现货 $' + spotPrice.toLocaleString(), color: '#eab308', font: { size: 13, weight: 'bold' } }
+                        labels: { color: '#9497a9', boxWidth: 12, padding: 15, font: { size: 11 } },
+                        title: { display: true, text: '最大痛点 $' + mpStrike.toLocaleString() + ' | 现货 $' + spotPrice.toLocaleString(), color: '#7132f5', font: { size: 13, weight: 'bold' } }
                     },
                     tooltip: {
                         callbacks: {
@@ -3277,16 +3395,16 @@ async function _loadMaxPain(retryCount = 0) {
                     y: { 
                         type: 'linear', position: 'left', 
                         min: 0, max: 110,
-                        title: { display: true, text: '痛点曲线 (%)', color: '#f97316' }, 
+                        title: { display: true, text: '痛点曲线 (%)', color: '#7132f5' }, 
                         grid: { color: 'rgba(255,255,255,0.06)' }, 
-                        ticks: { color: '#f97316', callback: function(v) { return v + '%'; } } 
+                        ticks: { color: '#7132f5', callback: function(v) { return v + '%'; } } 
                     },
                     y1: { 
                         type: 'linear', position: 'right',
-                        title: { display: true, text: 'OI净敞口 (%)', color: '#22c55e' }, 
+                        title: { display: true, text: 'OI净敞口 (%)', color: '#149e61' }, 
                         grid: { drawOnChartArea: false }, 
                         ticks: { 
-                            color: '#22c55e', 
+                            color: '#149e61', 
                             callback: function(v) { 
                                 if (Math.abs(v) >= 1000) return (v/1000).toFixed(0) + 'K';
                                 return v; 
@@ -3296,7 +3414,7 @@ async function _loadMaxPain(retryCount = 0) {
                     x: { 
                         grid: { color: 'rgba(255,255,255,0.06)' }, 
                         ticks: { 
-                            color: '#9ca3af', maxTicksLimit: 20,
+                            color: '#9497a9', maxTicksLimit: 20,
                             callback: function(val, idx) {
                                 var s = this.getLabelForValue(val);
                                 var stk = parseFloat(s.replace(/[$K]/g, '')) * 1000;
@@ -3331,7 +3449,7 @@ function _showMaxPainError(message) {
             errDiv.className = 'text-gray-500 text-center py-8 absolute inset-0 bg-gray-900/90 z-10';
             container.parentElement.appendChild(errDiv);
         }
-        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
+        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-[#f59e0b] text-2xl mb-2"></i><br>' +
             '最大痛点数据加载失败: ' + safeHTML(message) + '<br>' +
             '<button onclick="window.loadMaxPain()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
             '<i class="fas fa-redo mr-1"></i>重试</button>';
@@ -3355,7 +3473,7 @@ async function _runSandbox() {
 
     var resultDiv = document.getElementById('sandboxResult');
     if (!resultDiv) { alert('沙盘容器未找到'); return; }
-    resultDiv.innerHTML = '<div class="text-center py-4 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>🔄 推演计算中...</div>';
+    resultDiv.innerHTML = '<div class="text-center py-4 text-[#7132f5]"><i class="fas fa-spinner fa-spin mr-2"></i>🔄 推演计算中...</div>';
 
     try {
         var resp = await safeFetch(API_BASE + '/api/sandbox/simulate', {
@@ -3375,10 +3493,10 @@ async function _runSandbox() {
         // ===== 安全评估卡片 =====
         var safety = d.safety_assessment || {};
         var safetyColors = {
-            'SAFE': 'bg-green-900/30 border-green-500/40 text-green-300',
-            'WARNING': 'bg-yellow-900/30 border-yellow-500/40 text-yellow-300',
-            'DANGER': 'bg-red-900/30 border-red-500/40 text-red-300',
-            'CRITICAL': 'bg-red-900/50 border-red-500/60 text-red-200'
+            'SAFE': 'bg-[#149e61]/10 border-[#149e61]/40 text-[#149e61]',
+            'WARNING': 'bg-[#f59e0b]/10 border-[#f59e0b]/40 text-[#f59e0b]',
+            'DANGER': 'bg-[#ef4444]/10 border-[#ef4444]/40 text-[#ef4444]',
+            'CRITICAL': 'bg-[#ef4444]/10 border-[#ef4444]/60 text-[#ef4444]'
         };
         var sc = safetyColors[safety.level] || 'bg-gray-800 border-gray-600 text-gray-300';
         html += '<div class="p-4 rounded-lg border ' + sc + '">';
@@ -3399,26 +3517,26 @@ async function _runSandbox() {
         html += '<div class="text-xs font-semibold text-gray-400 mb-2">📉 崩盘情景</div>';
         html += '<div class="space-y-1 text-xs">';
         html += '<div class="flex justify-between"><span class="text-gray-500">当前价格</span><span class="font-mono">$' + (crash.from_price || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">崩盘目标</span><span class="font-mono text-red-400">$' + (crash.to_price || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">跌幅</span><span class="font-mono text-red-400">' + (crash.drop_pct || 0) + '%</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">崩盘目标</span><span class="font-mono text-[#ef4444]">$' + (crash.to_price || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">跌幅</span><span class="font-mono text-[#ef4444]">' + (crash.drop_pct || 0) + '%</span></div>';
         html += '</div></div>';
 
         // 右：损失分析
         html += '<div class="p-3 rounded-lg bg-gray-800 border border-gray-700/30">';
         html += '<div class="text-xs font-semibold text-gray-400 mb-2">💥 损失分解</div>';
         html += '<div class="space-y-1 text-xs">';
-        html += '<div class="flex justify-between"><span class="text-gray-500">本金损失</span><span class="font-mono text-red-400">$' + (loss.intrinsic_loss || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">Vega 冲击</span><span class="font-mono text-orange-400">$' + (loss.vega_impact || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">总损失</span><span class="font-mono text-red-300 font-bold">$' + (loss.total_loss || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">损失比例</span><span class="font-mono text-red-400">' + (loss.loss_pct || 0) + '%</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">本金损失</span><span class="font-mono text-[#ef4444]">$' + (loss.intrinsic_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">Vega 冲击</span><span class="font-mono text-[#7132f5]">$' + (loss.vega_impact || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">总损失</span><span class="font-mono text-[#ef4444] font-bold">$' + (loss.total_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">损失比例</span><span class="font-mono text-[#ef4444]">' + (loss.loss_pct || 0) + '%</span></div>';
         html += '</div></div>';
         html += '</div>';
 
         // ===== 最佳恢复方案 =====
         var best = d.best_plan;
         if (best) {
-            var planBorder = best.status === 'success' ? 'border-green-500/40' : best.status === 'partial' ? 'border-yellow-500/40' : 'border-red-500/40';
-            var planBg = best.status === 'success' ? 'bg-green-900/10' : best.status === 'partial' ? 'bg-yellow-900/10' : 'bg-red-900/10';
+            var planBorder = best.status === 'success' ? 'border-[#149e61]/40' : best.status === 'partial' ? 'border-[#f59e0b]/40' : 'border-[#ef4444]/40';
+            var planBg = best.status === 'success' ? 'bg-[#149e61]/10' : best.status === 'partial' ? 'bg-[#f59e0b]/10' : 'bg-[#ef4444]/10';
             html += '<div class="p-3 rounded-lg border ' + planBorder + ' ' + planBg + ' mb-3">';
             html += '<div class="text-sm font-bold mb-2">🎯 最佳恢复方案</div>';
             html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">';
@@ -3430,12 +3548,12 @@ async function _runSandbox() {
             html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">';
             html += '<div><span class="text-gray-500 block">每张权利金</span><span class="font-mono">$' + best.premium_per_contract + '</span></div>';
             html += '<div><span class="text-gray-500 block">加仓数量</span><span class="font-mono">' + best.contracts + 'x</span></div>';
-            html += '<div><span class="text-gray-500 block">所需保证金</span><span class="font-mono text-yellow-400">$' + best.margin_required.toLocaleString() + '</span></div>';
-            var nc = best.net_recovery >= 0 ? 'text-green-400' : 'text-red-400';
+            html += '<div><span class="text-gray-500 block">所需保证金</span><span class="font-mono text-[#f59e0b]">$' + best.margin_required.toLocaleString() + '</span></div>';
+            var nc = best.net_recovery >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
             html += '<div><span class="text-gray-500 block">净恢复</span><span class="font-mono ' + nc + '">$' + best.net_recovery.toLocaleString() + '</span></div>';
             html += '</div>';
             html += '<div class="grid grid-cols-2 gap-2 text-xs mt-2">';
-            var rc = best.remaining_reserve >= 0 ? 'text-green-400' : 'text-red-400';
+            var rc = best.remaining_reserve >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
             html += '<div><span class="text-gray-500 block">剩余后备金</span><span class="font-mono ' + rc + '">$' + best.remaining_reserve.toLocaleString() + '</span></div>';
             html += '<div><span class="text-gray-500 block">安全距离</span><span class="font-mono">' + best.distance_from_crash + '%</span></div>';
             html += '</div>';
@@ -3461,9 +3579,9 @@ async function _runSandbox() {
             html += '</tr></thead>';
             html += '<tbody class="divide-y divide-gray-800/30">';
             d.recovery_plans.forEach(function(p) {
-                var stClass = p.status === 'success' ? 'text-green-400' : p.status === 'partial' ? 'text-yellow-400' : 'text-red-400';
+                var stClass = p.status === 'success' ? 'text-[#149e61]' : p.status === 'partial' ? 'text-[#f59e0b]' : 'text-[#ef4444]';
                 var stText = p.status === 'success' ? '✅' : p.status === 'partial' ? '⚠️' : '🔴';
-                var nc2 = p.net_recovery >= 0 ? 'text-green-400' : 'text-red-400';
+                var nc2 = p.net_recovery >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
                 html += '<tr class="hover:bg-gray-800/30">';
                 html += '<td class="py-1 px-2 text-left font-mono text-gray-300">' + safeHTML(p.symbol || '-') + '</td>';
                 html += '<td class="py-1 px-2 font-mono">$' + p.strike.toLocaleString() + '</td>';
@@ -3471,7 +3589,7 @@ async function _runSandbox() {
                 html += '<td class="py-1 px-2 font-mono">' + p.apr + '%</td>';
                 html += '<td class="py-1 px-2 font-mono">$' + p.premium_per_contract + '</td>';
                 html += '<td class="py-1 px-2 font-mono">' + p.contracts + 'x</td>';
-                html += '<td class="py-1 px-2 font-mono text-yellow-400">$' + p.margin_required.toLocaleString() + '</td>';
+                html += '<td class="py-1 px-2 font-mono text-[#f59e0b]">$' + p.margin_required.toLocaleString() + '</td>';
                 html += '<td class="py-1 px-2 font-mono ' + nc2 + '">$' + p.net_recovery.toLocaleString() + '</td>';
                 html += '<td class="py-1 px-2 ' + stClass + '">' + stText + '</td>';
                 html += '</tr>';
@@ -3480,12 +3598,12 @@ async function _runSandbox() {
         }
 
         if (d.total_candidates === 0) {
-            html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">⚠️ 该价格水平下无可用恢复合约（链上无深度或IV过高）</div>';
+            html += '<div class="text-[#f59e0b] text-xs mt-2 p-2 bg-[#f59e0b]/10 rounded">⚠️ 该价格水平下无可用恢复合约（链上无深度或IV过高）</div>';
         }
 
         resultDiv.innerHTML = html;
     } catch(e) {
-        resultDiv.innerHTML = '<div class="text-red-400 text-sm p-3">❌ 错误: ' + safeHTML(e.message) + '</div>';
+        resultDiv.innerHTML = '<div class="text-[#ef4444] text-sm p-3">❌ 错误: ' + safeHTML(e.message) + '</div>';
     }
 }
 
@@ -3549,8 +3667,8 @@ async function loadPcrChart(currency = 'BTC', hours = 168) {
                     legend: { display: false }
                 },
                 scales: {
-                    y: { title: { display: true, text: 'PCR', color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
-                    x: { grid: { display: false }, ticks: { color: '#9ca3af', maxTicksLimit: 8 } }
+                    y: { title: { display: true, text: 'PCR', color: '#9497a9' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9497a9' } },
+                    x: { grid: { display: false }, ticks: { color: '#9497a9', maxTicksLimit: 8 } }
                 }
             }
         });
@@ -3617,15 +3735,15 @@ async function loadLLMConfigStatus() {
             const status = document.getElementById('llmConfigStatus');
             if (config.api_key && config.api_key !== '****') {
                 status.textContent = config.model ? `已配置 (${config.model})` : '已配置';
-                status.className = 'text-xs ml-2 text-green-400';
+                status.className = 'text-xs ml-2 text-[#149e61]';
             } else if (config.api_key === '****') {
                 status.textContent = config.model ? `已配置 (${config.model})` : '已配置';
-                status.className = 'text-xs ml-2 text-green-400';
+                status.className = 'text-xs ml-2 text-[#149e61]';
                 if (config.base_url) document.getElementById('llmBaseUrl').value = config.base_url;
                 if (config.model) document.getElementById('llmModel').value = config.model;
             } else {
                 status.textContent = '未配置';
-                status.className = 'text-xs ml-2 text-yellow-400';
+                status.className = 'text-xs ml-2 text-[#f59e0b]';
             }
         }
     } catch (e) {
@@ -3682,14 +3800,14 @@ async function testLLMConnection() {
         const data = await resp.json();
         if (data.success) {
             resultSpan.textContent = `连接成功 (${data.latency_ms}ms)`;
-            resultSpan.className = 'text-xs ml-2 text-green-400';
+            resultSpan.className = 'text-xs ml-2 text-[#149e61]';
         } else {
             resultSpan.textContent = `失败: ${data.error || '未知错误'}`;
-            resultSpan.className = 'text-xs ml-2 text-red-400';
+            resultSpan.className = 'text-xs ml-2 text-[#ef4444]';
         }
     } catch (e) {
         resultSpan.textContent = '连接失败: ' + e.message;
-        resultSpan.className = 'text-xs ml-2 text-red-400';
+        resultSpan.className = 'text-xs ml-2 text-[#ef4444]';
     }
 }
 
@@ -3762,7 +3880,7 @@ function resetLLMProgress() {
 function setLLMStepComplete(stepNum) {
     const labels = ['规则分析', '综合研判', '多空辩论', '数据审计'];
     const step = document.getElementById(`llmStep${stepNum}`);
-    step.className = 'flex items-center gap-1.5 text-xs text-green-400';
+    step.className = 'flex items-center gap-1.5 text-xs text-[#149e61]';
     step.innerHTML = '<i class="fas fa-check-circle"></i> ' + labels[stepNum-1];
     const progress = (stepNum / 4) * 100;
     document.getElementById('llmProgressBar').style.width = progress + '%';
@@ -3782,17 +3900,17 @@ function renderLLMSynthesis(synthesis) {
 
     const conf = synthesis.confidence || 0;
     confSpan.textContent = `信心度 ${conf}%`;
-    confSpan.className = `text-xs px-2 py-0.5 rounded-full ${conf >= 70 ? 'bg-green-500/20 text-green-300' : conf >= 40 ? 'bg-yellow-500/20 text-yellow-300' : 'bg-red-500/20 text-red-300'} ml-auto`;
+    confSpan.className = `text-xs px-2 py-0.5 rounded-full ${conf >= 70 ? 'bg-[#149e61]/20 text-[#149e61]' : conf >= 40 ? 'bg-[#f59e0b]/20 text-[#f59e0b]' : 'bg-[#ef4444]/20 text-[#ef4444]'} ml-auto`;
 
     let html = '';
     if (synthesis.market_assessment) {
-        html += `<div><span class="text-purple-400 font-medium">市场评估：</span><span>${safeHTML(synthesis.market_assessment)}</span></div>`;
+        html += `<div><span class="text-[#7132f5] font-medium">市场评估：</span><span>${safeHTML(synthesis.market_assessment)}</span></div>`;
     }
     if (synthesis.strategy_recommendation) {
-        html += `<div><span class="text-blue-400 font-medium">策略建议：</span><span>${safeHTML(synthesis.strategy_recommendation)}</span></div>`;
+        html += `<div><span class="text-[#7132f5] font-medium">策略建议：</span><span>${safeHTML(synthesis.strategy_recommendation)}</span></div>`;
     }
     if (synthesis.risk_warning) {
-        html += `<div><span class="text-red-400 font-medium">风险提示：</span><span>${safeHTML(synthesis.risk_warning)}</span></div>`;
+        html += `<div><span class="text-[#ef4444] font-medium">风险提示：</span><span>${safeHTML(synthesis.risk_warning)}</span></div>`;
     }
     content.innerHTML = html;
 }
@@ -3840,7 +3958,7 @@ function renderLLMDebate(debate) {
     let judgeHtml = '';
     if (judge.judge_verdict) judgeHtml += `<p class="font-medium">${safeHTML(judge.judge_verdict)}</p>`;
     if (judge.winner) {
-        const winnerColors = { bull: 'text-green-400', bear: 'text-red-400', draw: 'text-yellow-400' };
+        const winnerColors = { bull: 'text-[#149e61]', bear: 'text-[#ef4444]', draw: 'text-[#f59e0b]' };
         const winnerLabels = { bull: '多头胜', bear: '空头胜', draw: '平局' };
         judgeHtml += `<p class="${winnerColors[judge.winner] || 'text-gray-300'} font-bold mt-2">${winnerLabels[judge.winner] || judge.winner}</p>`;
     }
@@ -3861,16 +3979,16 @@ function renderLLMAudit(audit) {
     const fillEl = document.getElementById('llmAuditScoreFill');
 
     scoreEl.textContent = score;
-    scoreEl.className = `text-lg font-bold ${score >= 80 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-red-400'}`;
+    scoreEl.className = `text-lg font-bold ${score >= 80 ? 'text-[#149e61]' : score >= 50 ? 'text-[#f59e0b]' : 'text-[#ef4444]'}`;
     fillEl.style.width = score + '%';
-    fillEl.className = `h-full rounded-full transition-all ${score >= 80 ? 'bg-green-500' : score >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`;
+    fillEl.className = `h-full rounded-full transition-all ${score >= 80 ? 'bg-[#149e61]' : score >= 50 ? 'bg-[#f59e0b]' : 'bg-[#ef4444]'}`;
 
     const content = document.getElementById('llmAuditContent');
     let html = '';
 
     // Show error if audit failed
     if (audit.error) {
-        html = `<div class="text-yellow-400 text-sm"><i class="fas fa-exclamation-circle mr-1"></i>审计未完成: ${safeHTML(audit.error)}</div>`;
+        html = `<div class="text-[#f59e0b] text-sm"><i class="fas fa-exclamation-circle mr-1"></i>审计未完成: ${safeHTML(audit.error)}</div>`;
         content.innerHTML = html;
         return;
     }
@@ -3879,7 +3997,7 @@ function renderLLMAudit(audit) {
     const issues = audit.logic_issues || [];
 
     if (anomalies.length === 0 && issues.length === 0) {
-        html = '<div class="text-green-400 text-sm"><i class="fas fa-check-circle mr-1"></i>未发现数据异常</div>';
+        html = '<div class="text-[#149e61] text-sm"><i class="fas fa-check-circle mr-1"></i>未发现数据异常</div>';
     } else {
         for (const a of anomalies) {
             const sevColors = { critical: 'red', warning: 'yellow', info: 'blue' };
@@ -3925,7 +4043,7 @@ function renderLLMRuleAgents(ruleReports) {
     for (const r of reports) {
         const colors = agentColors[r.name] || { bg: 'gray', icon: '\u{1f916}' };
         const score = r.score || 0;
-        const scoreColor = score > 20 ? 'text-green-400' : score > 0 ? 'text-emerald-300' : score > -20 ? 'text-yellow-400' : 'text-red-400';
+        const scoreColor = score > 20 ? 'text-[#149e61]' : score > 0 ? 'text-[#149e61]' : score > -20 ? 'text-[#f59e0b]' : 'text-[#ef4444]';
 
         html += `<div class="card-glass rounded-lg p-3 border-l-4 border-${colors.bg}-500/60">`;
         html += `<div class="flex items-center justify-between mb-2">`;
@@ -3951,78 +4069,213 @@ initLLMAnalystSection();
 // IV 波动率微笑图 + Greeks 风险矩阵
 // ============================================================
 
+let _ivSmileChart = null;
+
 async function loadIVSmile() {
-    const container = document.getElementById('ivSmileChart');
-    if (!container) return;
-    container.innerHTML = '<div class="text-gray-400 text-sm py-8 text-center">加载中...</div>';
+    const canvas = document.getElementById('ivSmileCanvas');
+    const analysisDiv = document.getElementById('ivSmileAnalysis');
+    if (!canvas) return;
+
+    if (analysisDiv) analysisDiv.innerHTML = '';
 
     try {
         const currency = document.getElementById('ivSmileCurrency')?.value || 'BTC';
         const resp = await safeFetch(`${API_BASE}/api/charts/iv-smile?currency=${currency}`);
         const data = await resp.json();
+
         if (data.error) {
-            container.innerHTML = `<div class="text-yellow-400 text-sm py-4">${safeHTML(data.error)}</div>`;
+            if (_ivSmileChart) { _ivSmileChart.destroy(); _ivSmileChart = null; }
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (analysisDiv) analysisDiv.innerHTML = `<div class="text-[#f59e0b] text-sm py-4 text-center">${safeHTML(data.error)}</div>`;
             return;
         }
 
         const smiles = data.smiles || {};
         const spot = data.spot || 0;
-        let html = '';
+        const expiryKeys = Object.keys(smiles).sort((a, b) => smiles[a].dte - smiles[b].dte);
 
-        for (const [key, smile] of Object.entries(smiles)) {
-            const all = smile.all || [];
-            if (all.length === 0) continue;
+        if (expiryKeys.length === 0) return;
 
-            // 找到 IV 范围
-            const minIv = Math.min(...all.map(p => p.iv));
-            const maxIv = Math.max(...all.map(p => p.iv));
-            const ivRange = maxIv - minIv || 1;
+        const colors = ['#ef4444', '#f59e0b', '#3b82f6'];
+        const dashPatterns = [[], [5, 5], [10, 5]];
+        const datasets = [];
 
-            html += `<div class="mb-6">
-                <div class="text-sm text-gray-400 mb-2">到期 ${smile.dte} 天 (Spot: $${spot.toLocaleString()})</div>
-                <div class="relative h-40 bg-gray-800/20 rounded-lg p-2">
-                    <div class="flex items-end justify-center gap-1 h-full">`;
+        expiryKeys.forEach((key, i) => {
+            const smile = smiles[key];
+            const all = (smile.all || []).sort((a, b) => a.strike - b.strike);
+            if (all.length === 0) return;
 
-            // 按 strike 排序，画柱状图
-            const sorted = [...all].sort((a, b) => a.strike - b.strike);
-            const barWidth = Math.max(8, Math.min(24, 300 / sorted.length));
+            datasets.push({
+                label: `${smile.dte}D`,
+                data: all.map(p => ({ x: p.strike, y: p.iv })),
+                borderColor: colors[i % colors.length],
+                backgroundColor: colors[i % colors.length] + '20',
+                borderDash: dashPatterns[i % dashPatterns.length],
+                tension: 0.3,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 6,
+                fill: false,
+            });
+        });
 
-            for (const p of sorted) {
-                const heightPct = Math.max(10, ((p.iv - minIv) / ivRange) * 80 + 10);
-                const isPut = p.type === 'P';
-                const isATM = Math.abs(p.strike - spot) / spot < 0.02;
-                const color = isATM ? 'bg-yellow-400' : isPut ? 'bg-green-500' : 'bg-blue-500';
-                const opacity = p.oi > 100 ? 'opacity-100' : 'opacity-60';
+        // ATM vertical line (no annotation plugin — use dataset)
+        if (spot > 0 && datasets.length > 0) {
+            const allIvs = datasets.flatMap(d => d.data.map(p => p.y));
+            const minY = Math.min(...allIvs);
+            const maxY = Math.max(...allIvs);
+            datasets.push({
+                label: 'ATM',
+                data: [{ x: spot, y: minY }, { x: spot, y: maxY }],
+                borderColor: '#f59e0b',
+                borderWidth: 1,
+                borderDash: [4, 4],
+                pointRadius: 0,
+                fill: false,
+            });
+        }
 
-                html += `<div class="group relative flex flex-col items-center justify-end" style="width:${barWidth}px; height:100%;">
-                    <div class="${color} ${opacity} rounded-t w-full transition-all hover:opacity-100 hover:brightness-110"
-                         style="height:${heightPct}%; min-height: 4px;"></div>
-                    <div class="hidden group-hover:block absolute bottom-full mb-1 bg-gray-900 border border-gray-600 rounded p-1.5 text-xs whitespace-nowrap z-10 shadow-lg">
-                        <div class="font-medium">K=$${p.strike.toLocaleString()} | IV=${p.iv}%</div>
-                        <div class="text-gray-400">${p.type} | OI=${Math.round(p.oi)} | 距现货${p.moneyness > 0 ? '+' : ''}${p.moneyness}%</div>
-                    </div>
-                </div>`;
-            }
+        if (_ivSmileChart) _ivSmileChart.destroy();
 
-            html += `</div>
-                </div>
-                <div class="flex justify-between text-xs text-gray-500 mt-1 px-2">
-                    <span>$${sorted[0]?.strike?.toLocaleString() || ''}</span>
-                    <span class="text-yellow-400 font-medium">ATM $${spot.toLocaleString()}</span>
-                    <span>$${sorted[sorted.length-1]?.strike?.toLocaleString() || ''}</span>
-                </div>
-                <div class="flex justify-center gap-4 mt-2 text-xs">
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span> Put</span>
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span> Call</span>
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-yellow-400"></span> ATM</span>
+        _ivSmileChart = new Chart(canvas.getContext('2d'), {
+            type: 'line',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'nearest', intersect: false },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: { color: '#9497a9', usePointStyle: true, pointStyle: 'line', padding: 15, font: { size: 11 } }
+                    },
+                    tooltip: {
+                        backgroundColor: '#1a1b23',
+                        titleColor: '#e4e4e7',
+                        bodyColor: '#9497a9',
+                        borderColor: '#333',
+                        borderWidth: 1,
+                        callbacks: {
+                            title: (items) => `$${items[0].parsed.x.toLocaleString()}`,
+                            label: (item) => `${item.dataset.label}: IV ${item.parsed.y.toFixed(2)}%`,
+                        }
+                    },
+                },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Strike', color: '#686b82', font: { size: 11 } },
+                        ticks: {
+                            color: '#686b82',
+                            callback: (v) => '$' + v.toLocaleString(),
+                            maxTicksLimit: 10,
+                        },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                    },
+                    y: {
+                        title: { display: true, text: 'IV %', color: '#686b82', font: { size: 11 } },
+                        ticks: {
+                            color: '#686b82',
+                            callback: (v) => v.toFixed(0) + '%',
+                        },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                    },
+                },
+            },
+        });
+
+        // Render analysis panel
+        if (analysisDiv && data.analysis) {
+            renderIVSmileAnalysis(analysisDiv, data.analysis, spot);
+        }
+    } catch (e) {
+        if (_ivSmileChart) { _ivSmileChart.destroy(); _ivSmileChart = null; }
+        if (analysisDiv) analysisDiv.innerHTML = `<div class="text-[#ef4444] text-sm py-4 text-center">加载失败: ${safeHTML(e.message)}</div>`;
+    }
+}
+
+function renderIVSmileAnalysis(container, analysis, spot) {
+    const sent = analysis.sentiment || {};
+    const met = analysis.metrics || {};
+    const formIcon = analysis.form_icon || '';
+    const formLabel = analysis.form_label || '';
+
+    let html = `<div class="bg-[#22232e]/50 rounded-xl border border-[rgba(71,73,85,0.3)] p-4 space-y-4">`;
+
+    // Row 1: Form + Sentiment + ATM IV
+    html += `<div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+            <span class="text-lg">${formIcon}</span>
+            <span class="text-sm font-medium text-[#e4e4e7]">${safeHTML(formLabel)}</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <span class="text-sm" style="color:${sent.color || '#9497a9'}">${sent.icon || ''} ${safeHTML(sent.label || '')}</span>
+        </div>
+        <div class="text-sm text-[#9497a9]">ATM IV: <span class="text-[#e4e4e7] font-bold">${met.atm_iv?.toFixed(1) || '--'}%</span></div>
+    </div>`;
+
+    // Row 2: Key metrics
+    html += `<div class="grid grid-cols-3 gap-3 text-center">
+        <div class="bg-[#1a1b23]/50 rounded-lg p-2">
+            <div class="text-[10px] text-[#686b82]">25Δ Skew</div>
+            <div class="text-sm font-bold ${(met.skew_25d || 0) > 0 ? 'text-[#ef4444]' : 'text-[#149e61]'}">${met.skew_25d > 0 ? '+' : ''}${met.skew_25d?.toFixed(1) || '--'}</div>
+        </div>
+        <div class="bg-[#1a1b23]/50 rounded-lg p-2">
+            <div class="text-[10px] text-[#686b82]">Put 偏度</div>
+            <div class="text-sm font-bold ${(met.put_skew_pct || 0) > 0 ? 'text-[#ef4444]' : 'text-[#149e61]'}">${met.put_skew_pct > 0 ? '+' : ''}${met.put_skew_pct?.toFixed(1) || '--'}%</div>
+        </div>
+        <div class="bg-[#1a1b23]/50 rounded-lg p-2">
+            <div class="text-[10px] text-[#686b82]">曲度</div>
+            <div class="text-sm font-bold text-[#e4e4e7]">${met.curvature?.toFixed(1) || '--'}%</div>
+        </div>
+    </div>`;
+
+    // Row 3: By-expiry table
+    const byExpiry = analysis.by_expiry || [];
+    if (byExpiry.length > 0) {
+        html += `<div class="overflow-x-auto"><table class="w-full text-xs">
+            <thead><tr class="text-[#686b82] border-b border-gray-700/50">
+                <th class="text-left py-1.5 px-2">到期</th>
+                <th class="text-right py-1.5 px-2">ATM IV</th>
+                <th class="text-right py-1.5 px-2">25Δ Skew</th>
+                <th class="text-center py-1.5 px-2">形态</th>
+                <th class="text-right py-1.5 px-2">点数</th>
+            </tr></thead><tbody>`;
+        for (const e of byExpiry) {
+            html += `<tr class="border-b border-gray-800/30">
+                <td class="py-1.5 px-2 text-[#e4e4e7]">${e.dte}D</td>
+                <td class="py-1.5 px-2 text-right text-[#e4e4e7]">${e.atm_iv?.toFixed(1)}%</td>
+                <td class="py-1.5 px-2 text-right ${(e.skew_25d || 0) > 0 ? 'text-[#ef4444]' : 'text-[#149e61]'}">${e.skew_25d > 0 ? '+' : ''}${e.skew_25d?.toFixed(1)}</td>
+                <td class="py-1.5 px-2 text-center text-[#9497a9]">${safeHTML(e.form_label || e.form)}</td>
+                <td class="py-1.5 px-2 text-right text-[#9497a9]">${e.point_count}</td>
+            </tr>`;
+        }
+        html += `</tbody></table></div>`;
+    }
+
+    // Row 4: Recommendations
+    const recs = analysis.recommendations || [];
+    if (recs.length > 0) {
+        html += `<div class="space-y-2">
+            <div class="text-xs font-semibold text-[#7132f5]"><i class="fas fa-lightbulb mr-1"></i>策略建议</div>`;
+        for (const r of recs) {
+            const confColor = r.confidence === 'HIGH' ? '#149e61' : '#f59e0b';
+            html += `<div class="flex items-start gap-2 bg-[#1a1b23]/40 rounded-lg p-2.5 border-l-2" style="border-color:${confColor}">
+                <span class="text-xs font-bold px-1.5 py-0.5 rounded" style="color:${confColor}; background:${confColor}15">${r.confidence}</span>
+                <div class="flex-1 min-w-0">
+                    <div class="text-xs font-medium text-[#e4e4e7]">${safeHTML(r.title)}</div>
+                    <div class="text-[11px] text-[#9497a9] mt-0.5">${safeHTML(r.body)}</div>
+                    <div class="text-[11px] text-[#686b82] mt-0.5"><i class="fas fa-crosshairs mr-1"></i>${safeHTML(r.action)}</div>
                 </div>
             </div>`;
         }
-
-        container.innerHTML = html || '<div class="text-gray-400 text-sm py-4">暂无微笑数据</div>';
-    } catch (e) {
-        container.innerHTML = `<div class="text-red-400 text-sm py-4">加载失败: ${e.message}</div>`;
+        html += `</div>`;
     }
+
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
 async function loadGreeksSummary() {
@@ -4035,7 +4288,7 @@ async function loadGreeksSummary() {
         const resp = await safeFetch(`${API_BASE}/api/charts/greeks-summary?currency=${currency}`);
         const data = await resp.json();
         if (data.error) {
-            container.innerHTML = `<div class="text-yellow-400 text-sm">${safeHTML(data.error)}</div>`;
+            container.innerHTML = `<div class="text-[#f59e0b] text-sm">${safeHTML(data.error)}</div>`;
             return;
         }
 
@@ -4047,8 +4300,8 @@ async function loadGreeksSummary() {
         const totalOi = data.total_oi || 0;
 
         // 基于单合约 Greeks 计算颜色阈值
-        const deltaColor = Math.abs(g.delta) > 0.5 ? 'text-red-400' : Math.abs(g.delta) > 0.2 ? 'text-yellow-400' : 'text-green-400';
-        const thetaColor = g.theta < -0.5 ? 'text-red-400' : g.theta < -0.1 ? 'text-yellow-400' : 'text-green-400';
+        const deltaColor = Math.abs(g.delta) > 0.5 ? 'text-[#ef4444]' : Math.abs(g.delta) > 0.2 ? 'text-[#f59e0b]' : 'text-[#149e61]';
+        const thetaColor = g.theta < -0.5 ? 'text-[#ef4444]' : g.theta < -0.1 ? 'text-[#f59e0b]' : 'text-[#149e61]';
 
         container.innerHTML = `
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -4059,7 +4312,7 @@ async function loadGreeksSummary() {
                 </div>
                 <div class="bg-gray-800/50 rounded-lg p-3 text-center">
                     <div class="text-xs text-gray-400">Gamma (Γ)</div>
-                    <div class="text-xl font-bold text-blue-400">${g.gamma?.toFixed(6) || 0}</div>
+                    <div class="text-xl font-bold text-[#7132f5]">${g.gamma?.toFixed(6) || 0}</div>
                     <div class="text-xs text-gray-500">Delta 变化率</div>
                 </div>
                 <div class="bg-gray-800/50 rounded-lg p-3 text-center">
@@ -4069,7 +4322,7 @@ async function loadGreeksSummary() {
                 </div>
                 <div class="bg-gray-800/50 rounded-lg p-3 text-center">
                     <div class="text-xs text-gray-400">Vega (V)</div>
-                    <div class="text-xl font-bold text-purple-400">$${g.vega?.toFixed(4) || 0}</div>
+                    <div class="text-xl font-bold text-[#7132f5]">$${g.vega?.toFixed(4) || 0}</div>
                     <div class="text-xs text-gray-500">IV 敏感度</div>
                 </div>
             </div>
@@ -4078,19 +4331,19 @@ async function loadGreeksSummary() {
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                     <div class="text-center">
                         <div class="text-gray-400">总 Delta</div>
-                        <div class="text-lg font-bold ${total.delta > 0 ? 'text-green-400' : 'text-red-400'}">${total.delta?.toLocaleString() || 0}</div>
+                        <div class="text-lg font-bold ${total.delta > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">${total.delta?.toLocaleString() || 0}</div>
                     </div>
                     <div class="text-center">
                         <div class="text-gray-400">总 Gamma</div>
-                        <div class="text-lg font-bold text-blue-400">${total.gamma?.toFixed(4) || 0}</div>
+                        <div class="text-lg font-bold text-[#7132f5]">${total.gamma?.toFixed(4) || 0}</div>
                     </div>
                     <div class="text-center">
                         <div class="text-gray-400">总 Theta</div>
-                        <div class="text-lg font-bold ${total.theta > 0 ? 'text-green-400' : 'text-red-400'}">$${total.theta?.toLocaleString() || 0}</div>
+                        <div class="text-lg font-bold ${total.theta > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">$${total.theta?.toLocaleString() || 0}</div>
                     </div>
                     <div class="text-center">
                         <div class="text-gray-400">总 Vega</div>
-                        <div class="text-lg font-bold text-purple-400">$${total.vega?.toLocaleString() || 0}</div>
+                        <div class="text-lg font-bold text-[#7132f5]">$${total.vega?.toLocaleString() || 0}</div>
                     </div>
                 </div>
             </div>
@@ -4099,15 +4352,15 @@ async function loadGreeksSummary() {
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
                     <div class="flex justify-between">
                         <span class="text-gray-400">若 ${currency} 下跌 10%</span>
-                        <span class="${risk.delta_pnl_if_down_10pct < 0 ? 'text-red-400' : 'text-green-400'}">${risk.delta_pnl_if_down_10pct < 0 ? '' : '+'}$${risk.delta_pnl_if_down_10pct?.toLocaleString() || 0}</span>
+                        <span class="${risk.delta_pnl_if_down_10pct < 0 ? 'text-[#ef4444]' : 'text-[#149e61]'}">${risk.delta_pnl_if_down_10pct < 0 ? '' : '+'}$${risk.delta_pnl_if_down_10pct?.toLocaleString() || 0}</span>
                     </div>
                     <div class="flex justify-between">
                         <span class="text-gray-400">若 ${currency} 上涨 10%</span>
-                        <span class="${risk.delta_pnl_if_up_10pct > 0 ? 'text-green-400' : 'text-red-400'}">+${risk.delta_pnl_if_up_10pct?.toLocaleString() || 0}</span>
+                        <span class="${risk.delta_pnl_if_up_10pct > 0 ? 'text-[#149e61]' : 'text-[#ef4444]'}">+${risk.delta_pnl_if_up_10pct?.toLocaleString() || 0}</span>
                     </div>
                     <div class="flex justify-between">
                         <span class="text-gray-400">若 IV 上升 5%</span>
-                        <span class="text-green-400">+$${risk.vega_pnl_if_iv_up_5pct?.toLocaleString() || 0}</span>
+                        <span class="text-[#149e61]">+$${risk.vega_pnl_if_iv_up_5pct?.toLocaleString() || 0}</span>
                     </div>
                 </div>
                 <div class="mt-2 text-xs text-gray-500">
@@ -4117,7 +4370,7 @@ async function loadGreeksSummary() {
                 </div>
             </div>`;
     } catch (e) {
-        container.innerHTML = `<div class="text-red-400 text-sm">加载失败: ${e.message}</div>`;
+        container.innerHTML = `<div class="text-[#ef4444] text-sm">加载失败: ${e.message}</div>`;
     }
 }
 

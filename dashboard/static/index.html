@@ -3,214 +3,210 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com; connect-src 'self' ws: wss: http: https:; img-src 'self' data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; connect-src 'self' ws: wss: http: https:; img-src 'self' data:;">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <title>加密期权监控面板</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        .gradient-bg { background: linear-gradient(135deg, #1e3a5f 0%, #0d1f33 100%); }
-        .card-glass { background: rgba(30, 58, 95, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        :root {
+            --brand: #7132f5; --brand-hover: #8b5cf6;
+            --bg-1: #12131a; --bg-2: #1a1b23; --bg-3: #22232e; --bg-hover: #2a2b38;
+            --text-1: #e4e4e7; --text-2: #9497a9; --text-3: #686b82;
+            --pos: #149e61; --neg: #ef4444; --warn: #f59e0b;
+            --border: rgba(71,73,85,0.3); --border-active: rgba(113,50,245,0.4);
+        }
+        body { font-family: 'Outfit', 'Inter', sans-serif; background: var(--bg-1); color: var(--text-1); }
+        .font-mono, [class*="font-mono"] { font-family: 'JetBrains Mono', monospace; }
+        .gradient-bg { background: var(--bg-1); }
+        .card-glass { background: rgba(26,27,35,0.8); backdrop-filter: blur(10px); border: 1px solid var(--border); }
         .pulse-dot { animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .pulse-live { position: relative; }
+        .pulse-live::after { content: ''; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background: var(--brand); border-radius: 50%; animation: pulseGlow 2s infinite; }
+        @keyframes pulseGlow { 0%, 100% { box-shadow: 0 0 4px var(--brand); opacity: 1; } 50% { box-shadow: 0 0 12px var(--brand); opacity: 0.6; } }
+        @keyframes pulseUpdate { 0% { color: var(--text-1); } 30% { color: var(--brand); text-shadow: 0 0 8px rgba(113,50,245,0.4); } 100% { color: var(--text-1); } }
+        .pulse-update { animation: pulseUpdate 0.8s ease-out; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(75, 85, 99, 0.2); border-radius: 3px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(249, 115, 22, 0.5); border-radius: 3px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(249, 115, 22, 0.7); }
-        .input-dark { background: rgba(31, 41, 55, 0.8); border: 1px solid rgba(75, 85, 99, 0.5); color: white; }
-        .input-dark:focus { outline: none; border-color: #f97316; box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2); }
-        .btn-primary { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); transition: all 0.3s ease; }
-        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(249, 115, 22, 0.4); }
-        .metric-card { transition: all 0.3s ease; }
-        .metric-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
-        @keyframes flashRed { 0%, 100% { border-color: rgba(239, 68, 68, 0.8); box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3); } 50% { border-color: rgba(239, 68, 68, 0.3); box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1); } }
-        .risk-alert-high { animation: flashRed 1.5s infinite; border: 2px solid rgba(239, 68, 68, 0.8) !important; background: rgba(239, 68, 68, 0.1) !important; }
-        .risk-alert-medium { border: 2px solid rgba(245, 158, 11, 0.6) !important; background: rgba(245, 158, 11, 0.05) !important; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(75, 85, 99, 0.15); border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(113, 50, 245, 0.4); border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(113, 50, 245, 0.6); }
+        .input-dark { background: var(--bg-3); border: 1px solid var(--border); color: var(--text-1); font-family: 'Outfit', sans-serif; }
+        .input-dark:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 2px rgba(113,50,245,0.15); }
+        .btn-primary { background: var(--brand); transition: all 0.2s ease; font-family: 'Outfit', sans-serif; }
+        .btn-primary:hover { background: var(--brand-hover); box-shadow: 0 4px 16px rgba(113,50,245,0.3); }
+        .btn-secondary { background: var(--bg-3); border: 1px solid var(--border); color: var(--text-2); transition: all 0.2s ease; }
+        .btn-secondary:hover { border-color: var(--brand); color: var(--text-1); }
+        .metric-card { transition: all 0.2s ease; }
+        .metric-card:hover { border-color: var(--border-active); box-shadow: 0 0 20px rgba(113,50,245,0.08); }
+        .num-hero { font-size: 28px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: -0.02em; }
+        .num-key { font-size: 18px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+        .num-secondary { font-size: 14px; font-weight: 500; }
+        .num-metadata { font-size: 12px; color: var(--text-3); }
+        @keyframes flashRed { 0%, 100% { border-color: rgba(239,68,68,0.8); box-shadow: 0 0 0 2px rgba(239,68,68,0.3); } 50% { border-color: rgba(239,68,68,0.3); box-shadow: 0 0 0 2px rgba(239,68,68,0.1); } }
+        .risk-alert-high { animation: flashRed 1.5s infinite; border: 2px solid rgba(239,68,68,0.8) !important; background: rgba(239,68,68,0.1) !important; }
+        .risk-alert-medium { border: 2px solid rgba(245,158,11,0.6) !important; background: rgba(245,158,11,0.05) !important; }
         .risk-badge { animation: pulse 1.5s infinite; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
         .recovery-result { animation: slideIn 0.3s ease; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
         .modal.active { display: flex; }
-        .modal-content { background: linear-gradient(135deg, #1e3a5f 0%, #0d1f33 100%); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
-        .vega-high { color: #f59e0b; font-weight: bold; }
+        .modal-content { background: var(--bg-2); border: 1px solid var(--border); border-radius: 16px; padding: 24px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .vega-high { color: var(--warn); font-weight: bold; }
         .tabular-nums { font-variant-numeric: tabular-nums; }
-        #contractsTable tr:hover td { background: rgba(255,255,255,0.02); }
+        #contractsTable tr:hover td { background: rgba(113,50,245,0.04); }
         #contractsTable tr td { transition: background 0.15s ease; vertical-align: middle; }
-        #contractsTable thead th { position: sticky; top: 0; z-index: 10; background: rgba(30,41,55,0.95); backdrop-filter: blur(8px); }
-
-        /* 表格固定布局 - 每列精确宽度 */
-        .table-compact {
-            font-size: 15px;
-            table-layout: fixed;
-            width: 100%;
-        }
-        .table-compact th,
-        .table-compact td {
-            padding: 8px 6px !important;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-.animate-fade-in { animation: fadeIn 0.3s ease-out; }
-</style>
+        #contractsTable thead th { position: sticky; top: 0; z-index: 10; background: rgba(34,35,46,0.95); backdrop-filter: blur(8px); }
+        .table-compact { font-size: 15px; table-layout: fixed; width: 100%; }
+        .table-compact th, .table-compact td { padding: 8px 6px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        .density-compact .metric-card { padding: 8px !important; }
+        .density-compact .card-glass { padding: 12px !important; }
+        .density-compact .num-hero { font-size: 22px; }
+        .density-pro .num-hero { font-size: 32px; }
+        .density-pro .metric-card { padding: 20px !important; }
+    </style>
 </head>
 <body class="gradient-bg min-h-screen text-white">
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 space-y-2 pointer-events-none"></div>
     <div class="container mx-auto px-4 py-6 max-w-[1600px]">
-        <header class="mb-6">
-            <div class="flex flex-wrap items-center justify-between gap-4">
+        <header class="mb-6 bg-[#1a1b23] rounded-2xl px-5 py-3 border border-[rgba(71,73,85,0.3)]">
+            <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
-                    <div class="w-12 h-12 bg-gradient-to-br from-orange-500 to-red-600 rounded-xl flex items-center justify-center shadow-lg">
-                        <i class="fas fa-chart-line text-2xl"></i>
+                    <div class="w-9 h-9 bg-[#7132f5] rounded-xl flex items-center justify-center">
+                        <i class="fas fa-chart-line text-white text-sm"></i>
                     </div>
-                    <div>
-                        <h1 class="text-2xl font-bold">加密期权监控面板</h1>
-                        <p class="text-gray-400 text-sm">Binance + Deribit 双平台实时监控 | 倍投修复 + 风险预警</p>
-                    </div>
+                    <h1 class="text-lg font-semibold tracking-tight" style="font-family:'Outfit',sans-serif">Crypto Options</h1>
                 </div>
-                <div class="flex items-center gap-4">
-                    <div class="flex items-center gap-2 text-sm bg-gray-800/50 px-3 py-1.5 rounded-full">
-                        <span class="w-2 h-2 bg-green-500 rounded-full pulse-dot"></span>
-                        <span id="lastUpdate" class="text-gray-300">等待数据...</span>
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 bg-[#149e61] rounded-full pulse-dot"></span>
+                    <span class="num-hero text-[#e4e4e7] pulse-live" id="spotPrice" style="font-size:20px">--</span>
+                    <span class="text-xs text-[#686b82] ml-1" id="currencyLabel">BTC</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="flex gap-1 bg-[#22232e] rounded-lg p-0.5">
+                        <button class="density-btn px-2 py-1 rounded text-xs font-medium bg-[#22232e] text-[#9497a9] hover:text-white transition" data-density="compact" onclick="setDensityMode('compact')">简洁</button>
+                        <button class="density-btn px-2 py-1 rounded text-xs font-medium bg-[#7132f5] text-white transition" data-density="standard" onclick="setDensityMode('standard')">标准</button>
+                        <button class="density-btn px-2 py-1 rounded text-xs font-medium bg-[#22232e] text-[#9497a9] hover:text-white transition" data-density="pro" onclick="setDensityMode('pro')">专业</button>
                     </div>
-                    <button id="scanBtn" class="btn-primary px-5 py-2.5 rounded-xl font-medium flex items-center gap-2">
-                        <i class="fas fa-search"></i>
-                        <i class="fas fa-sync-alt" id="scanIcon" style="display:none"></i>
-                        <span>立即扫描</span>
+                    <div class="flex items-center gap-2 text-xs text-[#686b82]">
+                        <span class="w-1.5 h-1.5 bg-[#149e61] rounded-full pulse-dot"></span>
+                        <span id="lastUpdate">等待数据...</span>
+                    </div>
+                    <button id="scanBtn" class="btn-primary px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2">
+                        <i class="fas fa-search text-xs"></i>
+                        <i class="fas fa-sync-alt text-xs" id="scanIcon" style="display:none"></i>
+                        <span>扫描</span>
                     </button>
-                    <button id="exportCsvBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-colors" title="导出CSV">
-                        <i class="fas fa-download"></i>
-                        <span class="hidden sm:inline">导出</span>
+                    <button id="exportCsvBtn" class="btn-secondary px-3 py-2 rounded-xl text-sm font-medium flex items-center gap-2" title="导出CSV">
+                        <i class="fas fa-download text-xs"></i>
                     </button>
                 </div>
             </div>
         </header>
 
         <!-- 顶部指标卡片 -->
-        <section class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">恐惧贪婪</span>
-                    <i class="fas fa-brain text-yellow-500 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold" id="fearGreedValue">--</div>
-                <div class="text-xs text-gray-400 mt-1" id="fearGreedLabel">市场情绪</div>
+        <section class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
+            <div class="bg-[#1a1b23] metric-card rounded-2xl p-4 border border-[rgba(71,73,85,0.3)]">
+                <div class="text-xs text-[#9497a9] mb-1">恐惧贪婪</div>
+                <div class="num-hero" id="fearGreedValue">--</div>
+                <div class="num-metadata mt-1" id="fearGreedLabel">市场情绪</div>
             </div>
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">资金费率</span>
-                    <i class="fas fa-percentage text-cyan-500 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold" id="fundingRateValue">--</div>
-                <div class="text-xs text-gray-400 mt-1" id="fundingRateLabel">永续合约</div>
+            <div class="bg-[#1a1b23] metric-card rounded-2xl p-4 border border-[rgba(71,73,85,0.3)]">
+                <div class="text-xs text-[#9497a9] mb-1">资金费率</div>
+                <div class="num-hero" id="fundingRateValue">--</div>
+                <div class="num-metadata mt-1" id="fundingRateLabel">永续合约</div>
             </div>
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">现货价格</span>
-                    <i class="fab fa-bitcoin text-orange-500 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold" id="spotPrice">--</div>
-                <div class="text-xs text-gray-400 mt-1" id="currencyLabel">BTC/USDT</div>
+            <div class="bg-[#1a1b23] metric-card rounded-2xl p-4 border border-[rgba(71,73,85,0.3)]">
+                <div class="text-xs text-[#9497a9] mb-1">DVOL 指数</div>
+                <div class="num-hero" id="dvolValue">--</div>
+                <div class="num-metadata mt-1" id="dvolSignal">--</div>
             </div>
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">DVOL 指数</span>
-                    <i class="fas fa-wave-square text-blue-500 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold" id="dvolValue">--</div>
-                <div class="text-xs mt-1" id="dvolSignal">--</div>
+            <div class="bg-[#1a1b23] metric-card rounded-2xl p-4 border border-[rgba(71,73,85,0.3)]">
+                <div class="text-xs text-[#9497a9] mb-1">距支撑位</div>
+                <div class="num-hero" id="supportDistCard">--</div>
+                <div class="num-metadata mt-1">到常规支撑位</div>
             </div>
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">距支撑位</span>
-                    <i class="fas fa-shield-alt text-blue-400 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold" id="supportDistCard">--</div>
-                <div class="text-xs text-gray-400 mt-1">到常规支撑位</div>
+            <div class="bg-[#1a1b23] metric-card rounded-2xl p-4 border border-[rgba(71,73,85,0.3)]">
+                <div class="text-xs text-[#9497a9] mb-1">大宗交易 (1h)</div>
+                <div class="num-hero" id="largeTradesCount">--</div>
+                <div class="num-metadata mt-1">笔大单成交</div>
             </div>
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">大宗交易 (1h)</span>
-                    <i class="fas fa-fish text-purple-500 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold" id="largeTradesCount">--</div>
-                <div class="text-xs text-gray-400 mt-1">笔大单成交</div>
-            </div>
-            <div class="card-glass metric-card rounded-xl p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-gray-400 text-sm">风险评分</span>
-                    <i class="fas fa-heartbeat text-red-400 text-lg"></i>
-                </div>
-                <div class="text-2xl font-bold" id="riskScoreCard">--</div>
-                <div class="text-xs text-gray-400 mt-1" id="riskLevelCard">综合风险</div>
+            <div class="bg-[#1a1b23] metric-card rounded-2xl p-4 border border-[rgba(71,73,85,0.3)]">
+                <div class="text-xs text-[#9497a9] mb-1">风险评分</div>
+                <div class="num-hero" id="riskScoreCard">--</div>
+                <div class="num-metadata mt-1" id="riskLevelCard">综合风险</div>
             </div>
         </section>
 
         <!-- 综合风险仪表板 -->
-        <section id="riskDashboard" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-red-500">
+        <section id="riskDashboard" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
             <!-- Header -->
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-3">
                     <h2 class="text-xl font-bold text-white">风险指挥中心</h2>
-                    <span id="rfStatusBadge" class="px-2 py-0.5 rounded text-xs font-medium bg-gray-700 text-gray-300">--</span>
+                    <span id="rfStatusBadge" class="px-2 py-0.5 rounded text-xs font-medium bg-[#22232e] text-[#e4e4e7]">--</span>
                 </div>
                 <div class="flex items-center gap-4 text-sm">
-                    <span class="text-gray-400">支撑位:
-                        <span id="floorRegularHeader" class="text-yellow-400 font-mono">--</span> /
-                        <span id="floorExtremeHeader" class="text-red-400 font-mono">--</span>
+                    <span class="text-[#9497a9]">支撑位:
+                        <span id="floorRegularHeader" class="text-[#f59e0b] font-mono">--</span> /
+                        <span id="floorExtremeHeader" class="text-[#ef4444] font-mono">--</span>
                     </span>
-                    <span id="riskScoreBadge" class="text-2xl font-bold text-gray-400">--</span>
+                    <span id="riskScoreBadge" class="text-2xl font-bold text-[#9497a9]">--</span>
                 </div>
             </div>
 
             <!-- Gauge + Radar + Indicator Cards — 3-column compact row -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                 <!-- Gauge -->
-                <div class="bg-gray-800/50 rounded-lg p-3 flex flex-col items-center justify-center">
+                <div class="bg-[#22232e]/50 rounded-lg p-3 flex flex-col items-center justify-center">
                     <canvas id="riskGaugeCanvas" width="220" height="130"></canvas>
-                    <div id="riskGaugeLabel" class="text-xs text-gray-400 mt-1">综合风险评分</div>
+                    <div id="riskGaugeLabel" class="text-xs text-[#9497a9] mt-1">综合风险评分</div>
                 </div>
                 <!-- Radar -->
-                <div class="bg-gray-800/50 rounded-lg p-3 flex items-center justify-center">
+                <div class="bg-[#22232e]/50 rounded-lg p-3 flex items-center justify-center">
                     <canvas id="riskRadarCanvas"></canvas>
                 </div>
                 <!-- 5 Indicator Cards -->
                 <div class="grid grid-cols-2 gap-2">
-                    <div class="bg-gray-800/50 rounded-lg p-2.5">
-                        <div class="text-xs text-gray-400 mb-0.5">Max Pain</div>
+                    <div class="bg-[#22232e]/50 rounded-lg p-2.5">
+                        <div class="text-xs text-[#9497a9] mb-0.5">Max Pain</div>
                         <div id="cardMaxPain" class="text-base font-bold text-white font-mono">--</div>
-                        <div id="cardMaxPainDist" class="text-xs text-gray-500">--</div>
+                        <div id="cardMaxPainDist" class="text-xs text-[#686b82]">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-2.5">
-                        <div class="text-xs text-gray-400 mb-0.5">Put Wall</div>
-                        <div id="cardPutWall" class="text-base font-bold text-yellow-400 font-mono">--</div>
-                        <div id="cardPutWallOI" class="text-xs text-gray-500">--</div>
+                    <div class="bg-[#22232e]/50 rounded-lg p-2.5">
+                        <div class="text-xs text-[#9497a9] mb-0.5">Put Wall</div>
+                        <div id="cardPutWall" class="text-base font-bold text-[#f59e0b] font-mono">--</div>
+                        <div id="cardPutWallOI" class="text-xs text-[#686b82]">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-2.5">
-                        <div class="text-xs text-gray-400 mb-0.5">Gamma Flip</div>
-                        <div id="cardGammaFlip" class="text-base font-bold text-purple-400 font-mono">--</div>
-                        <div id="cardGammaFlipSignal" class="text-xs text-gray-500">--</div>
+                    <div class="bg-[#22232e]/50 rounded-lg p-2.5">
+                        <div class="text-xs text-[#9497a9] mb-0.5">Gamma Flip</div>
+                        <div id="cardGammaFlip" class="text-base font-bold text-[#7132f5] font-mono">--</div>
+                        <div id="cardGammaFlipSignal" class="text-xs text-[#686b82]">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-2.5">
-                        <div class="text-xs text-gray-400 mb-0.5">常规支撑</div>
-                        <div id="cardFloorRegular" class="text-base font-bold text-green-400 font-mono">--</div>
-                        <div id="cardFloorRegularDist" class="text-xs text-gray-500">--</div>
+                    <div class="bg-[#22232e]/50 rounded-lg p-2.5">
+                        <div class="text-xs text-[#9497a9] mb-0.5">常规支撑</div>
+                        <div id="cardFloorRegular" class="text-base font-bold text-[#149e61] font-mono">--</div>
+                        <div id="cardFloorRegularDist" class="text-xs text-[#686b82]">--</div>
                     </div>
-                    <div class="bg-gray-800/50 rounded-lg p-2.5 col-span-2">
-                        <div class="text-xs text-gray-400 mb-0.5">极端支撑</div>
-                        <div id="cardFloorExtreme" class="text-base font-bold text-red-400 font-mono">--</div>
-                        <div id="cardFloorExtremeDist" class="text-xs text-gray-500">--</div>
+                    <div class="bg-[#22232e]/50 rounded-lg p-2.5 col-span-2">
+                        <div class="text-xs text-[#9497a9] mb-0.5">极端支撑</div>
+                        <div id="cardFloorExtreme" class="text-base font-bold text-[#ef4444] font-mono">--</div>
+                        <div id="cardFloorExtremeDist" class="text-xs text-[#686b82]">--</div>
                     </div>
                 </div>
             </div>
 
             <!-- Tabs -->
-            <div class="flex gap-1 mb-3 border-b border-gray-700">
-                <button onclick="setRiskTab('onchain')" class="risk-tab px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-white border-b-2 border-transparent transition" data-tab="onchain">链上指标</button>
-                <button onclick="setRiskTab('deriv')" class="risk-tab px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-white border-b-2 border-transparent transition" data-tab="deriv">衍生品</button>
-                <button onclick="setRiskTab('pressure')" class="risk-tab px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-white border-b-2 border-transparent transition" data-tab="pressure">压力测试</button>
-                <button onclick="setRiskTab('sentiment')" class="risk-tab px-3 py-1.5 text-sm font-medium text-gray-400 hover:text-white border-b-2 border-transparent transition" data-tab="sentiment">AI情绪</button>
+            <div class="flex gap-1 mb-3 border-b border-[rgba(71,73,85,0.3)]">
+                <button onclick="setRiskTab('onchain')" class="risk-tab px-3 py-1.5 text-sm font-medium text-[#9497a9] hover:text-white border-b-2 border-transparent transition" data-tab="onchain">链上指标</button>
+                <button onclick="setRiskTab('deriv')" class="risk-tab px-3 py-1.5 text-sm font-medium text-[#9497a9] hover:text-white border-b-2 border-transparent transition" data-tab="deriv">衍生品</button>
+                <button onclick="setRiskTab('pressure')" class="risk-tab px-3 py-1.5 text-sm font-medium text-[#9497a9] hover:text-white border-b-2 border-transparent transition" data-tab="pressure">压力测试</button>
+                <button onclick="setRiskTab('sentiment')" class="risk-tab px-3 py-1.5 text-sm font-medium text-[#9497a9] hover:text-white border-b-2 border-transparent transition" data-tab="sentiment">AI情绪</button>
             </div>
 
             <!-- Tab Content: On-chain -->
@@ -236,27 +232,27 @@
             </div>
 
             <!-- LLM Insight Panel -->
-            <div class="mt-4 border-l-4 border-red-500 bg-gray-800/30 rounded-lg p-4">
+            <div class="mt-4 border-l-4 border-[#7132f5] bg-[#22232e]/30 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-2">
                         <span class="text-lg">🤖</span>
                         <span class="font-bold text-white">LLM 智能研判</span>
-                        <span id="llmInsightModel" class="text-xs text-gray-500"></span>
+                        <span id="llmInsightModel" class="text-xs text-[#686b82]"></span>
                     </div>
-                    <button onclick="loadLLMRiskInsight('BTC')" id="llmInsightBtn" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition">开始研判</button>
+                    <button onclick="loadLLMRiskInsight('BTC')" id="llmInsightBtn" class="px-3 py-1 bg-[#7132f5] hover:bg-[#8b5cf6] text-white text-sm rounded transition">开始研判</button>
                 </div>
                 <div id="llmInsightLoading" class="hidden text-center py-4">
-                    <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-red-500"></div>
-                    <span class="ml-2 text-gray-400">LLM 分析中...</span>
+                    <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-[#7132f5]"></div>
+                    <span class="ml-2 text-[#9497a9]">LLM 分析中...</span>
                 </div>
                 <div id="llmInsightResult" class="hidden">
-                    <div id="llmNarrative" class="border-l-2 border-blue-500 pl-3 mb-3 text-sm text-gray-300"></div>
-                    <div id="llmAnomalies" class="border-l-2 border-yellow-500 pl-3 mb-3"></div>
-                    <div id="llmRecommendations" class="border-l-2 border-green-500 pl-3 mb-3"></div>
+                    <div id="llmNarrative" class="border-l-2 border-[#7132f5] pl-3 mb-3 text-sm text-[#e4e4e7]"></div>
+                    <div id="llmAnomalies" class="border-l-2 border-[#f59e0b] pl-3 mb-3"></div>
+                    <div id="llmRecommendations" class="border-l-2 border-[#149e61] pl-3 mb-3"></div>
                     <div class="flex items-center gap-2 mt-2">
-                        <span class="text-xs text-gray-500">信心度:</span>
-                        <div class="flex-1 bg-gray-700 rounded-full h-2"><div id="llmConfidenceBar" class="bg-red-500 h-2 rounded-full" style="width:0%"></div></div>
-                        <span id="llmConfidenceText" class="text-xs text-gray-400">0%</span>
+                        <span class="text-xs text-[#686b82]">信心度:</span>
+                        <div class="flex-1 bg-[#22232e] rounded-full h-2"><div id="llmConfidenceBar" class="bg-[#7132f5] h-2 rounded-full" style="width:0%"></div></div>
+                        <span id="llmConfidenceText" class="text-xs text-[#9497a9]">0%</span>
                     </div>
                 </div>
             </div>
@@ -264,99 +260,99 @@
 
 
         <!-- 策略推荐中心 v2 -->
-        <section class="card-glass rounded-xl p-5 mb-6 border-l-4 border-orange-500">
+        <section class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
-                    <i class="fas fa-chess-queen text-orange-500"></i>
+                    <i class="fas fa-chess-queen text-[#7132f5]"></i>
                     <h3 class="font-semibold text-lg">策略推荐中心</h3>
-                    <span class="text-xs text-gray-400 ml-2">统一筛选 · 多因子评分 · DVOL自适应</span>
+                    <span class="text-xs text-[#9497a9] ml-2">统一筛选 · 多因子评分 · DVOL自适应</span>
                 </div>
                 <div class="flex gap-1" id="strategyModeTabs">
                     <button id="modeNewBtn"
-                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white">新建开仓</button>
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-[#7132f5] text-white">新建开仓</button>
                     <button id="modeRollBtn"
-                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">滚仓优化</button>
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-[#22232e] text-[#e4e4e7]">滚仓优化</button>
                     <button id="modeWheelBtn"
-                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">轮转策略</button>
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-[#22232e] text-[#e4e4e7]">轮转策略</button>
                     <button id="modeGridBtn"
-                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">网格配置</button>
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium bg-[#22232e] text-[#e4e4e7]">网格配置</button>
                 </div>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                 <div class="lg:col-span-1 space-y-3">
-                    <div class="bg-gray-800/50 p-3 rounded-xl border border-gray-700">
-                        <h4 class="text-xs font-semibold text-gray-300 mb-2"><i class="fas fa-edit mr-1"></i>基础参数</h4>
+                    <div class="bg-[#22232e]/50 p-3 rounded-xl border border-[rgba(71,73,85,0.3)]">
+                        <h4 class="text-xs font-semibold text-[#e4e4e7] mb-2"><i class="fas fa-edit mr-1"></i>基础参数</h4>
                         <div class="space-y-2">
                             <div>
-                                <label class="block text-[11px] text-gray-400 mb-0.5">币种</label>
+                                <label class="block text-[11px] text-[#9497a9] mb-0.5">币种</label>
                                 <select id="strCurrency" class="input-dark w-full p-1.5 rounded-lg text-xs">
                                     <option value="BTC">BTC</option><option value="ETH">ETH</option><option value="SOL">SOL</option>
                                 </select>
                             </div>
                             <div>
-                                <label class="block text-[11px] text-gray-400 mb-0.5">方向</label>
+                                <label class="block text-[11px] text-[#9497a9] mb-0.5">方向</label>
                                 <div class="flex gap-1" id="strDirectionBtns">
                                     <button id="strDirPut"
-                                        class="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white">PUT</button>
+                                        class="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-[#149e61] text-white">PUT</button>
                                     <button id="strDirCall"
-                                        class="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-gray-700 text-gray-300">CALL</button>
+                                        class="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-[#22232e] text-[#e4e4e7]">CALL</button>
                                 </div>
                             </div>
                             <div>
-                                <label class="block text-[11px] text-gray-400 mb-0.5">可用资金 (USDT)</label>
+                                <label class="block text-[11px] text-[#9497a9] mb-0.5">可用资金 (USDT)</label>
                                 <input type="number" id="strCapital" value="50000" class="input-dark w-full p-1.5 rounded-lg text-xs">
                             </div>
                         </div>
                     </div>
 
-                    <div id="strRollFields" class="hidden bg-orange-900/20 p-3 rounded-xl border border-orange-500/30">
-                        <h4 class="text-xs font-semibold text-orange-400 mb-2"><i class="fas fa-sync-alt mr-1"></i>滚仓参数</h4>
+                    <div id="strRollFields" class="hidden bg-[#7132f5]/10 p-3 rounded-xl border border-[#7132f5]/30">
+                        <h4 class="text-xs font-semibold text-[#7132f5] mb-2"><i class="fas fa-sync-alt mr-1"></i>滚仓参数</h4>
                         <div class="space-y-2">
                             <div>
-                                <label class="block text-[11px] text-gray-400 mb-0.5">当前行权价</label>
+                                <label class="block text-[11px] text-[#9497a9] mb-0.5">当前行权价</label>
                                 <input type="number" id="strOldStrike" class="input-dark w-full p-1.5 rounded-lg text-xs" placeholder="如 90000">
                             </div>
                             <div>
-                                <label class="block text-[11px] text-gray-400 mb-0.5">当前到期日</label>
+                                <label class="block text-[11px] text-[#9497a9] mb-0.5">当前到期日</label>
                                 <input type="date" id="strOldExpiry" class="input-dark w-full p-1.5 rounded-lg text-xs">
                             </div>
                         </div>
                     </div>
 
-                    <div id="strGridFields" class="hidden bg-purple-900/20 p-3 rounded-xl border border-purple-500/30">
-                        <h4 class="text-xs font-semibold text-purple-400 mb-2"><i class="fas fa-th mr-1"></i>网格参数</h4>
+                    <div id="strGridFields" class="hidden bg-[#7132f5]/10 p-3 rounded-xl border border-[#7132f5]/30">
+                        <h4 class="text-xs font-semibold text-[#7132f5] mb-2"><i class="fas fa-th mr-1"></i>网格参数</h4>
                         <div class="space-y-2">
                             <div>
-                                <label class="block text-[11px] text-gray-400 mb-0.5">网格层数</label>
+                                <label class="block text-[11px] text-[#9497a9] mb-0.5">网格层数</label>
                                 <input type="number" id="strGridLevels" value="5" min="2" max="20" class="input-dark w-full p-1.5 rounded-lg text-xs">
                             </div>
                             <div>
-                                <label class="block text-[11px] text-gray-400 mb-0.5">间隔百分比 (%)</label>
+                                <label class="block text-[11px] text-[#9497a9] mb-0.5">间隔百分比 (%)</label>
                                 <input type="number" id="strGridInterval" value="3" min="0.5" max="20" step="0.5" class="input-dark w-full p-1.5 rounded-lg text-xs">
                             </div>
                         </div>
                     </div>
 
-                    <details class="bg-gray-800/30 rounded-xl border border-gray-700/50">
-                        <summary class="p-3 text-xs font-semibold text-gray-400 cursor-pointer"><i class="fas fa-sliders-h mr-1"></i>高级筛选</summary>
+                    <details class="bg-[#22232e]/30 rounded-xl border border-[rgba(71,73,85,0.3)]">
+                        <summary class="p-3 text-xs font-semibold text-[#9497a9] cursor-pointer"><i class="fas fa-sliders-h mr-1"></i>高级筛选</summary>
                         <div class="px-3 pb-3 space-y-2">
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-0.5">最大 Delta</label>
+                                <label class="block text-[10px] text-[#686b82] mb-0.5">最大 Delta</label>
                                 <input type="number" id="strMaxDelta" value="0.30" step="0.05" min="0.1" max="0.5" class="input-dark w-full p-1 rounded-lg text-xs text-center">
                             </div>
                             <div class="grid grid-cols-2 gap-2">
                                 <div>
-                                    <label class="block text-[10px] text-gray-500 mb-0.5">最小 DTE</label>
+                                    <label class="block text-[10px] text-[#686b82] mb-0.5">最小 DTE</label>
                                     <input type="number" id="strMinDte" value="14" min="1" class="input-dark w-full p-1 rounded-lg text-xs text-center">
                                 </div>
                                 <div>
-                                    <label class="block text-[10px] text-gray-500 mb-0.5">最大 DTE</label>
+                                    <label class="block text-[10px] text-[#686b82] mb-0.5">最大 DTE</label>
                                     <input type="number" id="strMaxDte" value="45" min="1" class="input-dark w-full p-1 rounded-lg text-xs text-center">
                                 </div>
                             </div>
                             <div>
-                                <label class="block text-[10px] text-gray-500 mb-0.5">最低 APR (%)</label>
+                                <label class="block text-[10px] text-[#686b82] mb-0.5">最低 APR (%)</label>
                                 <input type="number" id="strMinApr" value="10" min="0" step="1" class="input-dark w-full p-1 rounded-lg text-xs text-center">
                             </div>
                         </div>
@@ -369,17 +365,17 @@
                 </div>
 
                 <div class="lg:col-span-3">
-                    <div id="strDvolWarning" class="hidden mb-3 p-2 bg-yellow-900/30 border border-yellow-600 rounded-lg text-sm text-yellow-300"></div>
+                    <div id="strDvolWarning" class="hidden mb-3 p-2 bg-[#f59e0b]/10 border border-[#f59e0b]/40 rounded-lg text-sm text-[#f59e0b]"></div>
                     <div id="strLoading" class="hidden text-center py-8">
-                        <div class="animate-spin inline-block w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full"></div>
-                        <p class="mt-2 text-gray-400 text-sm" id="strLoadingText">正在分析合约...</p>
+                        <div class="animate-spin inline-block w-8 h-8 border-4 border-[#7132f5] border-t-transparent rounded-full"></div>
+                        <p class="mt-2 text-[#9497a9] text-sm" id="strLoadingText">正在分析合约...</p>
                     </div>
-                    <div id="strEmpty" class="hidden text-center py-8 text-gray-500">
+                    <div id="strEmpty" class="hidden text-center py-8 text-[#686b82]">
                         <i class="fas fa-inbox text-3xl mb-2 opacity-30"></i>
                         <p id="strEmptyMessage" class="text-sm">暂无推荐结果</p>
                     </div>
                     <div id="strResultsWrapper">
-                        <div class="text-center text-gray-500 py-12">
+                        <div class="text-center text-[#686b82] py-12">
                             <i class="fas fa-chess-queen text-4xl mb-2 opacity-30"></i>
                             <p class="text-sm">选择参数后点击"获取推荐"</p>
                         </div>
@@ -390,8 +386,7 @@
 
         
         <!-- IV 波动率微笑 -->
-        <!-- IV 波动率微笑 -->
-        <section id="ivSmileSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-indigo-500">
+        <section id="ivSmileSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
                     <span class="text-xl">📈</span>
@@ -402,16 +397,14 @@
                     <option value="ETH">ETH</option>
                 </select>
             </div>
-            <div class="text-xs text-gray-500 mb-3 bg-gray-800/30 rounded p-2">
-                <span class="text-indigo-400 font-medium">说明：</span>
-                展示不同行权价的隐含波动率(IV)分布。通常 ATM 附近 IV 最低，OTM Put IV 较高(左偏)。
-                <span class="text-green-400">● Put</span> <span class="text-blue-400">● Call</span> <span class="text-yellow-400">● ATM</span>
+            <div id="ivSmileChart" style="height: 280px; position: relative;">
+                <canvas id="ivSmileCanvas"></canvas>
             </div>
-            <div id="ivSmileChart"></div>
+            <div id="ivSmileAnalysis" class="mt-4"></div>
         </section>
 
         <!-- Greeks 风险矩阵 -->
-        <section id="greeksSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-cyan-500">
+        <section id="greeksSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
                     <span class="text-xl">🛡️</span>
@@ -422,22 +415,22 @@
                     <option value="ETH">ETH</option>
                 </select>
             </div>
-            <div class="text-xs text-gray-500 mb-3 bg-gray-800/30 rounded p-2 space-y-1">
-                <div><span class="text-cyan-400 font-medium">Delta (Δ):</span> 价格敏感度 | +看涨 -看跌 | 绝对值>0.5风险高</div>
-                <div><span class="text-blue-400 font-medium">Gamma (Γ):</span> Delta变化率 | 越大价格大幅波动风险越高</div>
-                <div><span class="text-green-400 font-medium">Theta (Θ):</span> 时间损耗 | 负数表示每天流失的价值</div>
-                <div><span class="text-purple-400 font-medium">Vega (V):</span> IV敏感度 | 越大波动率变化影响越大</div>
+            <div class="text-xs text-[#686b82] mb-3 bg-[#22232e]/30 rounded p-2 space-y-1">
+                <div><span class="text-[#7132f5] font-medium">Delta (Δ):</span> 价格敏感度 | +看涨 -看跌 | 绝对值>0.5风险高</div>
+                <div><span class="text-[#7132f5] font-medium">Gamma (Γ):</span> Delta变化率 | 越大价格大幅波动风险越高</div>
+                <div><span class="text-[#149e61] font-medium">Theta (Θ):</span> 时间损耗 | 负数表示每天流失的价值</div>
+                <div><span class="text-[#7132f5] font-medium">Vega (V):</span> IV敏感度 | 越大波动率变化影响越大</div>
             </div>
             <div id="greeksGrid"></div>
         </section>
 
         <!-- AI 研判中心 -->
-        <section id="llmAnalystSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-purple-500">
+        <section id="llmAnalystSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
-                    <i class="fas fa-brain text-purple-500"></i>
+                    <i class="fas fa-brain text-[#7132f5]"></i>
                     <h3 class="font-semibold text-lg">AI 研判中心</h3>
-                    <span class="text-xs text-gray-400 ml-2">LLM 综合分析 · 多空辩论 · 数据审计</span>
+                    <span class="text-xs text-[#9497a9] ml-2">LLM 综合分析 · 多空辩论 · 数据审计</span>
                 </div>
                 <div class="flex items-center gap-2">
                     <select id="llmCurrency" class="input-dark rounded-lg px-3 py-1.5 text-sm">
@@ -458,92 +451,92 @@
             <!-- 进度指示器 -->
             <div id="llmProgress" class="hidden mb-4">
                 <div class="flex items-center gap-3 mb-2">
-                    <div id="llmStep1" class="flex items-center gap-1.5 text-xs text-gray-400">
+                    <div id="llmStep1" class="flex items-center gap-1.5 text-xs text-[#9497a9]">
                         <i class="fas fa-circle-notch fa-spin"></i> 规则分析
                     </div>
-                    <div class="text-gray-600">→</div>
-                    <div id="llmStep2" class="flex items-center gap-1.5 text-xs text-gray-500">
+                    <div class="text-[#686b82]">→</div>
+                    <div id="llmStep2" class="flex items-center gap-1.5 text-xs text-[#686b82]">
                         <i class="far fa-circle"></i> 综合研判
                     </div>
-                    <div class="text-gray-600">→</div>
-                    <div id="llmStep3" class="flex items-center gap-1.5 text-xs text-gray-500">
+                    <div class="text-[#686b82]">→</div>
+                    <div id="llmStep3" class="flex items-center gap-1.5 text-xs text-[#686b82]">
                         <i class="far fa-circle"></i> 多空辩论
                     </div>
-                    <div class="text-gray-600">→</div>
-                    <div id="llmStep4" class="flex items-center gap-1.5 text-xs text-gray-500">
+                    <div class="text-[#686b82]">→</div>
+                    <div id="llmStep4" class="flex items-center gap-1.5 text-xs text-[#686b82]">
                         <i class="far fa-circle"></i> 数据审计
                     </div>
                 </div>
-                <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
-                    <div id="llmProgressBar" class="h-full bg-purple-500 rounded-full transition-all" style="width: 0%"></div>
+                <div class="w-full h-1 bg-[#22232e] rounded-full overflow-hidden">
+                    <div id="llmProgressBar" class="h-full bg-[#7132f5] rounded-full transition-all" style="width: 0%"></div>
                 </div>
             </div>
 
             <!-- 空状态 -->
-            <div id="llmEmpty" class="text-center py-8 text-gray-500">
-                <i class="fas fa-brain text-4xl mb-3 text-gray-600"></i>
+            <div id="llmEmpty" class="text-center py-8 text-[#686b82]">
+                <i class="fas fa-brain text-4xl mb-3 text-[#686b82]"></i>
                 <p>选择币种，点击"开始分析"启动 LLM 综合研判</p>
-                <p class="text-xs mt-1 text-gray-600">需要配置 LLM API Key（面板底部）</p>
+                <p class="text-xs mt-1 text-[#686b82]">需要配置 LLM API Key（面板底部）</p>
             </div>
 
             <!-- 结果区 -->
             <div id="llmResults" class="hidden">
                 <!-- 综合研判卡片 -->
-                <div id="llmSynthesisCard" class="mb-4 p-5 rounded-xl border-2 border-purple-500/40 bg-gradient-to-r from-purple-900/30 to-gray-900/30 hidden">
+                <div id="llmSynthesisCard" class="mb-4 p-5 rounded-xl border-2 border-[#7132f5]/40 bg-gradient-to-r from-[#7132f5]/10 to-[#22232e]/30 hidden">
                     <div class="flex items-center gap-2 mb-3">
-                        <i class="fas fa-chart-line text-purple-400"></i>
-                        <span class="font-semibold text-sm text-purple-300">综合研判</span>
-                        <span id="llmSynthesisConfidence" class="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 ml-auto"></span>
+                        <i class="fas fa-chart-line text-[#7132f5]"></i>
+                        <span class="font-semibold text-sm text-[#8b5cf6]">综合研判</span>
+                        <span id="llmSynthesisConfidence" class="text-xs px-2 py-0.5 rounded-full bg-[#7132f5]/20 text-[#8b5cf6] ml-auto"></span>
                     </div>
-                    <div id="llmSynthesisContent" class="text-sm text-gray-300 space-y-3"></div>
+                    <div id="llmSynthesisContent" class="text-sm text-[#e4e4e7] space-y-3"></div>
                 </div>
 
                 <!-- 多空辩论卡片 -->
                 <div id="llmDebateCard" class="mb-4 hidden">
                     <div class="flex items-center gap-2 mb-3">
-                        <i class="fas fa-balance-scale text-yellow-400"></i>
-                        <span class="font-semibold text-sm text-yellow-300">多空辩论</span>
+                        <i class="fas fa-balance-scale text-[#f59e0b]"></i>
+                        <span class="font-semibold text-sm text-[#f59e0b]">多空辩论</span>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div class="p-4 rounded-lg border border-green-500/30 bg-green-900/10">
+                        <div class="p-4 rounded-lg border border-[#149e61]/30 bg-[#149e61]/10">
                             <div class="flex items-center gap-2 mb-2">
                                 <span class="text-lg">🐂</span>
-                                <span class="text-sm font-semibold text-green-400">Bull Agent</span>
-                                <span id="llmBullConf" class="text-xs text-green-300 ml-auto"></span>
+                                <span class="text-sm font-semibold text-[#149e61]">Bull Agent</span>
+                                <span id="llmBullConf" class="text-xs text-[#149e61] ml-auto"></span>
                             </div>
-                            <div id="llmBullContent" class="text-xs text-gray-300 space-y-2"></div>
+                            <div id="llmBullContent" class="text-xs text-[#e4e4e7] space-y-2"></div>
                         </div>
-                        <div class="p-4 rounded-lg border border-red-500/30 bg-red-900/10">
+                        <div class="p-4 rounded-lg border border-[#ef4444]/30 bg-[#ef4444]/10">
                             <div class="flex items-center gap-2 mb-2">
                                 <span class="text-lg">🐻</span>
-                                <span class="text-sm font-semibold text-red-400">Bear Agent</span>
-                                <span id="llmBearConf" class="text-xs text-red-300 ml-auto"></span>
+                                <span class="text-sm font-semibold text-[#ef4444]">Bear Agent</span>
+                                <span id="llmBearConf" class="text-xs text-[#ef4444] ml-auto"></span>
                             </div>
-                            <div id="llmBearContent" class="text-xs text-gray-300 space-y-2"></div>
+                            <div id="llmBearContent" class="text-xs text-[#e4e4e7] space-y-2"></div>
                         </div>
-                        <div class="p-4 rounded-lg border border-yellow-500/30 bg-yellow-900/10">
+                        <div class="p-4 rounded-lg border border-[#f59e0b]/30 bg-[#f59e0b]/10">
                             <div class="flex items-center gap-2 mb-2">
                                 <span class="text-lg">⚖️</span>
-                                <span class="text-sm font-semibold text-yellow-400">裁判裁决</span>
+                                <span class="text-sm font-semibold text-[#f59e0b]">裁判裁决</span>
                             </div>
-                            <div id="llmJudgeContent" class="text-xs text-gray-300 space-y-2"></div>
+                            <div id="llmJudgeContent" class="text-xs text-[#e4e4e7] space-y-2"></div>
                         </div>
                     </div>
                 </div>
 
                 <!-- 数据审计卡片 -->
-                <div id="llmAuditCard" class="mb-4 p-4 rounded-xl border border-gray-600/30 bg-gray-900/30 hidden">
+                <div id="llmAuditCard" class="mb-4 p-4 rounded-xl border border-[rgba(71,73,85,0.3)] bg-gray-900/30 hidden">
                     <div class="flex items-center justify-between mb-3">
                         <div class="flex items-center gap-2">
-                            <i class="fas fa-shield-alt text-blue-400"></i>
-                            <span class="font-semibold text-sm text-blue-300">数据审计</span>
+                            <i class="fas fa-shield-alt text-[#7132f5]"></i>
+                            <span class="font-semibold text-sm text-[#8b5cf6]">数据审计</span>
                         </div>
                         <div class="flex items-center gap-2">
-                            <span class="text-xs text-gray-400">质量评分</span>
+                            <span class="text-xs text-[#9497a9]">质量评分</span>
                             <span id="llmAuditScore" class="text-lg font-bold"></span>
                         </div>
                     </div>
-                    <div id="llmAuditScoreBar" class="w-full h-2 bg-gray-700 rounded-full mb-3 overflow-hidden">
+                    <div id="llmAuditScoreBar" class="w-full h-2 bg-[#22232e] rounded-full mb-3 overflow-hidden">
                         <div id="llmAuditScoreFill" class="h-full rounded-full transition-all"></div>
                     </div>
                     <div id="llmAuditContent" class="space-y-2"></div>
@@ -551,18 +544,18 @@
 
                 <!-- 规则 Agent 详情（可折叠） -->
                 <div id="llmRuleAgentsCard" class="mb-4">
-                    <button id="llmToggleRuleAgents" class="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition mb-2">
+                    <button id="llmToggleRuleAgents" class="flex items-center gap-2 text-sm text-[#9497a9] hover:text-[#e4e4e7] transition mb-2">
                         <i class="fas fa-chevron-right text-xs transition-transform" id="llmRuleAgentsIcon"></i>
                         <span>规则 Agent 详情</span>
-                        <span id="llmRuleAgentsCount" class="text-xs text-gray-500"></span>
+                        <span id="llmRuleAgentsCount" class="text-xs text-[#686b82]"></span>
                     </button>
                     <div id="llmRuleAgentsContent" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
                 </div>
             </div>
 
             <!-- LLM 配置面板（内嵌底部） -->
-            <div class="mt-6 pt-4 border-t border-gray-700/50">
-                <button id="llmConfigToggle" class="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition mb-3">
+            <div class="mt-6 pt-4 border-t border-[rgba(71,73,85,0.3)]">
+                <button id="llmConfigToggle" class="flex items-center gap-2 text-sm text-[#9497a9] hover:text-[#e4e4e7] transition mb-3">
                     <i class="fas fa-cog"></i>
                     <span>LLM 配置</span>
                     <span id="llmConfigStatus" class="text-xs ml-2"></span>
@@ -570,15 +563,15 @@
                 <div id="llmConfigPanel" class="hidden space-y-3">
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div>
-                            <label class="block text-xs text-gray-400 mb-1">API Key</label>
+                            <label class="block text-xs text-[#9497a9] mb-1">API Key</label>
                             <input type="password" id="llmApiKey" placeholder="sk-..." class="w-full input-dark rounded-lg px-3 py-2 text-sm">
                         </div>
                         <div>
-                            <label class="block text-xs text-gray-400 mb-1">Base URL <span class="text-gray-500">(可选)</span></label>
+                            <label class="block text-xs text-[#9497a9] mb-1">Base URL <span class="text-[#686b82]">(可选)</span></label>
                             <input type="text" id="llmBaseUrl" placeholder="https://api.openai.com/v1" class="w-full input-dark rounded-lg px-3 py-2 text-sm">
                         </div>
                         <div>
-                            <label class="block text-xs text-gray-400 mb-1">Model <span class="text-gray-500">(可选)</span></label>
+                            <label class="block text-xs text-[#9497a9] mb-1">Model <span class="text-[#686b82]">(可选)</span></label>
                             <input type="text" id="llmModel" placeholder="gpt-4o-mini" class="w-full input-dark rounded-lg px-3 py-2 text-sm">
                         </div>
                     </div>
@@ -594,12 +587,12 @@
         <!-- 扫描参数 -->
         <section class="card-glass rounded-xl p-5 mb-6">
             <div class="flex items-center gap-2 mb-4">
-                <i class="fas fa-sliders-h text-orange-500"></i>
+                <i class="fas fa-sliders-h text-[#7132f5]"></i>
                 <h3 class="font-semibold">扫描参数</h3>
             </div>
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">币种</label>
+                    <label class="block text-[#9497a9] text-xs mb-1.5">币种</label>
                     <select id="currencySelect" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                         <option value="BTC">BTC</option>
                         <option value="ETH">ETH</option>
@@ -608,49 +601,49 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">DTE 范围</label>
+                    <label class="block text-[#9497a9] text-xs mb-1.5">DTE 范围</label>
                     <div class="flex items-center gap-1">
                         <input type="number" id="minDte" value="14" min="1" max="365" class="input-dark w-full rounded-lg px-2 py-2 text-sm text-center">
-                        <span class="text-gray-500">-</span>
+                        <span class="text-[#686b82]">-</span>
                         <input type="number" id="maxDte" value="25" min="1" max="365" class="input-dark w-full rounded-lg px-2 py-2 text-sm text-center">
                     </div>
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">Max Delta</label>
+                    <label class="block text-[#9497a9] text-xs mb-1.5">Max Delta</label>
                     <input type="number" id="maxDelta" value="0.4" step="0.05" min="0.01" max="1" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">策略类型</label>
+                    <label class="block text-[#9497a9] text-xs mb-1.5">策略类型</label>
                     <select id="optionType" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                         <option value="PUT">Sell Put</option>
                         <option value="CALL">Covered Call</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">风险偏好</label>
+                    <label class="block text-[#9497a9] text-xs mb-1.5">风险偏好</label>
                     <div class="flex gap-1">
-                        <button type="button" id="presetCon" class="flex-1 px-2 py-2 text-xs rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition font-medium">保守</button>
-                        <button type="button" id="presetStd" class="flex-1 px-2 py-2 text-xs rounded-lg border border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 transition font-medium ring-1 ring-blue-500/30">标准</button>
-                        <button type="button" id="presetAgg" class="flex-1 px-2 py-2 text-xs rounded-lg border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 transition font-medium">进取</button>
+                        <button type="button" id="presetCon" class="flex-1 px-2 py-2 text-xs rounded-lg border border-[#149e61]/30 text-[#149e61] hover:bg-[#149e61]/10 transition font-medium">保守</button>
+                        <button type="button" id="presetStd" class="flex-1 px-2 py-2 text-xs rounded-lg border border-[#7132f5]/40 bg-[#7132f5]/15 text-[#8b5cf6] hover:bg-[#7132f5]/20 transition font-medium ring-1 ring-[#7132f5]/30">标准</button>
+                        <button type="button" id="presetAgg" class="flex-1 px-2 py-2 text-xs rounded-lg border border-[#7132f5]/30 text-[#7132f5] hover:bg-[#7132f5]/10 transition font-medium">进取</button>
                     </div>
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">特定行权价 (可选)</label>
+                    <label class="block text-[#9497a9] text-xs mb-1.5">特定行权价 (可选)</label>
                     <input type="number" id="strikeInput" placeholder="如: 63000" class="input-dark w-full rounded-lg px-3 py-2 text-sm" min="1000" step="100">
                 </div>
                 <div>
-                    <label class="block text-gray-400 text-xs mb-1.5">行权价范围 (可选)</label>
+                    <label class="block text-[#9497a9] text-xs mb-1.5">行权价范围 (可选)</label>
                     <input type="text" id="strikeRangeInput" placeholder="如: 60000-65000" class="input-dark w-full rounded-lg px-3 py-2 text-sm">
                 </div>
             </div>
-            <div class="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-gray-700/50">
-                <div id="dvolAdviceBar" class="hidden w-full mb-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-300 flex items-center gap-2">
-                    <i class="fas fa-lightbulb text-yellow-400"></i>
+            <div class="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-[rgba(71,73,85,0.3)]">
+                <div id="dvolAdviceBar" class="hidden w-full mb-2 px-3 py-2 rounded-lg bg-[#f59e0b]/10 border border-[#f59e0b]/20 text-xs text-[#f59e0b] flex items-center gap-2">
+                    <i class="fas fa-lightbulb text-[#f59e0b]"></i>
                     <span id="dvolAdviceText"></span>
                     <span id="dvolAdjustBadge" class="ml-auto text-[10px] px-1.5 py-0.5 rounded"></span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <label class="text-gray-400 text-sm">自动刷新</label>
+                    <label class="text-[#9497a9] text-sm">自动刷新</label>
                     <select id="autoRefresh" class="input-dark rounded-lg px-3 py-1.5 text-sm">
                         <option value="0">关闭</option>
                         <option value="5" selected>5分钟</option>
@@ -659,8 +652,8 @@
                     </select>
                 </div>
                 <div class="flex items-center gap-2 ml-auto">
-                    <span class="text-gray-400 text-sm">当前参数:</span>
-                    <span id="currentParams" class="text-orange-400 text-sm font-mono">BTC | DTE 14-25 | Δ≤0.4 | Sell Put | 标准</span>
+                    <span class="text-[#9497a9] text-sm">当前参数:</span>
+                    <span id="currentParams" class="text-[#7132f5] text-sm font-mono">BTC | DTE 14-25 | Δ≤0.4 | Sell Put | 标准</span>
                 </div>
             </div>
         </section>
@@ -671,61 +664,61 @@
             <div class="card-glass rounded-xl p-5">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-lg font-semibold flex items-center gap-2">
-                        <i class="fas fa-list-ol text-orange-500"></i>
+                        <i class="fas fa-list-ol text-[#7132f5]"></i>
                         实时机会列表
                         <div class="flex items-center gap-1 ml-3">
-                            <button id="viewSellPut" class="px-2.5 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30 transition hover:bg-green-500/30">Sell Put</button>
-                            <button id="viewCoveredCall" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-blue-500/20 hover:text-blue-400 hover:border-blue-500/30">Covered Call</button>
-                            <button id="viewWheel" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-purple-500/20 hover:text-purple-400 hover:border-purple-500/30">Wheel</button>
-                            <button id="viewAll" class="px-2.5 py-1 rounded text-xs font-medium bg-gray-700/50 text-gray-400 border border-gray-600/30 transition hover:bg-orange-500/20 hover:text-orange-400 hover:border-orange-500/30">全部</button>
+                            <button id="viewSellPut" class="px-2.5 py-1 rounded text-xs font-medium bg-[#149e61]/20 text-[#149e61] border border-[#149e61]/30 transition hover:bg-[#149e61]/30">Sell Put</button>
+                            <button id="viewCoveredCall" class="px-2.5 py-1 rounded text-xs font-medium bg-[#22232e]/50 text-[#9497a9] border border-[rgba(71,73,85,0.3)] transition hover:bg-[#7132f5]/20 hover:text-[#7132f5] hover:border-[#7132f5]/30">Covered Call</button>
+                            <button id="viewWheel" class="px-2.5 py-1 rounded text-xs font-medium bg-[#22232e]/50 text-[#9497a9] border border-[rgba(71,73,85,0.3)] transition hover:bg-[#7132f5]/20 hover:text-[#7132f5] hover:border-[#7132f5]/30">Wheel</button>
+                            <button id="viewAll" class="px-2.5 py-1 rounded text-xs font-medium bg-[#22232e]/50 text-[#9497a9] border border-[rgba(71,73,85,0.3)] transition hover:bg-[#7132f5]/20 hover:text-[#7132f5] hover:border-[#7132f5]/30">全部</button>
                         </div>
                     </h2>
                     <div class="flex items-center gap-3">
                         <div class="flex items-center gap-2 text-xs">
-                            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span> Delta>0.4</span>
-                            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-orange-500 rounded-full"></span> 价格接近Strike 2%</span>
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-[#ef4444] rounded-full animate-pulse"></span> Delta>0.4</span>
+                            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-[#7132f5] rounded-full"></span> 价格接近Strike 2%</span>
                         </div>
-                        <span class="text-xs text-gray-400">按流动性评分排序</span>
-                        <span id="contractCount" class="bg-gray-700 px-2 py-0.5 rounded text-xs">0 个合约</span>
+                        <span class="text-xs text-[#9497a9]">按流动性评分排序</span>
+                        <span id="contractCount" class="bg-[#22232e] px-2 py-0.5 rounded text-xs">0 个合约</span>
                     </div>
                 </div>
-                <div class="overflow-hidden rounded-lg border border-gray-700/50">
+                <div class="overflow-hidden rounded-lg border border-[rgba(71,73,85,0.3)]">
                     <div class="overflow-x-auto rounded-lg">
                         <table class="w-full table-compact" id="contractsTable">
                             <thead>
-                                <tr class="bg-gradient-to-r from-gray-800/80 to-gray-800/40 text-gray-400 text-xs" id="tableHeaders">
-                                    <th style="width:4.5%" class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="platform">平台</th>
-                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="option_type">类型</th>
-                                    <th style="width:6.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="expiry">到期日</th>
-                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="dte">到期天数</th>
-                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="strike">行权价</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="delta">Delta</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="theta" title="Theta - 每日时间价值衰减，正值=每天赚多少">Theta</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="gamma">Gamma</th>
-                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="vega">Vega</th>
-                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="mark_iv">隐含波动率</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="apr">年化收益</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="pop" title="盈利概率 - PUT: 到期不被行权概率; CALL: 被行权概率(卖飞风险)">POP</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="premium">权利金$</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="margin_required" title="保证金需求 - 开仓所需最低保证金">保证金$</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="capital_efficiency" title="资金效率 - 权利金/保证金，越高越好">资金效率</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="support_distance_pct" title="支撑距离 - PUT行权价到常规支撑位的距离，>10%安全，<5%危险">支撑距离</th>
-                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="liquidity_score">流动性</th>
-                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="loss_at_10pct">-10%亏损$</th>
-                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="breakeven">盈亏平衡$</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="breakeven_pct" title="安全垫距离 - 现价到盈亏平衡点的百分比缓冲">安全垫%</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="open_interest">持仓量</th>
-                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="spread_pct">买卖价差</th>
-                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-blue-300 transition select-none" data-sort="iv_rank" title="IV Rank - 当前IV在历史分位中的位置，50%为中性">IV Rank</th>
-                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-emerald-400 transition select-none" data-sort="_score" title="加权评分 - 综合APR+POP+安全垫+流动性+IV">评分</th>
-                                    <th style="width:5.0%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-orange-400 transition select-none" data-sort="risk">风险等级</th>
+                                <tr class="bg-gradient-to-r from-gray-800/80 to-gray-800/40 text-[#9497a9] text-xs" id="tableHeaders">
+                                    <th style="width:4.5%" class="text-left py-2 px-2 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="platform">平台</th>
+                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="option_type">类型</th>
+                                    <th style="width:6.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="expiry">到期日</th>
+                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="dte">到期天数</th>
+                                    <th style="width:5.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="strike">行权价</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="delta">Delta</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#149e61] transition select-none" data-sort="theta" title="Theta - 每日时间价值衰减，正值=每天赚多少">Theta</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="gamma">Gamma</th>
+                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="vega">Vega</th>
+                                    <th style="width:3.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="mark_iv">隐含波动率</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="apr">年化收益</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#149e61] transition select-none" data-sort="pop" title="盈利概率 - PUT: 到期不被行权概率; CALL: 被行权概率(卖飞风险)">POP</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="premium">权利金$</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="margin_required" title="保证金需求 - 开仓所需最低保证金">保证金$</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#149e61] transition select-none" data-sort="capital_efficiency" title="资金效率 - 权利金/保证金，越高越好">资金效率</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#149e61] transition select-none" data-sort="support_distance_pct" title="支撑距离 - PUT行权价到常规支撑位的距离，>10%安全，<5%危险">支撑距离</th>
+                                    <th style="width:3.5%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="liquidity_score">流动性</th>
+                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="loss_at_10pct">-10%亏损$</th>
+                                    <th style="width:5.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="breakeven">盈亏平衡$</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#149e61] transition select-none" data-sort="breakeven_pct" title="安全垫距离 - 现价到盈亏平衡点的百分比缓冲">安全垫%</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="open_interest">持仓量</th>
+                                    <th style="width:4.0%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="spread_pct">买卖价差</th>
+                                    <th style="width:4.0%" class="text-center py-2 px-1 font-semibold cursor-pointer hover:text-[#8b5cf6] transition select-none" data-sort="iv_rank" title="IV Rank - 当前IV在历史分位中的位置，50%为中性">IV Rank</th>
+                                    <th style="width:4.5%" class="text-right py-2 px-1 font-semibold cursor-pointer hover:text-[#149e61] transition select-none" data-sort="_score" title="加权评分 - 综合APR+POP+安全垫+流动性+IV">评分</th>
+                                    <th style="width:5.0%" class="text-center py-2 px-2 font-semibold cursor-pointer hover:text-[#7132f5] transition select-none" data-sort="risk">风险等级</th>
                                 </tr>
                             </thead>
-                            <tbody id="opportunitiesTable" class="divide-y divide-gray-800/40">
+                            <tbody id="opportunitiesTable" class="divide-y divide-[rgba(71,73,85,0.2)]/40">
                                 <tr>
-                                    <td colspan="25" class="text-center py-12 text-gray-500">
+                                    <td colspan="25" class="text-center py-12 text-[#686b82]">
                                         <div class="flex flex-col items-center gap-3">
-                                            <i class="fas fa-search text-3xl text-gray-600"></i>
+                                            <i class="fas fa-search text-3xl text-[#686b82]"></i>
                                             <p>点击"立即扫描"获取期权数据</p>
                                         </div>
                                     </td>
@@ -742,29 +735,29 @@
             </div>
 
             <!-- 图表区域：DVOL趋势独占一行 -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-6 border-t border-gray-700/30">
-                <div class="card-glass rounded-xl p-5 border-l-4 border-blue-500">
-                    <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-blue-400"><i class="fas fa-chart-area"></i> DVOL 趋势</h3>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-6 border-t border-[rgba(71,73,85,0.3)]">
+                <div class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
+                    <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-[#7132f5]"><i class="fas fa-chart-area"></i> DVOL 趋势</h3>
                     <div class="relative h-64">
                         <canvas id="dvolChart"></canvas>
                     </div>
                     <div class="flex justify-center gap-2 mt-3">
-                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
-                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
-                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
+                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-[#22232e]/50 hover:bg-[#2a2b38] transition" data-period="24">24H</button>
+                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-[#7132f5] text-white transition" data-period="168">7天</button>
+                        <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-[#22232e]/50 hover:bg-[#2a2b38] transition" data-period="720">30天</button>
                     </div>
                 </div>
-                <div class="card-glass rounded-xl p-5 border-l-4 border-purple-500">
-                    <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-purple-400"><i class="fas fa-chart-pie"></i> Put/Call Ratio 趋势</h3>
+                <div class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
+                    <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-[#7132f5]"><i class="fas fa-chart-pie"></i> Put/Call Ratio 趋势</h3>
                     <div class="relative h-64">
                         <canvas id="pcrChart"></canvas>
                     </div>
                     <div class="flex justify-center gap-2 mt-3">
-                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="24">24H</button>
-                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-orange-500 text-white transition" data-period="168">7天</button>
-                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-gray-700/50 hover:bg-gray-600 transition" data-period="720">30天</button>
+                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-[#22232e]/50 hover:bg-[#2a2b38] transition" data-period="24">24H</button>
+                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-[#7132f5] text-white transition" data-period="168">7天</button>
+                        <button class="pcr-period-btn text-xs px-3 py-1.5 rounded-lg bg-[#22232e]/50 hover:bg-[#2a2b38] transition" data-period="720">30天</button>
                     </div>
-                    <p class="text-xs text-gray-500 mt-2">PCR &gt; 1 市场偏空(卖Put多), PCR &lt; 1 市场偏多(卖Call多)</p>
+                    <p class="text-xs text-[#686b82] mt-2">PCR &gt; 1 市场偏空(卖Put多), PCR &lt; 1 市场偏多(卖Call多)</p>
                 </div>
             </div>
 
@@ -774,47 +767,47 @@
                 <div class="card-glass rounded-xl p-5">
                     <div class="flex items-center justify-between mb-3">
                         <h2 class="text-lg font-semibold flex items-center gap-2">
-                            <i class="fas fa-fish text-purple-500"></i>
+                            <i class="fas fa-fish text-[#7132f5]"></i>
                             大宗异动
-                            <span id="largeTradesTitleCount" class="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full hidden"></span>
+                            <span id="largeTradesTitleCount" class="text-xs bg-[#7132f5]/20 text-[#8b5cf6] px-2 py-0.5 rounded-full hidden"></span>
                         </h2>
                         <div class="flex items-center gap-2">
-                            <span id="tradesTotalNotional" class="text-xs text-gray-400">--</span>
+                            <span id="tradesTotalNotional" class="text-xs text-[#9497a9]">--</span>
                         </div>
                     </div>
                     <div id="largeTradesSummary" class="grid grid-cols-4 gap-2 mb-3">
-                        <div class="bg-red-500/10 border border-red-500/20 rounded-lg py-2 px-2 text-center">
-                            <div class="text-[10px] text-red-400 uppercase">巨鲸</div>
-                            <div id="ltMegaCount" class="font-mono text-sm font-bold text-red-400">0</div>
-                            <div class="text-[9px] text-gray-500">>$5M</div>
+                        <div class="bg-[#ef4444]/10 border border-[#ef4444]/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-[#ef4444] uppercase">巨鲸</div>
+                            <div id="ltMegaCount" class="font-mono text-sm font-bold text-[#ef4444]">0</div>
+                            <div class="text-[9px] text-[#686b82]">>$5M</div>
                         </div>
-                        <div class="bg-orange-500/10 border border-orange-500/20 rounded-lg py-2 px-2 text-center">
-                            <div class="text-[10px] text-orange-400 uppercase">大单</div>
-                            <div id="ltHighCount" class="font-mono text-sm font-bold text-orange-400">0</div>
-                            <div class="text-[9px] text-gray-500">>$2M</div>
+                        <div class="bg-[#7132f5]/10 border border-[#7132f5]/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-[#7132f5] uppercase">大单</div>
+                            <div id="ltHighCount" class="font-mono text-sm font-bold text-[#7132f5]">0</div>
+                            <div class="text-[9px] text-[#686b82]">>$2M</div>
                         </div>
-                        <div class="bg-yellow-500/10 border border-yellow-500/20 rounded-lg py-2 px-2 text-center">
-                            <div class="text-[10px] text-yellow-400 uppercase">中单</div>
-                            <div id="ltMediumCount" class="font-mono text-sm font-bold text-yellow-400">0</div>
-                            <div class="text-[9px] text-gray-500">>$500K</div>
+                        <div class="bg-[#f59e0b]/10 border border-[#f59e0b]/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-[#f59e0b] uppercase">中单</div>
+                            <div id="ltMediumCount" class="font-mono text-sm font-bold text-[#f59e0b]">0</div>
+                            <div class="text-[9px] text-[#686b82]">>$500K</div>
                         </div>
-                        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg py-2 px-2 text-center">
-                            <div class="text-[10px] text-blue-400 uppercase">小单</div>
-                            <div id="ltLowCount" class="font-mono text-sm font-bold text-blue-400">0</div>
-                            <div class="text-[9px] text-gray-500">>$100K</div>
+                        <div class="bg-[#7132f5]/10 border border-[#7132f5]/20 rounded-lg py-2 px-2 text-center">
+                            <div class="text-[10px] text-[#7132f5] uppercase">小单</div>
+                            <div id="ltLowCount" class="font-mono text-sm font-bold text-[#7132f5]">0</div>
+                            <div class="text-[9px] text-[#686b82]">>$100K</div>
                         </div>
                     </div>
                     <div id="largeTradesList" class="space-y-1.5 overflow-y-auto custom-scrollbar pr-1 text-sm" style="max-height: 55vh;">
-                        <div class="text-gray-500 text-center py-4">暂无数据</div>
+                        <div class="text-[#686b82] text-center py-4">暂无数据</div>
                     </div>
                 </div>
 
                 <!-- 大单风向标 v2 -->
-                <div class="card-glass rounded-xl p-5 border-l-4 border-purple-500">
+                <div class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-wind text-purple-400"></i>
+                        <i class="fas fa-wind text-[#7132f5]"></i>
                         大单风向标
-                        <span id="tradesStatsCount" class="text-xs bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full hidden"></span>
+                        <span id="tradesStatsCount" class="text-xs bg-[#7132f5]/20 text-[#8b5cf6] px-2 py-0.5 rounded-full hidden"></span>
                     </h2>
                     <div class="mb-3 flex flex-wrap gap-2">
                         <select id="tradesCurrency" class="input-dark rounded px-2 py-1 text-xs">
@@ -830,35 +823,35 @@
                     </div>
 
                     <!-- 情绪总览卡 -->
-                    <div id="windSummaryCard" class="hidden mb-4 rounded-lg bg-gradient-to-r from-gray-800/80 to-gray-900/80 border border-gray-700/50 p-3">
+                    <div id="windSummaryCard" class="hidden mb-4 rounded-lg bg-gradient-to-r from-gray-800/80 to-gray-900/80 border border-[rgba(71,73,85,0.3)] p-3">
                         <div class="flex items-center justify-between mb-2">
                             <span id="windSentimentIcon" class="text-xl"></span>
-                            <span id="windSentimentScore" class="text-xs font-mono px-2 py-0.5 rounded bg-gray-700"></span>
+                            <span id="windSentimentScore" class="text-xs font-mono px-2 py-0.5 rounded bg-[#22232e]"></span>
                         </div>
-                        <p id="windSentimentText" class="text-sm text-gray-200 leading-relaxed"></p>
-                        <div class="mt-2 flex gap-4 text-xs text-gray-400">
-                            <span>买/卖: <b id="windBuySellRatio" class="text-green-300"></b></span>
-                            <span>总名义: <b id="windTotalNotional" class="text-blue-300"></b></span>
-                            <span>主流行为: <b id="windDominantFlow" class="text-orange-300"></b></span>
+                        <p id="windSentimentText" class="text-sm text-[#e4e4e7] leading-relaxed"></p>
+                        <div class="mt-2 flex gap-4 text-xs text-[#9497a9]">
+                            <span>买/卖: <b id="windBuySellRatio" class="text-[#149e61]"></b></span>
+                            <span>总名义: <b id="windTotalNotional" class="text-[#8b5cf6]"></b></span>
+                            <span>主流行为: <b id="windDominantFlow" class="text-[#f59e0b]"></b></span>
                         </div>
                     </div>
 
                     <!-- 净头寸 Strike 图 -->
                     <div class="mb-4">
-                        <div class="flex items-center justify-between mb-1 text-xs text-gray-400">
+                        <div class="flex items-center justify-between mb-1 text-xs text-[#9497a9]">
                             <span>净头寸分布 (买-卖)</span>
-                            <span id="windSpotMarker" class="font-mono text-blue-400 hidden">● 现价</span>
+                            <span id="windSpotMarker" class="font-mono text-[#7132f5] hidden">● 现价</span>
                         </div>
                         <div id="strikeFlowsChart" class="space-y-1 overflow-y-auto custom-scrollbar pr-1" style="max-height: 45vh;">
-                            <div class="text-gray-500 text-center py-4">加载中...</div>
+                            <div class="text-[#686b82] text-center py-4">加载中...</div>
                         </div>
                     </div>
 
                     <!-- 流向分类 -->
                     <div>
-                        <div class="text-xs text-gray-400 mb-2">流向分类</div>
+                        <div class="text-xs text-[#9497a9] mb-2">流向分类</div>
                         <div id="flowBreakdown" class="grid grid-cols-2 gap-1">
-                            <div class="text-gray-500 text-center py-2 text-xs">加载中...</div>
+                            <div class="text-[#686b82] text-center py-2 text-xs">加载中...</div>
                         </div>
                     </div>
                 </div>
@@ -867,92 +860,92 @@
                 <div class="card-glass rounded-xl p-5">
                     <div class="flex items-center justify-between mb-3">
                         <h2 class="text-lg font-semibold flex items-center gap-2">
-                            <i class="fas fa-chart-area text-cyan-400"></i>
+                            <i class="fas fa-chart-area text-[#7132f5]"></i>
                             IV 期限结构 v2.0
                         </h2>
                         <div class="flex items-center gap-2">
-                            <span id="tsStructureLabel" class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">--</span>
-                            <span id="tsSlopeLabel" class="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">--</span>
+                            <span id="tsStructureLabel" class="text-xs px-2 py-0.5 rounded-full bg-[#22232e] text-[#9497a9]">--</span>
+                            <span id="tsSlopeLabel" class="text-xs px-2 py-0.5 rounded-full bg-[#22232e] text-[#9497a9]">--</span>
                         </div>
                     </div>
-                    <div id="backwardationAlert" class="hidden mb-3 p-2 rounded-lg bg-red-900/40 border border-red-500/50 text-red-300 text-xs font-medium">
+                    <div id="backwardationAlert" class="hidden mb-3 p-2 rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/50 text-[#ef4444] text-xs font-medium">
                         <span id="bwText"></span>
                     </div>
                     <div class="grid grid-cols-6 gap-2 mb-3 text-center">
-                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">1W</div>
-                            <div id="ts7" class="font-mono text-sm font-bold text-cyan-400">--</div>
-                            <div id="ts7dte" class="text-[9px] text-gray-600">--</div>
+                        <div class="bg-[#22232e]/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-[#686b82] uppercase tracking-wider">1W</div>
+                            <div id="ts7" class="font-mono text-sm font-bold text-[#7132f5]">--</div>
+                            <div id="ts7dte" class="text-[9px] text-[#686b82]">--</div>
                         </div>
-                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">2W</div>
-                            <div id="ts14" class="font-mono text-sm font-bold text-cyan-400">--</div>
-                            <div id="ts14dte" class="text-[9px] text-gray-600">--</div>
+                        <div class="bg-[#22232e]/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-[#686b82] uppercase tracking-wider">2W</div>
+                            <div id="ts14" class="font-mono text-sm font-bold text-[#7132f5]">--</div>
+                            <div id="ts14dte" class="text-[9px] text-[#686b82]">--</div>
                         </div>
-                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">1M</div>
-                            <div id="ts30" class="font-mono text-sm font-bold text-cyan-400">--</div>
-                            <div id="ts30dte" class="text-[9px] text-gray-600">--</div>
+                        <div class="bg-[#22232e]/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-[#686b82] uppercase tracking-wider">1M</div>
+                            <div id="ts30" class="font-mono text-sm font-bold text-[#7132f5]">--</div>
+                            <div id="ts30dte" class="text-[9px] text-[#686b82]">--</div>
                         </div>
-                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">2M</div>
-                            <div id="ts60" class="font-mono text-sm font-bold text-cyan-400">--</div>
-                            <div id="ts60dte" class="text-[9px] text-gray-600">--</div>
+                        <div class="bg-[#22232e]/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-[#686b82] uppercase tracking-wider">2M</div>
+                            <div id="ts60" class="font-mono text-sm font-bold text-[#7132f5]">--</div>
+                            <div id="ts60dte" class="text-[9px] text-[#686b82]">--</div>
                         </div>
-                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">3M</div>
-                            <div id="ts90" class="font-mono text-sm font-bold text-cyan-400">--</div>
-                            <div id="ts90dte" class="text-[9px] text-gray-600">--</div>
+                        <div class="bg-[#22232e]/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-[#686b82] uppercase tracking-wider">3M</div>
+                            <div id="ts90" class="font-mono text-sm font-bold text-[#7132f5]">--</div>
+                            <div id="ts90dte" class="text-[9px] text-[#686b82]">--</div>
                         </div>
-                        <div class="bg-gray-800/60 rounded-lg py-2 px-1">
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider">6M</div>
-                            <div id="ts180" class="font-mono text-sm font-bold text-cyan-400">--</div>
-                            <div id="ts180dte" class="text-[9px] text-gray-600">--</div>
+                        <div class="bg-[#22232e]/60 rounded-lg py-2 px-1">
+                            <div class="text-[10px] text-[#686b82] uppercase tracking-wider">6M</div>
+                            <div id="ts180" class="font-mono text-sm font-bold text-[#7132f5]">--</div>
+                            <div id="ts180dte" class="text-[9px] text-[#686b82]">--</div>
                         </div>
                     </div>
                     <div class="relative" style="min-height: 180px;">
                         <canvas id="termStructureChart" height="180"></canvas>
                     </div>
-                    <div class="flex items-center justify-between mt-2 text-[10px] text-gray-600">
+                    <div class="flex items-center justify-between mt-2 text-[10px] text-[#686b82]">
                         <span>Contango = 远期IV > 近期IV (正常)</span>
                         <span>Backwardation = 近期IV > 远期IV (恐慌)</span>
                     </div>
                     
                     <!-- 学术分析区块 v2.0 -->
-                    <div id="ivAnalysisSection" class="mt-4 border-t border-gray-700 pt-3">
+                    <div id="ivAnalysisSection" class="mt-4 border-t border-[rgba(71,73,85,0.3)] pt-3">
                         <!-- 市场状态 + VRP -->
                         <div class="grid grid-cols-2 gap-3 mb-3">
-                            <div class="p-3 bg-gray-800/40 rounded-lg border border-gray-700/30">
-                                <div class="text-[10px] text-gray-500 mb-1">市场状态</div>
+                            <div class="p-3 bg-[#22232e]/40 rounded-lg border border-[rgba(71,73,85,0.3)]">
+                                <div class="text-[10px] text-[#686b82] mb-1">市场状态</div>
                                 <div id="ivMarketState" class="text-lg font-bold">--</div>
-                                <div id="ivMarketAdvice" class="text-xs text-gray-400 mt-1">--</div>
+                                <div id="ivMarketAdvice" class="text-xs text-[#9497a9] mt-1">--</div>
                             </div>
-                            <div class="p-3 bg-gray-800/40 rounded-lg border border-gray-700/30">
-                                <div class="text-[10px] text-gray-500 mb-1">波动率风险溢价 (VRP)</div>
+                            <div class="p-3 bg-[#22232e]/40 rounded-lg border border-[rgba(71,73,85,0.3)]">
+                                <div class="text-[10px] text-[#686b82] mb-1">波动率风险溢价 (VRP)</div>
                                 <div id="ivVRPValue" class="text-lg font-bold">--</div>
-                                <div id="ivVRPDesc" class="text-xs text-gray-400 mt-1">--</div>
+                                <div id="ivVRPDesc" class="text-xs text-[#9497a9] mt-1">--</div>
                             </div>
                         </div>
                         
                         <!-- 形态指标 -->
                         <div class="grid grid-cols-3 gap-2 mb-3">
-                            <div class="p-2 bg-gray-800/30 rounded text-center">
-                                <div class="text-[9px] text-gray-500">斜率</div>
+                            <div class="p-2 bg-[#22232e]/30 rounded text-center">
+                                <div class="text-[9px] text-[#686b82]">斜率</div>
                                 <div id="ivSlopeGrade" class="text-xs font-bold">--</div>
                             </div>
-                            <div class="p-2 bg-gray-800/30 rounded text-center">
-                                <div class="text-[9px] text-gray-500">曲率</div>
+                            <div class="p-2 bg-[#22232e]/30 rounded text-center">
+                                <div class="text-[9px] text-[#686b82]">曲率</div>
                                 <div id="ivCurvatureType" class="text-xs font-bold">--</div>
                             </div>
-                            <div class="p-2 bg-gray-800/30 rounded text-center">
-                                <div class="text-[9px] text-gray-500">IV 区间</div>
+                            <div class="p-2 bg-[#22232e]/30 rounded text-center">
+                                <div class="text-[9px] text-[#686b82]">IV 区间</div>
                                 <div id="ivRegime" class="text-xs font-bold">--</div>
                             </div>
                         </div>
                         
                         <!-- 策略建议 -->
                         <div id="ivRecommendations" class="space-y-2">
-                            <div class="text-gray-600 text-sm">等待分析...</div>
+                            <div class="text-[#686b82] text-sm">等待分析...</div>
                         </div>
                     </div>
                 </div>
@@ -960,7 +953,7 @@
                 <!-- Module 2: Max Pain & Gamma Flip -->
                 <div class="card-glass rounded-xl p-5">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-crosshairs text-orange-400"></i>
+                        <i class="fas fa-crosshairs text-[#7132f5]"></i>
                         最大痛点 / Gamma Flip
                     </h2>
                     
@@ -970,7 +963,7 @@
                             <span id="gammaStatusIcon" class="text-xl"></span>
                             <span id="gammaStatusText" class="text-sm font-bold"></span>
                         </div>
-                        <div class="text-xs text-gray-400">
+                        <div class="text-xs text-[#9497a9]">
                             <span id="gammaDistance"></span>
                             <span class="mx-1">|</span>
                             <span id="gammaVolatility"></span>
@@ -982,47 +975,47 @@
                     <!-- 方向性建议 -->
                     <div id="gammaAdviceCard" class="mb-3 p-2.5 rounded-lg border hidden">
                         <div class="text-xs font-semibold mb-1">💡 策略建议</div>
-                        <div class="text-xs text-gray-300" id="gammaAdviceText"></div>
+                        <div class="text-xs text-[#e4e4e7]" id="gammaAdviceText"></div>
                         <div class="grid grid-cols-3 gap-2 mt-2 text-[11px]">
-                            <div class="bg-gray-800/50 rounded px-2 py-1">
-                                <div class="text-gray-500">建议仓位</div>
+                            <div class="bg-[#22232e]/50 rounded px-2 py-1">
+                                <div class="text-[#686b82]">建议仓位</div>
                                 <div id="advicePosition" class="font-bold text-white"></div>
                             </div>
-                            <div class="bg-gray-800/50 rounded px-2 py-1">
-                                <div class="text-gray-500">策略方向</div>
-                                <div id="adviceStrategy" class="font-bold text-cyan-400"></div>
+                            <div class="bg-[#22232e]/50 rounded px-2 py-1">
+                                <div class="text-[#686b82]">策略方向</div>
+                                <div id="adviceStrategy" class="font-bold text-[#7132f5]"></div>
                             </div>
-                            <div class="bg-gray-800/50 rounded px-2 py-1">
-                                <div class="text-gray-500">Delta 范围</div>
-                                <div id="adviceDelta" class="font-bold text-yellow-400"></div>
+                            <div class="bg-[#22232e]/50 rounded px-2 py-1">
+                                <div class="text-[#686b82]">Delta 范围</div>
+                                <div id="adviceDelta" class="font-bold text-[#f59e0b]"></div>
                             </div>
                         </div>
                     </div>
                     
                     <!-- 关键数据卡片 -->
                     <div id="mpOverview" class="grid grid-cols-6 gap-2 mb-3 text-xs">
-                        <div class="bg-gray-800 rounded p-2 text-center">
-                            <div class="text-gray-400 text-[10px]">现货价</div>
+                        <div class="bg-[#22232e] rounded p-2 text-center">
+                            <div class="text-[#9497a9] text-[10px]">现货价</div>
                             <div id="mpSpot" class="font-mono text-white text-xs">$--</div>
                         </div>
-                        <div class="bg-gray-800 rounded p-2 text-center">
-                            <div class="text-gray-400 text-[10px]">Gamma Flip</div>
-                            <div id="mpFlip" class="font-mono text-emerald-400 text-xs font-bold">$--</div>
+                        <div class="bg-[#22232e] rounded p-2 text-center">
+                            <div class="text-[#9497a9] text-[10px]">Gamma Flip</div>
+                            <div id="mpFlip" class="font-mono text-[#149e61] text-xs font-bold">$--</div>
                         </div>
-                        <div class="bg-gray-800 rounded p-2 text-center">
-                            <div class="text-gray-400 text-[10px]">最大痛点</div>
-                            <div id="mpPrice" class="font-mono text-yellow-400 text-xs">$--</div>
+                        <div class="bg-[#22232e] rounded p-2 text-center">
+                            <div class="text-[#9497a9] text-[10px]">最大痛点</div>
+                            <div id="mpPrice" class="font-mono text-[#f59e0b] text-xs">$--</div>
                         </div>
-                        <div class="bg-gray-800 rounded p-2 text-center">
-                            <div class="text-gray-400 text-[10px]">偏离度</div>
+                        <div class="bg-[#22232e] rounded p-2 text-center">
+                            <div class="text-[#9497a9] text-[10px]">偏离度</div>
                             <div id="mpDist" class="font-mono text-xs">--%</div>
                         </div>
-                        <div class="bg-gray-800 rounded p-2 text-center">
-                            <div class="text-gray-400 text-[10px]">区域距离</div>
+                        <div class="bg-[#22232e] rounded p-2 text-center">
+                            <div class="text-[#9497a9] text-[10px]">区域距离</div>
                             <div id="mpRegionDist" class="font-mono text-xs">--</div>
                         </div>
-                        <div class="bg-gray-800 rounded p-2 text-center">
-                            <div class="text-gray-400 text-[10px]">PCR</div>
+                        <div class="bg-[#22232e] rounded p-2 text-center">
+                            <div class="text-[#9497a9] text-[10px]">PCR</div>
                             <div id="mpPCR" class="font-mono text-xs">--</div>
                         </div>
                     </div>
@@ -1034,36 +1027,36 @@
                     <canvas id="painGexChart" height="180"></canvas>
                     
                     <!-- 详细说明（可折叠） -->
-                    <details class="text-xs text-gray-400 mt-3 bg-gray-800/50 rounded p-2.5">
-                        <summary class="cursor-pointer text-cyan-400 font-semibold mb-2">📚 如何解读此图</summary>
+                    <details class="text-xs text-[#9497a9] mt-3 bg-[#22232e]/50 rounded p-2.5">
+                        <summary class="cursor-pointer text-[#7132f5] font-semibold mb-2">📚 如何解读此图</summary>
                         <div class="space-y-1.5 leading-relaxed">
                             <p><b>橙色线 (左轴)</b> = 痛点曲线，最低点即<b>最大痛点</b>，到期时价格常被吸引向此收敛。</p>
-                            <p><b>柱状图 (右轴)</b> = <b>OI 净敞口 (Gamma 效应)</b>：<span class="text-green-400">绿色柱</span>=Call OI > Put OI(多头 Gamma 区)→<b>波动受抑制</b>；<span class="text-red-400">红色柱</span>=Put OI > Call OI(空头 Gamma 区)→<b>波动易放大</b>。</p>
+                            <p><b>柱状图 (右轴)</b> = <b>OI 净敞口 (Gamma 效应)</b>：<span class="text-[#149e61]">绿色柱</span>=Call OI > Put OI(多头 Gamma 区)→<b>波动受抑制</b>；<span class="text-[#ef4444]">红色柱</span>=Put OI > Call OI(空头 Gamma 区)→<b>波动易放大</b>。</p>
                             <p><b>⭐ Gamma Flip 点</b>（红绿交界）是多空分界线，突破后波动模式可能剧变！</p>
                             <p><b>垂直虚线</b>：绿色=Gamma Flip，橙色=最大痛点，白色=现货价格。</p>
                         </div>
                     </details>
                     
                     <!-- 深度解析（可折叠） -->
-                    <details class="text-xs text-gray-400 mt-2 bg-gray-800/50 rounded p-2.5">
-                        <summary class="cursor-pointer text-purple-400 font-semibold mb-2">💡 Gamma Flip 深度解析</summary>
+                    <details class="text-xs text-[#9497a9] mt-2 bg-[#22232e]/50 rounded p-2.5">
+                        <summary class="cursor-pointer text-[#7132f5] font-semibold mb-2">💡 Gamma Flip 深度解析</summary>
                         <div class="space-y-1.5 leading-relaxed">
                             <p><b>什么是 Gamma Flip？</b>Gamma Flip 是 Call 和 Put 的 Gamma 敞口互相转换的临界点。在此价格水平，做市商的 Gamma 对冲压力从"抑制波动"转变为"放大波动"。</p>
-                            <p><b>为什么重要？</b>当价格高于 Gamma Flip：机构多头主导，期权商高抛低吸，<span class="text-green-400">波动受抑制</span>。当价格低于 Gamma Flip：机构空头主导，期权商追涨杀跌，<span class="text-red-400">波动易放大</span>。</p>
+                            <p><b>为什么重要？</b>当价格高于 Gamma Flip：机构多头主导，期权商高抛低吸，<span class="text-[#149e61]">波动受抑制</span>。当价格低于 Gamma Flip：机构空头主导，期权商追涨杀跌，<span class="text-[#ef4444]">波动易放大</span>。</p>
                             <p><b>实战用法：</b>①判断突破时机——突破 Gamma Flip 后波动可能剧烈放大；②选择策略——在多头 Gamma 区更适合卖出期权收权利金；③风险管理——在空头 Gamma 区注意止损和仓位控制。</p>
                         </div>
                     </details>
                     
-                    <div id="mpSignal" class="mt-2 text-xs text-center text-gray-400"></div>
+                    <div id="mpSignal" class="mt-2 text-xs text-center text-[#9497a9]"></div>
                 </div>
 
                 <!-- Module 3: Martingale Sandbox v2.0 -->
                 <div class="card-glass rounded-xl p-5 xl:col-span-2">
                     <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
-                        <i class="fas fa-flask text-purple-400"></i>
+                        <i class="fas fa-flask text-[#7132f5]"></i>
                         🧪 马丁格尔沙盘推演 v2.0
                     </h2>
-                    <p class="text-xs text-gray-400 mb-3 leading-relaxed">
+                    <p class="text-xs text-[#9497a9] mb-3 leading-relaxed">
                         🔬 <b>使用方法：</b>输入当前持仓信息（行权价/期权类型/数量/权利金）、假设的极限崩盘价格、后备资金量。
                         系统会精确计算崩盘损失（含 Vega 冲击），从扫描数据库中寻找恢复合约，计算加仓方案和净盈亏。
                         绿灯 = 安全恢复，红灯 = 资金链断裂。
@@ -1071,90 +1064,90 @@
                     
                     <!-- 持仓信息输入 -->
                     <div class="mb-3">
-                        <div class="text-xs font-semibold text-gray-400 mb-2">📊 当前持仓信息</div>
+                        <div class="text-xs font-semibold text-[#9497a9] mb-2">📊 当前持仓信息</div>
                         <div class="grid grid-cols-5 gap-2">
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">行权价 ($)</label>
-                                <input id="sbStrike" type="number" value="65000" placeholder="65000" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">行权价 ($)</label>
+                                <input id="sbStrike" type="number" value="65000" placeholder="65000" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">期权类型</label>
-                                <select id="sbOptionType" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">期权类型</label>
+                                <select id="sbOptionType" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                                     <option value="P" selected>Put</option>
                                     <option value="C">Call</option>
                                 </select>
                             </div>
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">持仓数量</label>
-                                <input id="sbQty" type="number" value="1" min="0.1" step="0.1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">持仓数量</label>
+                                <input id="sbQty" type="number" value="1" min="0.1" step="0.1" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">平均权利金 ($)</label>
-                                <input id="sbPremium" type="number" value="2000" min="1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">平均权利金 ($)</label>
+                                <input id="sbPremium" type="number" value="2000" min="1" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">剩余 DTE (天)</label>
-                                <input id="sbDTE" type="number" value="30" min="1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">剩余 DTE (天)</label>
+                                <input id="sbDTE" type="number" value="30" min="1" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                         </div>
                     </div>
                     
                     <!-- 崩盘情景 + 恢复参数 -->
                     <div class="mb-3">
-                        <div class="text-xs font-semibold text-gray-400 mb-2">📉 崩盘情景 & 恢复策略</div>
+                        <div class="text-xs font-semibold text-[#9497a9] mb-2">📉 崩盘情景 & 恢复策略</div>
                         <div class="grid grid-cols-5 gap-2">
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">极限底点 ($)</label>
-                                <input id="sbCrash" type="number" value="45000" placeholder="45000" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">极限底点 ($)</label>
+                                <input id="sbCrash" type="number" value="45000" placeholder="45000" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">后备资金 ($)</label>
-                                <input id="sbReserve" type="number" value="50000" placeholder="50000" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">后备资金 ($)</label>
+                                <input id="sbReserve" type="number" value="50000" placeholder="50000" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">保证金比率</label>
-                                <input id="sbMargin" type="number" value="0.20" step="0.05" min="0.05" max="1.0" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">保证金比率</label>
+                                <input id="sbMargin" type="number" value="0.20" step="0.05" min="0.05" max="1.0" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div>
-                                <label class="text-[10px] text-gray-500 block mb-1">最小 APR (%)</label>
-                                <input id="sbMinAPR" type="number" value="5" step="1" min="1" class="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs w-full">
+                                <label class="text-[10px] text-[#686b82] block mb-1">最小 APR (%)</label>
+                                <input id="sbMinAPR" type="number" value="5" step="1" min="1" class="bg-[#22232e] border border-[rgba(71,73,85,0.3)] rounded px-2 py-1.5 text-xs w-full">
                             </div>
                             <div class="flex items-end">
-                                <button id="runSandboxBtn" class="bg-purple-600 hover:bg-purple-500 rounded px-4 py-1.5 text-xs font-medium w-full">▶ 开始推演</button>
+                                <button id="runSandboxBtn" class="bg-[#7132f5] hover:bg-[#7132f5] rounded px-4 py-1.5 text-xs font-medium w-full">▶ 开始推演</button>
                             </div>
                         </div>
                     </div>
                     
                     <div id="sandboxResult" class="space-y-3">
-                        <div class="text-gray-500 text-center py-6 text-sm">👆 点击「开始推演」进行沙盘模拟</div>
+                        <div class="text-[#686b82] text-center py-6 text-sm">👆 点击「开始推演」进行沙盘模拟</div>
                     </div>
                 </div>
 
                 <!-- 统计信息 -->
                 <div class="card-glass rounded-xl p-5 xl:col-span-2">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-database text-purple-500"></i>
+                        <i class="fas fa-database text-[#7132f5]"></i>
                         统计信息
                     </h2>
                     <div class="grid grid-cols-3 gap-4 text-sm">
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-400">总扫描次数</span>
-                            <span id="totalScans" class="font-mono bg-gray-800 px-2 py-0.5 rounded">--</span>
+                            <span class="text-[#9497a9]">总扫描次数</span>
+                            <span id="totalScans" class="font-mono bg-[#22232e] px-2 py-0.5 rounded">--</span>
                         </div>
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-400">今日扫描</span>
-                            <span id="todayScans" class="font-mono bg-gray-800 px-2 py-0.5 rounded">--</span>
+                            <span class="text-[#9497a9]">今日扫描</span>
+                            <span id="todayScans" class="font-mono bg-[#22232e] px-2 py-0.5 rounded">--</span>
                         </div>
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-400">数据库大小</span>
-                            <span id="dbSize" class="font-mono bg-gray-800 px-2 py-0.5 rounded">--</span>
+                            <span class="text-[#9497a9]">数据库大小</span>
+                            <span id="dbSize" class="font-mono bg-[#22232e] px-2 py-0.5 rounded">--</span>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <footer class="mt-8 text-center text-gray-500 text-sm">
+        <footer class="mt-8 text-center text-[#686b82] text-sm">
             <p>期权交易有风险，本工具仅供信息参考，不构成投资建议</p>
             <p class="mt-1">Margin-APR 基于20%保证金计算 | 亏损测算基于 Delta/Gamma 近似 | 风险预警基于 Delta>0.4 或 价格接近Strike 2%</p>
         </footer>
@@ -1166,11 +1159,11 @@
     <div id="rollModal" class="modal">
         <div class="modal-content">
             <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xl font-bold text-red-400 flex items-center gap-2">
+                <h3 class="text-xl font-bold text-[#ef4444] flex items-center gap-2">
                     <i class="fas fa-exclamation-triangle"></i>
                     滚仓修复建议
                 </h3>
-                <button id="closeRollModalBtn" class="text-gray-400 hover:text-white">
+                <button id="closeRollModalBtn" class="text-[#9497a9] hover:text-white">
                     <i class="fas fa-times text-xl"></i>
                 </button>
             </div>
@@ -1179,7 +1172,6 @@
     </div>
 
     <script type="module" src="/static/app.js?v=904&t=1777626800"></script>
-    <script type="module" src="/static/grid-strategy.js?v=824&t=1777626800"></script>
     
 <div style="display:none" data-app-version="v903"></div></body>
 </html>
