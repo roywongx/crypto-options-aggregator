@@ -5,12 +5,28 @@ Crypto Options Dashboard - 常量定义
 
 import os
 
+
+def _get_fallback_from_db(currency: str) -> float:
+    """Try to get last known spot price from scan_records."""
+    try:
+        from db.connection import execute_read
+        rows = execute_read(
+            "SELECT spot_price FROM scan_records WHERE currency=? AND spot_price>0 ORDER BY timestamp DESC LIMIT 1",
+            (currency,)
+        )
+        if rows and rows[0][0]:
+            return float(rows[0][0])
+    except (ValueError, TypeError, RuntimeError):
+        pass
+    return 0
+
+
 # 现货价格回退值（仅当 API 和数据库都不可用时使用）
 # 可通过环境变量覆盖: DASHBOARD_SPOT_BTC, DASHBOARD_SPOT_ETH, DASHBOARD_SPOT_SOL
 DEFAULT_SPOT_FALLBACK = {
-    "BTC": float(os.getenv("DASHBOARD_SPOT_BTC", "83000")),
-    "ETH": float(os.getenv("DASHBOARD_SPOT_ETH", "3500")),
-    "SOL": float(os.getenv("DASHBOARD_SPOT_SOL", "150")),
+    "BTC": float(os.getenv("DASHBOARD_SPOT_BTC") or _get_fallback_from_db("BTC") or 83000),
+    "ETH": float(os.getenv("DASHBOARD_SPOT_ETH") or _get_fallback_from_db("ETH") or 3500),
+    "SOL": float(os.getenv("DASHBOARD_SPOT_SOL") or _get_fallback_from_db("SOL") or 150),
 }
 
 def get_spot_fallback(currency: str) -> float:
