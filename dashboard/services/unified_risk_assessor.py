@@ -83,14 +83,12 @@ class UnifiedRiskAssessor:
 
             if dvol > 80:
                 score = 90
-            elif dvol > 60:
+            elif dvol > 70:
                 score = 70
-            elif dvol > 40:
+            elif dvol > 50:
                 score = 40
-            elif dvol > 20:
-                score = 20
             else:
-                score = 10
+                score = 20
 
             if abs(z_score) > 2:
                 score = min(100, score + 20)
