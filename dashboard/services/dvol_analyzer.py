@@ -129,35 +129,28 @@ def _get_dvol_simple_fallback(currency: str = "BTC") -> Dict[str, Any]:
         return {}
 
 def adapt_params_by_dvol(params: dict, dvol_raw: dict) -> dict:
-    """根据 DVOL 信号调整交易参数"""
+    """根据 DVOL 信号调整交易参数（使用 DVOL_PROFILES 三档查表）"""
     from config import config
 
     dvol = dvol_raw.get("current", 50)
     z_score = dvol_raw.get("z_score", 0)
-    signal = dvol_raw.get("signal", "正常区间")
 
-    adapted = {**params}
+    if dvol > config.DVOL_HIGH_THRESHOLD:
+        regime = "high"
+    elif dvol < config.DVOL_LOW_THRESHOLD:
+        regime = "low"
+    else:
+        regime = "mid"
 
-    # 波动率极高时（>70%），降低风险偏好
-    if dvol > 70:
-        adapted["max_delta"] = min(0.25, params.get("max_delta", 0.4))
-        adapted["margin_ratio"] = min(0.3, params.get("margin_ratio", 0.2) * 1.5)
-    # 波动率极低时（<30%），提高风险偏好
-    elif dvol < 30:
-        adapted["max_delta"] = max(0.5, params.get("max_delta", 0.4))
-        adapted["margin_ratio"] = max(0.15, params.get("margin_ratio", 0.2) * 0.8)
-    # Z-score 极端值处理
-    elif abs(z_score) > 2:
+    profile = config.DVOL_PROFILES[regime]
+    adapted = {**params, **{k: v for k, v in profile.items() if k in params or k in ("max_delta", "min_dte", "max_dte", "min_apr", "margin_ratio")}}
+
+    # Z-score extreme additional adjustment
+    if abs(z_score) > 2:
         if z_score > 0:
-            adapted["max_delta"] = min(0.25, params.get("max_delta", 0.4))
+            adapted["max_delta"] = min(adapted.get("max_delta", 0.3), 0.20)
         else:
-            adapted["max_delta"] = max(0.45, params.get("max_delta", 0.4))
-
-    # 调整最小 APR 要求
-    if dvol > 60:
-        adapted["min_apr"] = max(20, params.get("min_apr", 15))
-    elif dvol < 40:
-        adapted["min_apr"] = max(10, params.get("min_apr", 15) * 0.8)
+            adapted["max_delta"] = max(adapted.get("max_delta", 0.3), 0.40)
 
     return adapted
 
