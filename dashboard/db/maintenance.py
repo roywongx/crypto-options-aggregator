@@ -53,6 +53,27 @@ def cleanup_old_records(conn: sqlite3.Connection, days: int = 30) -> dict:
     }
 
 
+def cleanup_contracts_data(conn: sqlite3.Connection, days: int = 7) -> dict:
+    """将超过指定天数的 contracts_data 置为 NULL 以释放空间，保留行和其他字段"""
+    cursor = conn.cursor()
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_str = cutoff_date.strftime('%Y-%m-%d %H:%M:%S')
+
+    cursor.execute(
+        "UPDATE scan_records SET contracts_data = NULL WHERE timestamp < ? AND contracts_data IS NOT NULL",
+        (cutoff_str,)
+    )
+    nulled = cursor.rowcount
+
+    conn.commit()
+
+    return {
+        "contracts_data_nulled": nulled,
+        "cutoff_date": cutoff_str,
+        "message": f"NULLed contracts_data older than {days} days: {nulled} rows"
+    }
+
+
 def vacuum_database(conn: sqlite3.Connection) -> bool:
     """执行 VACUUM 压缩数据库"""
     try:
