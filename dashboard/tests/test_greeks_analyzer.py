@@ -206,9 +206,15 @@ class TestScenariosAndRisk:
             assert key in s
 
     def test_down_10pct_negative(self):
-        """If market has positive delta, down scenario should be negative."""
+        """Down scenario sign should be opposite to total delta sign."""
         result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
-        assert isinstance(result["scenarios"]["down_10pct"], (int, float))
+        down = result["scenarios"]["down_10pct"]
+        total_delta = result["greeks_summary"]["total_exposure"]["delta"]
+        assert isinstance(down, (int, float))
+        if total_delta > 0:
+            assert down < 0
+        elif total_delta < 0:
+            assert down > 0
 
     def test_pin_scenario_has_fields(self):
         result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
@@ -220,4 +226,7 @@ class TestScenariosAndRisk:
 
     def test_risk_ratings_populated(self):
         result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
-        assert result["scenarios"] != {}
+        ps = result["scenarios"]["pin_scenario"]
+        assert ps["concentration"] >= 1.0, "Pin strike OI should be at least average"
+        assert ps["pin_oi"] >= ps["avg_oi"], "Pin OI should be >= average OI"
+        assert result["gex"]["pin_risk_level"] in ["HIGH", "MEDIUM", "LOW"]

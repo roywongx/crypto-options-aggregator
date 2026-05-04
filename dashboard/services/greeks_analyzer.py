@@ -209,6 +209,9 @@ class GreeksAnalyzer:
             "total_gex": round(total_gex, 0),
             "flip_strike": flip_strike,
             "pin_strike": pin_strike,
+            "pin_oi": round(pin_oi, 0),
+            "avg_oi": round(avg_oi, 0),
+            "concentration": round(concentration, 1),
             "pin_risk_level": pin_risk_level,
         }
 
@@ -217,23 +220,11 @@ class GreeksAnalyzer:
         """Calculate scenario P&L shocks and pin risk metrics."""
         total_delta = 0.0
         total_vega = 0.0
-        total_oi = 0.0
 
         for c in contracts:
             weight = max(1.0, c["oi"])
             total_delta += c["delta"] * weight
             total_vega += c["vega"] * weight
-            total_oi += weight
-
-        # Pin scenario
-        oi_by_strike = {}
-        for c in contracts:
-            s = c["strike"]
-            oi_by_strike[s] = oi_by_strike.get(s, 0) + c["oi"]
-        pin_strike = gex.get("pin_strike", 0)
-        pin_oi = oi_by_strike.get(pin_strike, 0)
-        avg_oi = sum(oi_by_strike.values()) / len(oi_by_strike) if oi_by_strike else 1
-        concentration = pin_oi / avg_oi if avg_oi > 0 else 0
 
         return {
             "down_10pct": round(total_delta * spot * -0.1, 0),
@@ -241,9 +232,9 @@ class GreeksAnalyzer:
             "iv_up_5pct": round(total_vega * 5, 0),
             "iv_down_5pct": round(total_vega * -5, 0),
             "pin_scenario": {
-                "pin_strike": pin_strike,
-                "pin_oi": round(pin_oi, 0),
-                "avg_oi": round(avg_oi, 0),
-                "concentration": round(concentration, 1),
+                "pin_strike": gex.get("pin_strike", 0),
+                "pin_oi": gex.get("pin_oi", 0),
+                "avg_oi": gex.get("avg_oi", 1),
+                "concentration": gex.get("concentration", 0),
             },
         }
