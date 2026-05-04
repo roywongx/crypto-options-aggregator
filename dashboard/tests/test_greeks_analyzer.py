@@ -300,3 +300,19 @@ class TestAnalysis:
             assert "body" in s
             assert "action" in s
             assert "confidence" in s
+
+    def test_atm_iv_from_nearest_strike(self):
+        """ATM IV should come from the strike closest to spot."""
+        contracts = [
+            _make_contract(90000, 60.0, 7, "P"),   # far OTM put, high IV
+            _make_contract(100000, 40.0, 7, "P"),   # ATM put
+            _make_contract(100000, 38.0, 7, "C"),   # ATM call
+            _make_contract(110000, 55.0, 7, "C"),   # far OTM call, high IV
+        ]
+        result = GreeksAnalyzer.analyze(contracts, 100000)
+        # Market state should use ATM IV (~38-40), not far OTM IV (~55-60)
+        # If ATM IV was wrong, market state could be VOLATILE instead of CALM/MEAN_REVERTING
+        a = result["analysis"]
+        assert a is not None
+        # With IV ~38-40 and GEX likely positive, should not be VOLATILE (requires atm_iv > 40)
+        assert a["market_state"]["state"] != "VOLATILE"

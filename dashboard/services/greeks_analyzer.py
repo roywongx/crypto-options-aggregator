@@ -26,7 +26,7 @@ class GreeksAnalyzer:
         by_expiry = cls._calc_by_expiry(contracts, spot)
         gex = cls._calc_gex(contracts, spot)
         scenarios = cls._calc_scenarios(contracts, spot, gex)
-        analysis = cls._build_analysis(contracts, spot, greeks_summary, gex, scenarios)
+        analysis = cls._build_analysis(contracts, spot, greeks_summary, gex)
 
         return {
             "currency": currency, "spot": round(spot, 2),
@@ -242,30 +242,34 @@ class GreeksAnalyzer:
 
     @classmethod
     def _build_analysis(cls, contracts: list, spot: float, greeks_summary: dict,
-                        gex: dict, scenarios: dict) -> Optional[dict]:
+                        gex: dict) -> Optional[dict]:
         if not greeks_summary or not gex:
             return None
 
         per = greeks_summary.get("per_contract", {})
-        total = greeks_summary.get("total_exposure", {})
         total_gex = gex.get("total_gex", 0)
         pin_risk_level = gex.get("pin_risk_level", "LOW")
         pin_strike = gex.get("pin_strike", 0)
-        flip_strike = gex.get("flip_strike", 0)
         atm_iv = 0
+        closest_dist = float("inf")
 
-        # Get ATM IV from nearest expiry
+        # Get ATM IV from nearest strike
         for c in contracts:
-            if not atm_iv or abs(c["strike"] - spot) < abs(atm_iv - spot):
+            dist = abs(c["strike"] - spot)
+            if dist < closest_dist:
+                closest_dist = dist
                 atm_iv = c["iv"]
 
         # GEX Regime
         if total_gex > 0:
             gex_regime = {"state": "POSITIVE", "label": "正 Gamma", "icon": "shield",
                           "description": "做市商净多 gamma，价格趋于均值回归"}
-        else:
+        elif total_gex < 0:
             gex_regime = {"state": "NEGATIVE", "label": "负 Gamma", "icon": "zap",
                           "description": "做市商净空 gamma，趋势可能加速"}
+        else:
+            gex_regime = {"state": "NEUTRAL", "label": "中性 Gamma", "icon": "⚖️",
+                          "description": "GEX 接近零，方向不明确"}
 
         # Pin Risk
         pin_risk_info = {
@@ -313,8 +317,10 @@ class GreeksAnalyzer:
         interpretation = []
         if total_gex > 0:
             interpretation.append("GEX 为正，做市商处于多 gamma 位置，市场倾向于均值回归")
-        else:
+        elif total_gex < 0:
             interpretation.append("GEX 为负，做市商处于空 gamma 位置，趋势可能加速")
+        else:
+            interpretation.append("GEX 接近零，方向不明确")
 
         if pin_risk_level == "HIGH":
             interpretation.append(f"Pin Risk 高，{pin_strike} 附近 OI 集中，到期前价格可能被吸附")
