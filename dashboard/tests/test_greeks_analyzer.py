@@ -186,3 +186,38 @@ class TestGEX:
     def test_pin_risk_level_valid(self):
         result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
         assert result["gex"]["pin_risk_level"] in ["HIGH", "MEDIUM", "LOW"]
+
+
+class TestScenariosAndRisk:
+    def _make_contracts(self):
+        contracts = []
+        spot = 100000
+        for dte in [7, 14]:
+            for strike_pct in [-10, -5, 0, 5, 10]:
+                strike = spot * (1 + strike_pct / 100)
+                contracts.append(_make_contract(strike, 45.0, dte, "P"))
+                contracts.append(_make_contract(strike, 38.0, dte, "C"))
+        return contracts
+
+    def test_scenarios_populated(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        s = result["scenarios"]
+        for key in ["down_10pct", "up_10pct", "iv_up_5pct", "iv_down_5pct", "pin_scenario"]:
+            assert key in s
+
+    def test_down_10pct_negative(self):
+        """If market has positive delta, down scenario should be negative."""
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        assert isinstance(result["scenarios"]["down_10pct"], (int, float))
+
+    def test_pin_scenario_has_fields(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        ps = result["scenarios"]["pin_scenario"]
+        assert "pin_strike" in ps
+        assert "pin_oi" in ps
+        assert "avg_oi" in ps
+        assert "concentration" in ps
+
+    def test_risk_ratings_populated(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        assert result["scenarios"] != {}

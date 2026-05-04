@@ -25,6 +25,7 @@ class GreeksAnalyzer:
         greeks_summary = cls._calc_greeks_summary(contracts)
         by_expiry = cls._calc_by_expiry(contracts, spot)
         gex = cls._calc_gex(contracts, spot)
+        scenarios = cls._calc_scenarios(contracts, spot, gex)
 
         return {
             "currency": currency, "spot": round(spot, 2),
@@ -35,7 +36,7 @@ class GreeksAnalyzer:
             "greeks_summary": greeks_summary,
             "gex": gex,
             "by_expiry": by_expiry,
-            "scenarios": {},
+            "scenarios": scenarios,
             "analysis": None,
         }
 
@@ -209,4 +210,40 @@ class GreeksAnalyzer:
             "flip_strike": flip_strike,
             "pin_strike": pin_strike,
             "pin_risk_level": pin_risk_level,
+        }
+
+    @classmethod
+    def _calc_scenarios(cls, contracts: list, spot: float, gex: dict) -> dict:
+        """Calculate scenario P&L shocks and pin risk metrics."""
+        total_delta = 0.0
+        total_vega = 0.0
+        total_oi = 0.0
+
+        for c in contracts:
+            weight = max(1.0, c["oi"])
+            total_delta += c["delta"] * weight
+            total_vega += c["vega"] * weight
+            total_oi += weight
+
+        # Pin scenario
+        oi_by_strike = {}
+        for c in contracts:
+            s = c["strike"]
+            oi_by_strike[s] = oi_by_strike.get(s, 0) + c["oi"]
+        pin_strike = gex.get("pin_strike", 0)
+        pin_oi = oi_by_strike.get(pin_strike, 0)
+        avg_oi = sum(oi_by_strike.values()) / len(oi_by_strike) if oi_by_strike else 1
+        concentration = pin_oi / avg_oi if avg_oi > 0 else 0
+
+        return {
+            "down_10pct": round(total_delta * spot * -0.1, 0),
+            "up_10pct": round(total_delta * spot * 0.1, 0),
+            "iv_up_5pct": round(total_vega * 5, 0),
+            "iv_down_5pct": round(total_vega * -5, 0),
+            "pin_scenario": {
+                "pin_strike": pin_strike,
+                "pin_oi": round(pin_oi, 0),
+                "avg_oi": round(avg_oi, 0),
+                "concentration": round(concentration, 1),
+            },
         }
