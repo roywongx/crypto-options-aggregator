@@ -415,13 +415,20 @@
                     <option value="ETH">ETH</option>
                 </select>
             </div>
-            <div class="text-xs text-[#686b82] mb-3 bg-[#22232e]/30 rounded p-2 space-y-1">
-                <div><span class="text-[#7132f5] font-medium">Delta (Δ):</span> 价格敏感度 | +看涨 -看跌 | 绝对值>0.5风险高</div>
-                <div><span class="text-[#7132f5] font-medium">Gamma (Γ):</span> Delta变化率 | 越大价格大幅波动风险越高</div>
-                <div><span class="text-[#149e61] font-medium">Theta (Θ):</span> 时间损耗 | 负数表示每天流失的价值</div>
-                <div><span class="text-[#7132f5] font-medium">Vega (V):</span> IV敏感度 | 越大波动率变化影响越大</div>
+            <!-- Status bar -->
+            <div id="greeksStatusBar" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4"></div>
+            <!-- GEX Chart -->
+            <div id="gexChartContainer" class="mb-4" style="height: 260px; position: relative;">
+                <canvas id="gexCanvas"></canvas>
             </div>
+            <!-- Greeks Expiry Curves -->
+            <div id="greeksCurvesContainer" class="mb-4" style="height: 260px; position: relative;">
+                <canvas id="greeksCurvesCanvas"></canvas>
+            </div>
+            <!-- Greeks Overview Grid -->
             <div id="greeksGrid"></div>
+            <!-- Analysis Panel -->
+            <div id="greeksAnalysis" class="mt-4"></div>
         </section>
 
         <!-- AI 研判中心 -->
