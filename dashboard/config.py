@@ -92,7 +92,9 @@ class Config:
         # === 缓存配置 ===
         self.CACHE_TTL_SECONDS = _get_env("CACHE_TTL_SECONDS", 60, env)
         self.DATA_RETENTION_DAYS = _get_env("DATA_RETENTION_DAYS", 90, env)
-        
+        self.CONTRACTS_DATA_RETENTION_DAYS = _get_env("CONTRACTS_DATA_RETENTION_DAYS", 7, env)
+        self.TOP_CONTRACTS_RETENTION_DAYS = _get_env("TOP_CONTRACTS_RETENTION_DAYS", 30, env)
+
         # === 扫描配置 ===
         self.LARGE_TRADE_THRESHOLD_USD = _get_env("LARGE_TRADE_THRESHOLD_USD", 500_000, env)
         self.SCAN_CLEANUP_LIMIT_CONTRACTS = _get_env("SCAN_CLEANUP_LIMIT_CONTRACTS", 30, env)
@@ -118,9 +120,17 @@ class Config:
         
         # === DVOL 阈值配置 ===
         self.DVOL_PANIC_THRESHOLD = _get_env("DVOL_PANIC_THRESHOLD", 80, env)
-        self.DVOL_LOW_THRESHOLD = _get_env("DVOL_LOW_THRESHOLD", 20, env)
+        self.DVOL_HIGH_THRESHOLD = _get_env("DVOL_HIGH_THRESHOLD", 70, env)
+        self.DVOL_LOW_THRESHOLD = _get_env("DVOL_LOW_THRESHOLD", 50, env)
         self.DVOL_Z_HIGH = _get_env("DVOL_Z_HIGH", 2.0, env)
         self.DVOL_Z_MID = _get_env("DVOL_Z_MID", 1.0, env)
+
+        # === DVOL 自适应参数档位 ===
+        self.DVOL_PROFILES = {
+            "low":  {"max_delta": 0.35, "min_dte": 21, "max_dte": 45, "min_apr": 10.0, "margin_ratio": 0.18},
+            "mid":  {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "min_apr": 15.0, "margin_ratio": 0.20},
+            "high": {"max_delta": 0.20, "min_dte": 7,  "max_dte": 21, "min_apr": 25.0, "margin_ratio": 0.22},
+        }
         
         # === 成交量/流动性阈值 ===
         self.MIN_VOLUME_FILTER = _get_env("MIN_VOLUME_FILTER", 5, env)
@@ -155,12 +165,12 @@ class Config:
             "PUT": {
                 "conservative": {"max_delta": 0.20, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 12.0},
                 "standard":     {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 15.0},
-                "aggressive":   {"max_delta": 0.40, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0}
+                "aggressive":   {"max_delta": 0.35, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 20.0}
             },
             "CALL": {
-                "conservative": {"max_delta": 0.30, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0},
-                "standard":     {"max_delta": 0.45, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0},
-                "aggressive":   {"max_delta": 0.55, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0}
+                "conservative": {"max_delta": 0.15, "min_dte": 30, "max_dte": 45, "margin_ratio": 0.18, "min_apr": 10.0},
+                "standard":     {"max_delta": 0.25, "min_dte": 14, "max_dte": 35, "margin_ratio": 0.20, "min_apr": 12.0},
+                "aggressive":   {"max_delta": 0.30, "min_dte": 7,  "max_dte": 28, "margin_ratio": 0.22, "min_apr": 18.0}
             }
         }
     
