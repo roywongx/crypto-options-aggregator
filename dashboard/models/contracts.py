@@ -4,9 +4,9 @@ from typing import Optional
 
 class ScanParams(BaseModel):
     currency: str = Field(default="BTC", description="币种")
-    min_dte: int = Field(default=14, ge=1, le=365, description="最小到期天数")
-    max_dte: int = Field(default=25, ge=1, le=365, description="最大到期天数")
-    max_delta: float = Field(default=0.4, ge=0.01, le=1.0, description="最大Delta")
+    min_dte: int = Field(default=1, ge=1, le=365, description="最小到期天数")
+    max_dte: int = Field(default=90, ge=1, le=365, description="最大到期天数")
+    max_delta: float = Field(default=0.99, ge=0.01, le=1.0, description="最大Delta")
     margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0, description="保证金比率")
     option_type: str = Field(default="PUT", pattern="^(PUT|CALL)$")
     strike: Optional[float] = Field(default=None, description="特定行权价")
@@ -27,9 +27,9 @@ class RollCalcParams(BaseModel):
 
 class QuickScanParams(BaseModel):
     currency: str = Field(default="BTC", pattern="^(BTC|ETH|SOL|XRP)$")
-    min_dte: int = Field(default=14, ge=1, le=365)
-    max_dte: int = Field(default=35, ge=1, le=365)
-    max_delta: float = Field(default=0.4, ge=0.01, le=1.0)
+    min_dte: int = Field(default=1, ge=1, le=365)
+    max_dte: int = Field(default=90, ge=1, le=365)
+    max_delta: float = Field(default=0.99, ge=0.01, le=1.0)
     margin_ratio: float = Field(default=0.2, ge=0.05, le=1.0)
     option_type: str = Field(default="ALL", pattern="^(PUT|CALL|ALL|BOTH)$")
     strike: Optional[float] = Field(default=None, gt=0)
