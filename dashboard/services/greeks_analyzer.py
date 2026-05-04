@@ -26,6 +26,7 @@ class GreeksAnalyzer:
         by_expiry = cls._calc_by_expiry(contracts, spot)
         gex = cls._calc_gex(contracts, spot)
         scenarios = cls._calc_scenarios(contracts, spot, gex)
+        analysis = cls._build_analysis(contracts, spot, greeks_summary, gex, scenarios)
 
         return {
             "currency": currency, "spot": round(spot, 2),
@@ -37,7 +38,7 @@ class GreeksAnalyzer:
             "gex": gex,
             "by_expiry": by_expiry,
             "scenarios": scenarios,
-            "analysis": None,
+            "analysis": analysis,
         }
 
     @classmethod
@@ -237,4 +238,137 @@ class GreeksAnalyzer:
                 "avg_oi": gex.get("avg_oi", 1),
                 "concentration": gex.get("concentration", 0),
             },
+        }
+
+    @classmethod
+    def _build_analysis(cls, contracts: list, spot: float, greeks_summary: dict,
+                        gex: dict, scenarios: dict) -> Optional[dict]:
+        if not greeks_summary or not gex:
+            return None
+
+        per = greeks_summary.get("per_contract", {})
+        total = greeks_summary.get("total_exposure", {})
+        total_gex = gex.get("total_gex", 0)
+        pin_risk_level = gex.get("pin_risk_level", "LOW")
+        pin_strike = gex.get("pin_strike", 0)
+        flip_strike = gex.get("flip_strike", 0)
+        atm_iv = 0
+
+        # Get ATM IV from nearest expiry
+        for c in contracts:
+            if not atm_iv or abs(c["strike"] - spot) < abs(atm_iv - spot):
+                atm_iv = c["iv"]
+
+        # GEX Regime
+        if total_gex > 0:
+            gex_regime = {"state": "POSITIVE", "label": "正 Gamma", "icon": "shield",
+                          "description": "做市商净多 gamma，价格趋于均值回归"}
+        else:
+            gex_regime = {"state": "NEGATIVE", "label": "负 Gamma", "icon": "zap",
+                          "description": "做市商净空 gamma，趋势可能加速"}
+
+        # Pin Risk
+        pin_risk_info = {
+            "level": pin_risk_level,
+            "label": {"HIGH": "高 Pin Risk", "MEDIUM": "中 Pin Risk", "LOW": "低 Pin Risk"}[pin_risk_level],
+            "icon": "pin",
+            "description": f"{pin_strike} strike OI 集中" if pin_strike else "无明显 pin",
+        }
+
+        # Market State
+        delta_val = per.get("delta", 0)
+        if pin_risk_level == "HIGH":
+            market_state = {"state": "PIN_RISK", "label": "Pin 风险", "icon": "pin", "color": "#ef4444"}
+        elif total_gex < 0 and atm_iv > 40:
+            market_state = {"state": "VOLATILE", "label": "高波动", "icon": "waves", "color": "#ef4444"}
+        elif total_gex > 0 and atm_iv < 25:
+            market_state = {"state": "CALM", "label": "平静", "icon": "sleep", "color": "#149e61"}
+        elif total_gex < 0 and delta_val > 0:
+            market_state = {"state": "TRENDING_UP", "label": "趋势上行", "icon": "chart-up", "color": "#149e61"}
+        elif total_gex < 0 and delta_val < 0:
+            market_state = {"state": "TRENDING_DOWN", "label": "趋势下行", "icon": "chart-down", "color": "#ef4444"}
+        else:
+            market_state = {"state": "MEAN_REVERTING", "label": "均值回归", "icon": "refresh", "color": "#3b82f6"}
+
+        # Risk Ratings
+        def _rate_greek(value, high_thresh, med_thresh):
+            av = abs(value)
+            if av > high_thresh:
+                return "HIGH"
+            if av > med_thresh:
+                return "MEDIUM"
+            return "LOW"
+
+        risk_ratings = {
+            "delta": {"level": _rate_greek(delta_val, 0.5, 0.2), "label": "", "value": round(delta_val, 4)},
+            "gamma": {"level": _rate_greek(per.get("gamma", 0), 0.01, 0.005), "label": "", "value": round(per.get("gamma", 0), 6)},
+            "theta": {"level": _rate_greek(per.get("theta", 0), 100, 50), "label": "", "value": round(per.get("theta", 0), 2)},
+            "vega": {"level": _rate_greek(per.get("vega", 0), 500, 200), "label": "", "value": round(per.get("vega", 0), 2)},
+        }
+        level_labels = {"HIGH": "RED high", "MEDIUM": "YELLOW medium", "LOW": "GREEN low"}
+        for g in risk_ratings:
+            risk_ratings[g]["label"] = level_labels[risk_ratings[g]["level"]]
+
+        # Interpretation
+        interpretation = []
+        if total_gex > 0:
+            interpretation.append("GEX 为正，做市商处于多 gamma 位置，市场倾向于均值回归")
+        else:
+            interpretation.append("GEX 为负，做市商处于空 gamma 位置，趋势可能加速")
+
+        if pin_risk_level == "HIGH":
+            interpretation.append(f"Pin Risk 高，{pin_strike} 附近 OI 集中，到期前价格可能被吸附")
+        elif pin_risk_level == "MEDIUM":
+            interpretation.append(f"Pin Risk 中等，{pin_strike} 附近有一定 OI 集中")
+
+        if risk_ratings["vega"]["level"] == "HIGH":
+            interpretation.append("Vega 敞口大，IV 变动会显著影响持仓价值")
+        if risk_ratings["theta"]["level"] == "HIGH":
+            interpretation.append("Theta 衰减快，时间价值损耗显著")
+
+        # Hedge Suggestions
+        suggestions = []
+        if abs(delta_val) > 0.5:
+            suggestions.append({
+                "type": "delta_hedge", "title": "对冲方向风险",
+                "body": f"Delta 敞口较大 ({delta_val:.4f})，建议买入反向期权对冲",
+                "action": "买入反向期权使 Delta 接近中性",
+                "confidence": "HIGH",
+            })
+        if pin_risk_level == "HIGH":
+            suggestions.append({
+                "type": "reduce_position", "title": "到期前减仓",
+                "body": f"Pin Risk 高，{pin_strike} 附近 OI 集中度高",
+                "action": "将近期仓位移至更远到期日",
+                "confidence": "HIGH",
+            })
+        if total_gex > 0 and atm_iv > 30:
+            suggestions.append({
+                "type": "sell_straddle", "title": "卖出跨式",
+                "body": "正 Gamma 环境适合卖出跨式收取时间价值",
+                "action": "在 ATM strike 卖出跨式，Delta 中性",
+                "confidence": "MEDIUM",
+            })
+        if total_gex < 0 and delta_val > 0:
+            suggestions.append({
+                "type": "trend_follow", "title": "顺势加仓",
+                "body": "负 Gamma + 正 Delta，上行趋势可能加速",
+                "action": "考虑加仓多头或买入 Call 跟趋势",
+                "confidence": "MEDIUM",
+            })
+        if risk_ratings["vega"]["level"] == "HIGH":
+            suggestions.append({
+                "type": "vega_hedge", "title": "做空波动率",
+                "body": "Vega 敞口大，若预期 IV 下降可卖出宽跨式",
+                "action": "卖出宽跨式做空波动率",
+                "confidence": "MEDIUM",
+            })
+
+        return {
+            "gex_regime": gex_regime,
+            "pin_risk": pin_risk_info,
+            "market_state": market_state,
+            "risk_ratings": risk_ratings,
+            "interpretation": interpretation,
+            "hedge_suggestions": suggestions[:4],
         }

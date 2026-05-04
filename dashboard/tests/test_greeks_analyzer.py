@@ -230,3 +230,73 @@ class TestScenariosAndRisk:
         assert ps["concentration"] >= 1.0, "Pin strike OI should be at least average"
         assert ps["pin_oi"] >= ps["avg_oi"], "Pin OI should be >= average OI"
         assert result["gex"]["pin_risk_level"] in ["HIGH", "MEDIUM", "LOW"]
+
+
+class TestAnalysis:
+    def _make_contracts(self):
+        contracts = []
+        spot = 100000
+        for dte in [7, 14]:
+            for strike_pct in [-10, -5, 0, 5, 10]:
+                strike = spot * (1 + strike_pct / 100)
+                contracts.append(_make_contract(strike, 45.0, dte, "P"))
+                contracts.append(_make_contract(strike, 38.0, dte, "C"))
+        return contracts
+
+    def test_analysis_populated(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        assert result["analysis"] is not None
+
+    def test_analysis_has_gex_regime(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        a = result["analysis"]
+        assert "gex_regime" in a
+        assert "state" in a["gex_regime"]
+        assert "label" in a["gex_regime"]
+
+    def test_analysis_has_pin_risk(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        a = result["analysis"]
+        assert "pin_risk" in a
+        assert "level" in a["pin_risk"]
+
+    def test_analysis_has_market_state(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        a = result["analysis"]
+        assert "market_state" in a
+        assert "state" in a["market_state"]
+        assert a["market_state"]["state"] in [
+            "TRENDING_UP", "TRENDING_DOWN", "MEAN_REVERTING",
+            "PIN_RISK", "VOLATILE", "CALM"
+        ]
+
+    def test_analysis_has_risk_ratings(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        a = result["analysis"]
+        assert "risk_ratings" in a
+        for greek in ["delta", "gamma", "theta", "vega"]:
+            assert greek in a["risk_ratings"]
+            assert "level" in a["risk_ratings"][greek]
+            assert a["risk_ratings"][greek]["level"] in ["HIGH", "MEDIUM", "LOW"]
+
+    def test_analysis_has_interpretation(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        a = result["analysis"]
+        assert "interpretation" in a
+        assert isinstance(a["interpretation"], list)
+        assert len(a["interpretation"]) > 0
+
+    def test_analysis_has_hedge_suggestions(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        a = result["analysis"]
+        assert "hedge_suggestions" in a
+        assert isinstance(a["hedge_suggestions"], list)
+
+    def test_hedge_suggestion_has_fields(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        for s in result["analysis"]["hedge_suggestions"]:
+            assert "type" in s
+            assert "title" in s
+            assert "body" in s
+            assert "action" in s
+            assert "confidence" in s
