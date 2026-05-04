@@ -283,9 +283,9 @@ async def get_iv_smile(currency: str = "BTC"):
 
 @router.get("/greeks-summary")
 async def get_greeks_summary(currency: str = "BTC"):
-    """获取持仓 Greeks 汇总 (风险矩阵) - 使用 OI 加权计算"""
+    """获取 Greeks 风险矩阵分析"""
     from services.spot_price import get_spot_price
-    from services.shared_calculations import black_scholes_price
+    from services.greeks_analyzer import GreeksAnalyzer
     from db.async_connection import execute_read_async
 
     try:
@@ -294,7 +294,6 @@ async def get_greeks_summary(currency: str = "BTC"):
         from constants import get_spot_fallback
         spot = get_spot_fallback(currency)
 
-    # 从 DB 获取最新合约数据
     rows = await execute_read_async("""
         SELECT contracts_data FROM scan_records
         WHERE currency = ? AND contracts_data IS NOT NULL
@@ -302,110 +301,19 @@ async def get_greeks_summary(currency: str = "BTC"):
     """, (currency,))
 
     if not rows or not rows[0][0]:
-        return {"error": "无合约数据", "greeks": {}, "currency": currency, "spot": spot}
+        return {"error": "无合约数据", "greeks_summary": {}, "gex": {}, "by_expiry": [],
+                "scenarios": {}, "analysis": None, "currency": currency, "spot": spot}
 
     try:
         contracts = json.loads(rows[0][0])
     except json.JSONDecodeError:
-        return {"error": "数据解析失败", "greeks": {}, "currency": currency, "spot": spot}
+        return {"error": "数据解析失败", "greeks_summary": {}, "gex": {}, "by_expiry": [],
+                "scenarios": {}, "analysis": None, "currency": currency, "spot": spot}
 
-    total_delta = 0.0
-    total_gamma = 0.0
-    total_theta = 0.0
-    total_vega = 0.0
-    total_premium = 0.0
-    total_notional = 0.0
-    total_oi = 0.0
-    contract_count = 0
-    put_count = 0
-    call_count = 0
+    result = GreeksAnalyzer.analyze(contracts, spot, currency)
 
-    for c in contracts:
-        strike = float(c.get("strike", 0))
-        dte = int(float(c.get("dte", 0)))
-        iv_raw = c.get("mark_iv") or c.get("iv") or 0
-        iv = float(iv_raw) if iv_raw else 0
-        # 统一 IV 格式
-        if 0 < iv < 1.0:
-            iv *= 100
-        elif iv > 200 or iv <= 0:
-            continue
-        option_type = c.get("option_type", "")
-        premium = float(c.get("premium_usd", c.get("premium", 0)) or 0)
-        oi_raw = c.get("oi") if c.get("oi") is not None else c.get("open_interest", 0)
-        oi = float(oi_raw) if oi_raw else 0
+    if result["contract_count"] == 0:
+        return {"error": "无有效 Greeks 数据", "greeks_summary": {}, "gex": {}, "by_expiry": [],
+                "scenarios": {}, "analysis": None, "currency": currency, "spot": spot}
 
-        if strike <= 0 or dte <= 0:
-            continue
-
-        # 用 BS 模型计算 Greeks
-        bs = black_scholes_price(option_type, strike, spot, dte, iv)
-
-        # OI 加权 Greeks（反映市场真实风险敞口）
-        weight = max(1.0, oi)  # 至少权重为1
-        total_delta += bs["delta"] * weight
-        total_gamma += bs["gamma"] * weight
-        total_theta += bs["theta"] * weight
-        total_vega += bs["vega"] * weight
-        total_premium += premium * weight
-        total_notional += strike * weight
-        total_oi += weight
-        contract_count += 1
-
-        if option_type.upper()[0] == "P":
-            put_count += 1
-        elif option_type.upper()[0] == "C":
-            call_count += 1
-
-    if total_oi <= 0:
-        return {"error": "无有效 Greeks 数据", "greeks": {}, "currency": currency, "spot": spot}
-
-    # 归一化（每单位 OI 的平均 Greeks）
-    norm_delta = total_delta / total_oi
-    norm_gamma = total_gamma / total_oi
-    norm_theta = total_theta / total_oi
-    norm_vega = total_vega / total_oi
-
-    # 风险评级（基于归一化后的 Delta）
-    abs_delta = abs(norm_delta)
-    if abs_delta > 0.5:
-        delta_risk = "🔴 高"
-    elif abs_delta > 0.2:
-        delta_risk = "🟡 中"
-    else:
-        delta_risk = "🟢 低"
-
-    # 计算风险敞口（使用总 OI 作为乘数）
-    total_delta_exposure = norm_delta * total_oi
-
-    return {
-        "currency": currency,
-        "spot": round(spot, 2),
-        "contract_count": contract_count,
-        "put_count": put_count,
-        "call_count": call_count,
-        "total_oi": round(total_oi, 0),
-        "greeks_per_contract": {
-            "delta": round(norm_delta, 4),
-            "gamma": round(norm_gamma, 6),
-            "theta": round(norm_theta, 4),
-            "vega": round(norm_vega, 4),
-        },
-        "total_greeks_exposure": {
-            "delta": round(total_delta, 2),
-            "gamma": round(total_gamma, 4),
-            "theta": round(total_theta, 2),
-            "vega": round(total_vega, 2),
-        },
-        "risk_assessment": {
-            "delta_risk": delta_risk,
-            "delta_pnl_if_down_10pct": round(total_delta_exposure * spot * -0.1, 0),
-            "delta_pnl_if_up_10pct": round(total_delta_exposure * spot * 0.1, 0),
-            "theta_daily_decay": round(total_theta, 0),
-            "vega_pnl_if_iv_up_5pct": round(total_vega * 5, 0),
-        },
-        "totals": {
-            "premium": round(total_premium, 0),
-            "notional": round(total_notional, 0),
-        }
-    }
+    return result
