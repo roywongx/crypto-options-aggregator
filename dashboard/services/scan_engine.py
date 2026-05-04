@@ -28,6 +28,15 @@ from db.connection import get_db_connection as _db_conn, execute_read, execute_w
 from constants import get_spot_fallback
 
 
+def _get_dvol_profile(dvol_current: float) -> dict:
+    """根据 DVOL 当前值返回参数档位"""
+    if dvol_current > config.DVOL_HIGH_THRESHOLD:
+        return config.DVOL_PROFILES["high"]
+    elif dvol_current < config.DVOL_LOW_THRESHOLD:
+        return config.DVOL_PROFILES["low"]
+    return config.DVOL_PROFILES["mid"]
+
+
 def get_db_connection(read_only: bool = True):
     """获取数据库连接（默认只读）"""
     return _db_conn(read_only=read_only)
@@ -239,6 +248,79 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         return {"success": False, "error": "参数适配失败，请检查输入参数"}
 
 
+def _apply_quality_filter(contracts: list, spot: float) -> list:
+    """质量过滤：OI>=10, IV>0 — 不做 DTE/Delta 限制，保留全量数据供下游分析"""
+    filtered = []
+    for s in contracts:
+        meta = _parse_inst_name(s.get("instrument_name", ""))
+        if not meta or meta.dte < 1:
+            continue
+        iv = float(s.get("mark_iv") or 0)
+        oi = float(s.get("open_interest") or 0)
+        if iv <= 0 or oi < 10:
+            continue
+        strike = meta.strike
+        underlying = float(s.get("underlying_price", spot)) or spot
+        raw_delta = s.get("delta")
+        if raw_delta is None or float(raw_delta or 0) == 0:
+            delta_val = abs(calc_delta_bs(strike, underlying, iv, meta.dte, meta.option_type))
+        else:
+            delta_val = abs(float(raw_delta))
+        prem = float(s.get("mark_price") or 0)
+        prem_usd = prem * underlying
+        dist = abs(strike - spot) / spot * 100
+        margin_ratio = 0.2
+        cv = strike * margin_ratio
+        apr = (prem_usd / cv) * (365 / meta.dte) * 100 if cv > 0 else 0
+        bs_greeks = black_scholes_price(meta.option_type, strike, underlying, meta.dte, iv)
+        filtered.append({
+            "symbol": s.get("instrument_name", ""),
+            "platform": "Deribit",
+            "expiry": meta.expiry,
+            "dte": meta.dte,
+            "option_type": meta.option_type,
+            "strike": strike,
+            "apr": round(apr, 1),
+            "premium_usd": round(prem_usd, 2),
+            "delta": round(delta_val, 3),
+            "theta": round(bs_greeks["theta"], 4),
+            "gamma": round(bs_greeks["gamma"], 6),
+            "vega": round(bs_greeks["vega"], 4),
+            "iv": round(iv, 1),
+            "open_interest": round(oi, 0),
+            "distance_spot_pct": round(dist, 1),
+        })
+    return filtered
+
+
+def _apply_strategy_filter(contracts: list, dvol_current: float, spot: float) -> list:
+    """策略过滤：DVOL 自适应 DTE/Delta + 评分排序"""
+    profile = _get_dvol_profile(dvol_current)
+    max_delta = profile["max_delta"]
+    min_dte = profile["min_dte"]
+    max_dte = profile["max_dte"]
+
+    filtered = []
+    for c in contracts:
+        if c["dte"] < min_dte or c["dte"] > max_dte:
+            continue
+        if c["delta"] > max_delta:
+            continue
+        c["_score"] = CalculationEngine.weighted_score(
+            apr=c.get("apr", 0),
+            pop=calc_pop(c["delta"], c["option_type"], spot, c["strike"], c["iv"], c["dte"]),
+            breakeven_pct=c.get("distance_spot_pct", 0),
+            liquidity_score=min(100, int((c.get("open_interest", 0) / 500) * 100)),
+            iv_rank=50,
+            strike=c["strike"],
+            spot=spot
+        )
+        filtered.append(c)
+
+    filtered.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    return filtered
+
+
 async def quick_scan(params: QuickScanParams = None):
     """
     快速扫描（DataHub 优化版）
@@ -374,95 +456,7 @@ async def quick_scan(params: QuickScanParams = None):
     dvol_z = dvol_data.get('z_score', 0) or 0
     dvol_signal = dvol_data.get('signal', '正常区间')
 
-    use_min_dte = _p.min_dte
-    use_max_dte = _p.max_dte
-
-    dvol_pct = 50
-    if abs(dvol_z) > 0:
-        try:
-            from scipy.stats import norm
-            dvol_pct = round(norm.cdf(dvol_z) * 100, 1)
-        except (ImportError, ValueError) as e:
-            logger.debug("scipy norm.cdf failed: %s, using linear fallback", e)
-            dvol_pct = round(50 + dvol_z * 20, 1)
-            dvol_pct = max(1, min(99, dvol_pct))
-
-    contracts = []
-    floors = RiskFramework._get_floors()
-    regular_floor = floors.get("regular", 0)
-    extreme_floor = floors.get("extreme", 0)
-
-    if summaries:
-        for s in summaries:
-            meta = _parse_inst_name(s.get("instrument_name", ""))
-            if not meta: continue
-            if meta.dte < use_min_dte or meta.dte > use_max_dte: continue
-
-            req_type = _p.option_type.upper()
-            req_type_short = "P" if req_type == "PUT" else "C"
-            fetch_all = req_type in ("ALL", "BOTH")
-            if not fetch_all and meta.option_type != req_type_short: continue
-
-            iv = float(s.get("mark_iv") or 0)
-            prem = float(s.get("mark_price") or 0)
-            oi = float(s.get("open_interest") or 0)
-            if iv <= 0 or prem <= 0 or oi < 10: continue
-
-            strike = meta.strike
-            underlying = float(s.get("underlying_price", spot)) or spot
-
-            raw_delta = s.get("delta")
-            if raw_delta is None or float(raw_delta or 0) == 0:
-                delta_val = abs(calc_delta_bs(strike, underlying, iv, meta.dte, meta.option_type))
-            else:
-                delta_val = abs(float(raw_delta))
-
-            max_delta = _p.max_delta
-            if isinstance(dvol_pct, (int, float)) and dvol_pct >= 80:
-                max_delta = max_delta * 0.7
-            elif isinstance(dvol_pct, (int, float)) and dvol_pct <= 20:
-                max_delta = min(max_delta * 1.2, 0.55)
-
-            if delta_val > max_delta: continue
-            if _p.strike and abs(strike - _p.strike) > 0.5: continue
-
-            prem_usd = prem * underlying
-            margin_ratio = _p.margin_ratio
-            cv = strike * margin_ratio
-            apr = (prem_usd / cv) * (365 / meta.dte) * 100 if cv > 0 else 0
-
-            dist = abs(strike - spot) / spot * 100
-
-            # 使用 BS 模型计算 Greeks（API 不返回 Greeks）
-            bs_greeks = black_scholes_price(meta.option_type, strike, underlying, meta.dte, iv)
-
-            contracts.append({
-                "symbol": s.get("instrument_name", ""),
-                "platform": "Deribit",
-                "expiry": meta.expiry,
-                "dte": meta.dte,
-                "option_type": meta.option_type,
-                "strike": strike,
-                "apr": round(apr, 1),
-                "premium_usd": round(prem_usd, 2),
-                "delta": round(delta_val, 3),
-                "theta": round(bs_greeks["theta"], 4),
-                "gamma": round(bs_greeks["gamma"], 6),
-                "vega": round(bs_greeks["vega"], 4),
-                "iv": round(iv, 1),
-                "open_interest": round(oi, 0),
-                "loss_at_10pct": round(max(0, (strike - spot * 0.9) if meta.option_type == "P" else (spot * 1.1 - strike)), 2),
-                "breakeven": round(strike - prem_usd if meta.option_type == "P" else strike + prem_usd, 0),
-                "distance_spot_pct": round(dist, 1),
-                "support_distance_pct": round((strike - regular_floor) / regular_floor * 100, 1) if regular_floor > 0 and meta.option_type == "P" else None,
-                "margin_required": round(calc_margin(strike, prem_usd, meta.option_type, margin_ratio), 2),
-                "capital_efficiency": round(prem_usd / calc_margin(strike, prem_usd, meta.option_type, margin_ratio) * 100, 1) if cv > 0 else 0,
-                "spread_pct": 0.1,
-                "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, meta.option_type, spot),
-                "pop": calc_pop(delta_val, meta.option_type, spot, strike, iv, meta.dte),
-                "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
-                "liquidity_score": min(100, int((oi / 500) * 100))
-            })
+    quality_contracts = _apply_quality_filter(summaries, spot) if summaries else []
 
     if isinstance(binance_contracts, list):
         for s in binance_contracts:
@@ -473,20 +467,15 @@ async def quick_scan(params: QuickScanParams = None):
             dte = s.get('dte', 0)
             delta_val = s.get('delta', 0)
             iv = s.get('mark_iv', 0)
-            volume = s.get('volume', 0)
             oi = s.get('oi', 0)
+            if iv <= 0 or oi < 10:
+                continue
             spread_pct = s.get('spread_pct', 0)
             opt_type = 'P' if 'P' in s.get('symbol', '').upper() else 'C'
-            margin_ratio = _p.margin_ratio
-            cv = strike * margin_ratio
             apr = s.get('apr', 0)
             dist = abs(strike - spot) / spot * 100
-            liq_score = s.get('liquidity_score', 50)
-
-            # 使用 BS 模型计算 Greeks
             bs_greeks_binance = black_scholes_price(opt_type, strike, spot, int(dte), iv) if iv > 0 and dte > 0 else {"gamma": 0, "theta": 0, "vega": 0}
-
-            contracts.append({
+            quality_contracts.append({
                 "symbol": s['symbol'],
                 "platform": "Binance",
                 "expiry": s['symbol'].split('-')[1] if '-' in s.get('symbol', '') else '',
@@ -501,54 +490,14 @@ async def quick_scan(params: QuickScanParams = None):
                 "vega": round(bs_greeks_binance.get("vega", 0), 4),
                 "iv": round(iv, 1),
                 "open_interest": round(oi, 0),
-                "loss_at_10pct": round(max(0, (strike - spot * 0.9) if opt_type == "P" else (spot * 1.1 - strike)), 2),
-                "breakeven": round(strike - prem_usd if opt_type == 'P' else strike + prem_usd, 0),
                 "distance_spot_pct": round(dist, 1),
-                "support_distance_pct": round((strike - regular_floor) / regular_floor * 100, 1) if regular_floor > 0 and opt_type == "P" else None,
-                "margin_required": round(calc_margin(strike, prem_usd, opt_type, margin_ratio), 2),
-                "capital_efficiency": round(prem_usd / calc_margin(strike, prem_usd, opt_type, margin_ratio) * 100, 1) if cv > 0 else 0,
-                "spread_pct": round(spread_pct, 2),
-                "breakeven_pct": CalculationEngine.calc_breakeven_pct(strike, prem_usd, opt_type, spot),
-                "pop": calc_pop(abs(delta_val or 0), opt_type, spot, strike, iv, int(dte)),
-                "iv_rank": round(dvol_pct, 1) if isinstance(dvol_pct, (int,float)) else None,
-                "liquidity_score": int(liq_score)
             })
 
-    def _normalize_liquidity(ct):
-        platform = ct.get("platform", "")
-        base = ct.get("liquidity_score", 0)
-        if platform == "Binance":
-            oi_factor = min(2.0, 1.0 + (ct.get("open_interest", 0) / 200))
-            spread_penalty = max(0.5, 1.0 - ct.get("spread_pct", 0) / 20)
-            return min(100, int(base * oi_factor * spread_penalty))
-        return base
-
-    def _weighted_score(ct):
-        score = CalculationEngine.weighted_score(
-            apr=ct.get("apr", 0),
-            pop=ct.get("pop", 50),
-            breakeven_pct=ct.get("breakeven_pct", 0),
-            liquidity_score=_normalize_liquidity(ct),
-            iv_rank=ct.get("iv_rank", 50),
-            strike=ct.get("strike", 0),
-            spot=spot
-        )
-        ct["_score"] = score
-        return score
-
-    all_c = sorted(contracts, key=_weighted_score, reverse=True)
-    deribit_list = [c for c in all_c if c.get("platform") == "Deribit"][:15]
-    binance_list = [c for c in all_c if c.get("platform") == "Binance"][:15]
-
-    contracts = []
-    for i in range(max(len(deribit_list), len(binance_list))):
-        if i < len(deribit_list): contracts.append(deribit_list[i])
-        if i < len(binance_list): contracts.append(binance_list[i])
+    strategy_contracts = _apply_strategy_filter(quality_contracts, dvol_current, spot)
 
     large_trades_count = len(large_trades)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    # 使用 execute_transaction 保证 _write_lock 和原子性
     _raw_out = _sanitize_raw_output(dvol_data)
 
     stmts = []
@@ -557,7 +506,12 @@ async def quick_scan(params: QuickScanParams = None):
             dvol_signal, large_trades_count, large_trades_details, contracts_data, top_contracts_data, raw_output)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (timestamp, currency, spot, dvol_current, dvol_z, dvol_signal, large_trades_count,
-          json.dumps(large_trades[:20]), json.dumps(contracts[:30]), json.dumps(contracts[:30]), _raw_out)))
+          json.dumps(large_trades[:20]), json.dumps(quality_contracts), json.dumps(strategy_contracts[:30]), _raw_out)))
+
+    stmts.append(("""
+        INSERT INTO dvol_history (timestamp, currency, current, z_score, signal, trend)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (timestamp, currency, dvol_current, dvol_z, dvol_signal, dvol_data.get("trend", ""))))
 
     if large_trades and isinstance(large_trades, list):
         for trade in large_trades:
@@ -579,10 +533,11 @@ async def quick_scan(params: QuickScanParams = None):
 
     return {
         "success": True,
-        "contracts_count": len(contracts),
+        "contracts_count": len(quality_contracts),
+        "strategy_count": len(strategy_contracts[:30]),
         "spot_price": spot,
         "timestamp": timestamp,
-        "contracts": contracts[:30],
+        "contracts": strategy_contracts[:30],
         "dvol_current": dvol_current,
         "dvol_z_score": dvol_z,
         "dvol_signal": dvol_signal,
