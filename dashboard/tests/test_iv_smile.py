@@ -93,3 +93,55 @@ class TestExtractAndNormalize:
         contracts = [{"strike": 100000, "iv": 0.45, "dte": 7, "option_type": "P", "oi": 100}]
         result = IVSmileAnalyzer.analyze(contracts, 100000)
         assert result["smiles"]["dte_7"]["puts"][0]["iv"] == 45.0
+
+
+class TestMetrics:
+    def _make_smile_data(self, skew=0):
+        """Generate synthetic smile data with controllable skew."""
+        contracts = []
+        spot = 100000
+        for dte in [7, 14]:
+            for strike_pct in [-10, -7, -5, -3, 0, 3, 5, 7, 10]:
+                strike = spot * (1 + strike_pct / 100)
+                # Put IV increases as strike decreases (positive skew)
+                put_iv = 40 + skew * abs(strike_pct) / 10 + (0 if strike_pct >= 0 else 5)
+                call_iv = 40 + (0 if strike_pct <= 0 else 3)
+                contracts.append(_make_contract(strike, put_iv, dte, "P"))
+                contracts.append(_make_contract(strike, call_iv, dte, "C"))
+        return IVSmileAnalyzer.analyze(contracts, spot)
+
+    def test_atm_iv_present(self):
+        result = self._make_smile_data()
+        assert result["analysis"] is not None
+        assert "atm_iv" in result["analysis"]["metrics"]
+        assert result["analysis"]["metrics"]["atm_iv"] > 0
+
+    def test_skew_25d_positive_for_put_heavy(self):
+        result = self._make_smile_data(skew=2)
+        assert result["analysis"]["metrics"]["skew_25d"] > 0
+
+    def test_put_skew_pct_calculated(self):
+        result = self._make_smile_data(skew=2)
+        assert result["analysis"]["metrics"]["put_skew_pct"] > 0
+
+    def test_call_skew_pct_calculated(self):
+        result = self._make_smile_data(skew=0)
+        assert "call_skew_pct" in result["analysis"]["metrics"]
+
+    def test_skew_slope_present(self):
+        result = self._make_smile_data()
+        assert "skew_slope" in result["analysis"]["metrics"]
+
+    def test_curvature_present(self):
+        result = self._make_smile_data()
+        assert "curvature" in result["analysis"]["metrics"]
+
+    def test_by_expiry_has_metrics(self):
+        result = self._make_smile_data()
+        by_expiry = result["analysis"]["by_expiry"]
+        assert len(by_expiry) > 0
+        for entry in by_expiry:
+            assert "atm_iv" in entry
+            assert "skew_25d" in entry
+            assert "form" in entry
+            assert "point_count" in entry
