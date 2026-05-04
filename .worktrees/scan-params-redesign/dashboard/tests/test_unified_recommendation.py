@@ -142,13 +142,15 @@ class TestReportBuilder:
 class TestUnifiedRecommendationEngine:
     def test_engine_init_loads_panels(self):
         engine = UnifiedRecommendationEngine()
-        assert len(engine.panels) > 0
-        assert "test_panel" in engine.panels
+        assert len(engine.panels) >= 16
+        assert "metric_cards" in engine.panels
+        assert "risk_command_center" in engine.panels
+        assert "iv_term_structure" in engine.panels
 
     def test_analyze_returns_valid_structure(self):
         engine = UnifiedRecommendationEngine()
-        result = engine.analyze("test_panel", {"spot": 90000})
-        assert result["panel_id"] == "test_panel"
+        result = engine.analyze("metric_cards", {"spot": 90000, "dvol": 55, "fear_greed": 40, "trend_strength": 0.2})
+        assert result["panel_id"] == "metric_cards"
         assert "signal" in result
         assert "report" in result
         assert result["llm_analysis"] is None
@@ -175,12 +177,11 @@ class TestUnifiedRecommendationEngine:
         """Rule that raises an exception produces a fallback RuleResult."""
         from services.unified_recommendation_engine import UnifiedRecommendationEngine
         engine = UnifiedRecommendationEngine()
-        # Create a one-off test with a failing rule
-        result = engine.analyze("test_panel", {"spot": 90000})
-        # The test_panel rules work fine - verify
+        # Test via a real panel with valid data
+        result = engine.analyze("strategy_center", {"spot": 90000, "contracts": []})
         assert result["report"] is not None
 
-        # Test directly via a custom panel entry
+        # Test error handling via a custom panel entry
         engine.panels["error_test"] = {
             "name": "错误测试",
             "rules": [
@@ -219,9 +220,9 @@ class TestUnifiedRecommendationEngine:
             "risk_flags": ["风险1"],
         }
         prompt = LLMPromptBuilder.build(
-            panel_id="test_panel",
+            panel_id="metric_cards",
             rule_report=report,
-            data_snapshot={"spot": 90000, "dvol": 62},
+            data_snapshot={"spot": 90000, "dvol": 62, "dvol_z": -0.5, "fear_greed": 45},
             currency="BTC",
         )
         assert "BTC" in prompt["synthesis"]
