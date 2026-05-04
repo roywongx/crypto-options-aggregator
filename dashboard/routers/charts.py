@@ -230,18 +230,27 @@ async def get_vol_surface(currency: str = "BTC"):
         if front_iv is not None and back_iv is not None:
             backwardation = front_iv > back_iv * 1.05
 
+    # 运行 IV 期限结构分析
+    analysis = None
+    try:
+        from services.iv_term_structure import IVTermStructureAnalyzer
+        analysis = IVTermStructureAnalyzer.analyze_term_structure(term_data, spot)
+    except (ValueError, TypeError, RuntimeError) as e:
+        logger.warning("IV term structure analysis failed: %s", e)
+
     return {
         "currency": currency,
         "term_structure": term_data,
-        "backwardation": backwardation
+        "backwardation": backwardation,
+        "analysis": analysis
     }
 
 
 @router.get("/iv-smile")
 async def get_iv_smile(currency: str = "BTC"):
-    """获取波动率微笑数据 (strike vs IV，最近到期)"""
+    """获取波动率微笑数据 + 分析"""
     from services.spot_price import get_spot_price
-    from services.instrument import _parse_inst_name
+    from services.iv_smile import IVSmileAnalyzer
     from db.async_connection import execute_read_async
 
     try:
@@ -250,7 +259,6 @@ async def get_iv_smile(currency: str = "BTC"):
         from constants import get_spot_fallback
         spot = get_spot_fallback(currency)
 
-    # 从 DB 获取最新合约数据
     rows = await execute_read_async("""
         SELECT contracts_data FROM scan_records
         WHERE currency = ? AND contracts_data IS NOT NULL
@@ -258,68 +266,17 @@ async def get_iv_smile(currency: str = "BTC"):
     """, (currency,))
 
     if not rows or not rows[0][0]:
-        return {"error": "无合约数据", "smile": [], "currency": currency, "spot": spot}
+        return {"error": "无合约数据", "smiles": {}, "analysis": None, "currency": currency, "spot": spot}
 
     try:
         contracts = json.loads(rows[0][0])
     except json.JSONDecodeError:
-        return {"error": "数据解析失败", "smile": [], "currency": currency, "spot": spot}
+        return {"error": "数据解析失败", "smiles": {}, "analysis": None, "currency": currency, "spot": spot}
 
-    # 按到期日分组
-    by_expiry = {}
-    for c in contracts:
-        iv = c.get("mark_iv") or c.get("iv") or 0
-        strike = c.get("strike", 0)
-        dte = c.get("dte", 0)
-        option_type = c.get("option_type", "")
-        oi = c.get("oi") if c.get("oi") is not None else c.get("open_interest", 0)
-        volume = c.get("volume") if c.get("volume") is not None else 0
+    result = IVSmileAnalyzer.analyze(contracts, spot, currency)
 
-        iv_float = float(iv) if iv else 0
-        # 统一 IV 格式: 如果 < 1.0 认为是小数，转换为百分比
-        if 0 < iv_float < 1.0:
-            iv_float *= 100
-        # 如果 > 100，可能是错误数据，过滤掉
-        elif iv_float > 200:
-            continue
-
-        if iv_float <= 0 or strike <= 0 or dte <= 0:
-            continue
-
-        # 过滤无效数据 (无 OI 或 IV 异常)
-        if float(oi) < 1:
-            continue
-
-        exp_key = int(float(dte))
-        if exp_key not in by_expiry:
-            by_expiry[exp_key] = []
-        by_expiry[exp_key].append({
-            "strike": float(strike),
-            "iv": round(iv_float, 2),
-            "type": option_type.upper()[0] if option_type else "?",
-            "oi": float(oi),
-            "volume": float(volume) if volume else 0,
-            "moneyness": round((float(strike) - spot) / spot * 100, 2) if spot > 0 else 0,
-        })
-
-    if not by_expiry:
-        return {"error": "无有效 IV 数据", "smile": [], "currency": currency, "spot": spot}
-
-    # 取最近到期 + 最远到期 做对比
-    sorted_expiries = sorted(by_expiry.keys())
-    result = {"currency": currency, "spot": round(spot, 2), "smiles": {}}
-
-    for exp_dte in sorted_expiries[:3]:  # 最近3个到期日
-        points = sorted(by_expiry[exp_dte], key=lambda x: x["strike"])
-        # 分离 Put/Call
-        puts = [p for p in points if p["type"] == "P"]
-        calls = [p for p in points if p["type"] == "C"]
-        result["smiles"][f"dte_{exp_dte}"] = {
-            "dte": exp_dte,
-            "puts": puts,
-            "calls": calls,
-            "all": points,
-        }
+    if not result["smiles"]:
+        return {"error": "无有效 IV 数据", "smiles": {}, "analysis": None, "currency": currency, "spot": spot}
 
     return result
 
