@@ -24,6 +24,7 @@ class GreeksAnalyzer:
 
         greeks_summary = cls._calc_greeks_summary(contracts)
         by_expiry = cls._calc_by_expiry(contracts, spot)
+        gex = cls._calc_gex(contracts, spot)
 
         return {
             "currency": currency, "spot": round(spot, 2),
@@ -32,7 +33,7 @@ class GreeksAnalyzer:
             "call_count": sum(1 for c in contracts if c["type"] == "C"),
             "total_oi": round(sum(c["oi"] for c in contracts), 0),
             "greeks_summary": greeks_summary,
-            "gex": {},
+            "gex": gex,
             "by_expiry": by_expiry,
             "scenarios": {},
             "analysis": None,
@@ -147,3 +148,65 @@ class GreeksAnalyzer:
                 "total_oi": round(total_oi, 0),
             })
         return result
+
+    @classmethod
+    def _calc_gex(cls, contracts: list, spot: float) -> dict:
+        """Calculate Gamma Exposure by strike."""
+        strike_data = {}
+        for c in contracts:
+            strike = c["strike"]
+            if strike not in strike_data:
+                strike_data[strike] = {"call_gex": 0.0, "put_gex": 0.0}
+            gex_val = c["gamma"] * c["oi"] * spot * spot * 0.01
+            if c["type"] == "C":
+                strike_data[strike]["call_gex"] += gex_val
+            else:
+                strike_data[strike]["put_gex"] -= gex_val  # Put GEX is negative
+
+        by_strike = []
+        for strike in sorted(strike_data.keys()):
+            d = strike_data[strike]
+            net = d["call_gex"] + d["put_gex"]
+            by_strike.append({
+                "strike": strike,
+                "call_gex": round(d["call_gex"], 0),
+                "put_gex": round(d["put_gex"], 0),
+                "net_gex": round(net, 0),
+            })
+
+        total_gex = sum(e["net_gex"] for e in by_strike)
+
+        # Find flip strike (where net_gex crosses zero)
+        flip_strike = 0
+        for i in range(len(by_strike) - 1):
+            if by_strike[i]["net_gex"] * by_strike[i + 1]["net_gex"] < 0:
+                flip_strike = by_strike[i]["strike"]
+                break
+        if flip_strike == 0 and by_strike:
+            flip_strike = by_strike[0]["strike"]
+
+        # Find pin strike (highest total OI concentration)
+        oi_by_strike = {}
+        for c in contracts:
+            s = c["strike"]
+            oi_by_strike[s] = oi_by_strike.get(s, 0) + c["oi"]
+        pin_strike = max(oi_by_strike, key=oi_by_strike.get) if oi_by_strike else 0
+
+        # Pin risk level
+        pin_oi = oi_by_strike.get(pin_strike, 0)
+        avg_oi = sum(oi_by_strike.values()) / len(oi_by_strike) if oi_by_strike else 1
+        concentration = pin_oi / avg_oi if avg_oi > 0 else 0
+        if concentration > 10:
+            pin_risk_level = "HIGH"
+        elif concentration > 3:
+            pin_risk_level = "MEDIUM"
+        else:
+            pin_risk_level = "LOW"
+
+        return {
+            "by_strike": by_strike,
+            "total_gex": round(total_gex, 0),
+            "flip_strike": flip_strike,
+            "pin_strike": pin_strike,
+            "pin_risk_level": pin_risk_level,
+        }

@@ -133,3 +133,56 @@ class TestGreeksCalculation:
         result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
         dtes = [e["dte"] for e in result["by_expiry"]]
         assert dtes == sorted(dtes)
+
+
+class TestGEX:
+    def _make_contracts(self):
+        """Generate contracts with high OI at specific strikes for GEX testing."""
+        contracts = []
+        spot = 100000
+        for dte in [7, 14]:
+            for strike_pct in [-10, -5, 0, 5, 10]:
+                strike = spot * (1 + strike_pct / 100)
+                # Higher OI near ATM for pin risk testing
+                oi = 500 if abs(strike_pct) <= 5 else 100
+                contracts.append(_make_contract(strike, 45.0, dte, "P", oi=oi))
+                contracts.append(_make_contract(strike, 38.0, dte, "C", oi=oi))
+        return contracts
+
+    def test_gex_by_strike_populated(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        gex = result["gex"]
+        assert "by_strike" in gex
+        assert len(gex["by_strike"]) > 0
+
+    def test_gex_by_strike_has_required_fields(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        for entry in result["gex"]["by_strike"]:
+            assert "strike" in entry
+            assert "call_gex" in entry
+            assert "put_gex" in entry
+            assert "net_gex" in entry
+
+    def test_gex_totals_present(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        gex = result["gex"]
+        assert "total_gex" in gex
+        assert "flip_strike" in gex
+        assert "pin_strike" in gex
+        assert "pin_risk_level" in gex
+
+    def test_pin_strike_near_high_oi(self):
+        """Pin strike should be near the highest OI concentration."""
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        pin = result["gex"]["pin_strike"]
+        # Highest OI is at 0% and +-5% strikes (100000, 95000, 105000)
+        assert pin in [95000, 100000, 105000]
+
+    def test_flip_strike_is_number(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        flip = result["gex"]["flip_strike"]
+        assert isinstance(flip, (int, float))
+
+    def test_pin_risk_level_valid(self):
+        result = GreeksAnalyzer.analyze(self._make_contracts(), 100000)
+        assert result["gex"]["pin_risk_level"] in ["HIGH", "MEDIUM", "LOW"]
