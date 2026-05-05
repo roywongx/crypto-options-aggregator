@@ -135,6 +135,34 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
         except Exception as e:
             logger.debug("IV Smile analysis failed: %s", e)
 
+    # 衍生品指标（加密原生 v2.0）
+    try:
+        from services.derivative_metrics import DerivativeMetrics
+        deriv = DerivativeMetrics.get_all_metrics(currency)
+        data["perp_basis"] = deriv.get("perp_basis", {})
+        data["oi_price_divergence"] = deriv.get("oi_price_divergence", {})
+        data["funding_volatility"] = deriv.get("funding_volatility", {})
+        data["liquidation_heat"] = deriv.get("liquidation_heat", {})
+        data["stablecoin_reserve"] = deriv.get("stablecoin_reserve", {})
+        data["futures_spot_ratio"] = deriv.get("futures_spot_ratio", {})
+    except Exception as e:
+        logger.warning("Derivative metrics fetch failed: %s", e)
+
+    # 展开嵌套字典，让面板 LLM 模板可直接使用 {basis_annualized} 等占位符
+    if isinstance(data.get("perp_basis"), dict):
+        data["basis_annualized"] = data["perp_basis"].get("basis_annualized", 0)
+        data["perp_price"] = data["perp_basis"].get("perp_price", 0)
+    if isinstance(data.get("oi_price_divergence"), dict):
+        data["oi_divergence"] = data["oi_price_divergence"].get("divergence_label", "无数据")
+    if isinstance(data.get("funding_volatility"), dict):
+        data["funding_volatility"] = data["funding_volatility"].get("volatility_7d_pct", 0)
+    if isinstance(data.get("liquidation_heat"), dict):
+        data["liquidation_total_usd"] = data["liquidation_heat"].get("total_liquidation_1h_usd", 0)
+    if isinstance(data.get("futures_spot_ratio"), dict):
+        data["futures_spot_ratio"] = data["futures_spot_ratio"].get("ratio", 0)
+    if isinstance(data.get("stablecoin_reserve"), dict):
+        data["stablecoin_flow"] = data["stablecoin_reserve"].get("label", "未知")
+
     return data
 
 
