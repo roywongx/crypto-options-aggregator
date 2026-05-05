@@ -196,10 +196,15 @@ class LLMPromptBuilder:
 
         data_text = LLMPromptBuilder._format_data_snapshot(data_snapshot)
 
+        from services.crypto_market_context import CryptoMarketContext
+        market_ctx = CryptoMarketContext.build(data_snapshot, currency)
+        market_ctx_text = CryptoMarketContext.to_prompt_text(market_ctx)
+
         format_args = _SafeDict({
             "currency": currency, "spot": spot, "dvol": dvol, "dvol_z": dvol_z,
             "rule_scores": rule_scores_text, "data_snapshot": data_text,
             "panel_id": panel_id,
+            "market_context": market_ctx_text,
             **data_snapshot,
         })
 

@@ -296,6 +296,141 @@ def calc_opportunity_signal(data: dict, cache: dict):
                             reasoning=[f"均分={avg_q:.0f}"])
 
 
+def calc_perp_basis_signal(data: dict, cache: dict):
+    """永续基差信号（加密原生）"""
+    perp_basis = data.get("perp_basis", {})
+    if isinstance(perp_basis, dict):
+        basis = _safe_float(perp_basis.get("basis_annualized", 0))
+        pct = perp_basis.get("percentile", 50)
+    else:
+        basis = 0
+        pct = 50
+
+    if basis <= 0 and pct == 50:
+        return _make_result(name="永续基差", score=50, verdict="数据缺失")
+
+    if basis > 30:
+        return _make_result(name="永续基差", score=15,
+                            verdict=f"极端投机(basis={basis}%, p{pct})",
+                            reasoning=[f"年化基差={basis}%>30%", f"百分位={pct}", "危险信号"])
+    elif basis > 15:
+        return _make_result(name="永续基差", score=30,
+                            verdict=f"杠杆偏高(basis={basis}%, p{pct})",
+                            reasoning=[f"年化基差={basis}%>15%", f"百分位={pct}"])
+    elif basis > 8:
+        return _make_result(name="永续基差", score=60,
+                            verdict=f"温和看多(basis={basis}%)",
+                            reasoning=[f"年化基差={basis}% 正常偏高"])
+    elif basis < -2:
+        return _make_result(name="永续基差", score=25,
+                            verdict=f"现货溢价({basis}%)，看空信号",
+                            reasoning=[f"年化基差={basis}%<0", "perp<spot，市场看空"])
+    else:
+        return _make_result(name="永续基差", score=75,
+                            verdict=f"正常Contango(basis={basis}%)",
+                            reasoning=[f"年化基差={basis}% 健康范围"])
+
+
+def calc_oi_divergence_signal(data: dict, cache: dict):
+    """OI-价格背离信号"""
+    oi_div = data.get("oi_price_divergence", {})
+    if not isinstance(oi_div, dict):
+        return _make_result(name="OI背离", score=50, verdict="数据缺失")
+
+    divergence = oi_div.get("divergence", "none")
+    label = oi_div.get("divergence_label", "")
+
+    if divergence == "bearish":
+        return _make_result(name="OI背离", score=20,
+                            verdict=label,
+                            reasoning=["OI↑价格↓", "空头加仓=看空信号"])
+    elif divergence == "long_capitulation":
+        return _make_result(name="OI背离", score=30,
+                            verdict=label,
+                            reasoning=["OI↓价格↓", "多头平仓=短期看空"])
+    elif divergence == "short_squeeze":
+        return _make_result(name="OI背离", score=80,
+                            verdict=label,
+                            reasoning=["OI↓价格↑", "空头平仓=逼空"])
+    elif divergence == "bullish":
+        return _make_result(name="OI背离", score=70,
+                            verdict=label,
+                            reasoning=["OI↑价格↑", "多头加仓=看多"])
+    elif divergence == "breakout_looming":
+        return _make_result(name="OI背离", score=45,
+                            verdict=label,
+                            reasoning=["OI↑价格→", "分歧加大=即将突破"])
+    else:
+        return _make_result(name="OI背离", score=55,
+                            verdict="OI与价格同向，无背离",
+                            reasoning=["量价关系正常"])
+
+
+def calc_liquidation_signal(data: dict, cache: dict):
+    """清算热力信号"""
+    liq = data.get("liquidation_heat", {})
+    if not isinstance(liq, dict):
+        return _make_result(name="清算热力", score=50, verdict="数据缺失")
+
+    level = liq.get("heat_level", "L0")
+    bias = _safe_float(liq.get("direction_bias", 0))
+    total = _safe_float(liq.get("total_liquidation_1h_usd", 0))
+
+    if level == "L3":
+        base_score = 15
+        verdict = f"L3高压({total/1e6:.0f}M/h清算)"
+    elif level == "L2":
+        base_score = 30
+        verdict = f"L2中度压力({total/1e6:.0f}M/h清算)"
+    elif level == "L1":
+        base_score = 55
+        verdict = "L1轻度清算"
+    else:
+        base_score = 65
+        verdict = "正常"
+
+    if bias > 0.3:
+        base_score += 5
+        verdict += "，多头痛苦（潜在底部）"
+    elif bias < -0.3:
+        base_score -= 5
+        verdict += "，空头痛苦（潜在顶部）"
+
+    return _make_result(name="清算热力", score=base_score, verdict=verdict,
+                        reasoning=[f"1h清算={total/1e6:.1f}M", f"方向偏向={bias:.2f}"])
+
+
+def calc_funding_vol_signal(data: dict, cache: dict):
+    """资金费率波动率信号"""
+    fv = data.get("funding_volatility", {})
+    if isinstance(fv, dict):
+        vol_pct = _safe_float(fv.get("volatility_7d_pct", 0))
+        signal = fv.get("signal", "normal")
+    else:
+        vol_pct = 0
+        signal = "unknown"
+
+    if signal == "unknown" or vol_pct <= 0:
+        return _make_result(name="费率波动", score=50, verdict="数据不足")
+
+    if signal == "extreme":
+        return _make_result(name="费率波动", score=15,
+                            verdict=f"费率波动剧烈({vol_pct}%)，潜在拐点",
+                            reasoning=[f"波动率={vol_pct}%>0.1%", "市场情绪极不稳定"])
+    elif signal == "high":
+        return _make_result(name="费率波动", score=35,
+                            verdict=f"费率波动偏高({vol_pct}%)，情绪反复",
+                            reasoning=[f"波动率={vol_pct}%"])
+    elif signal == "stable":
+        return _make_result(name="费率波动", score=75,
+                            verdict=f"费率稳定({vol_pct}%)，市场共识强",
+                            reasoning=[f"波动率={vol_pct}%<0.01%"])
+    else:
+        return _make_result(name="费率波动", score=60,
+                            verdict=f"费率波动正常({vol_pct}%)",
+                            reasoning=[f"波动率={vol_pct}%"])
+
+
 # ============================================================
 # 包装器（包装现有引擎输出）
 # ============================================================
@@ -740,6 +875,19 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
         "default_action": "",
     },
 
+    # === 衍生品指标 ===
+    "derivative_metrics": {
+        "name": "衍生品指标",
+        "rules": [
+            {"id": "perp_basis", "name": "永续基差", "fn": calc_perp_basis_signal, "weight": 0.3},
+            {"id": "oi_div", "name": "OI背离", "fn": calc_oi_divergence_signal, "weight": 0.25},
+            {"id": "liq", "name": "清算热力", "fn": calc_liquidation_signal, "weight": 0.25},
+            {"id": "fund_vol", "name": "费率波动", "fn": calc_funding_vol_signal, "weight": 0.2},
+        ],
+        "signal_formula": "weighted_score",
+        "default_action": "",
+    },
+
     # === 链上指标 ===
     "onchain_metrics": {
         "name": "链上指标",
@@ -759,19 +907,19 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
 
 LLM_PROMPT_TEMPLATES: Dict[str, Dict[str, str]] = {
     "metric_cards": {
-        "synthesis": "基于以下数据，分析{currency}当前市场状态:\n- 现货: ${spot}\n- DVOL: {dvol} (z={dvol_z})\n- 恐惧贪婪: {fear_greed}\n- 趋势强度: {trend_strength}\n- 规则评分:\n{rule_scores}\n\n请给出综合市场状态判断和操作建议。",
+        "synthesis": "基于以下数据，分析{currency}当前市场状态:\n- 现货: ${spot}\n- DVOL: {dvol} (z={dvol_z})\n- 恐惧贪婪: {fear_greed}\n- 趋势强度: {trend_strength}\n- 规则评分:\n{rule_scores}\n\n请给出综合市场状态判断和操作建议。\n\n加密市场结构背景:\n{market_context}",
         "bull_context": "利多因素:\n- DVOL低有利于卖方策略\n- 恐惧情绪可能蕴藏买入机会\n- 趋势向上支撑卖PUT",
         "bear_context": "利空因素:\n- DVOL高增加卖方风险\n- 贪婪情绪预示回调\n- 趋势向下需要更大安全边际",
         "judge_criteria": "从风险收益比角度判定整体市场方向，给出具体的操作策略建议（卖PUT/卖CALL/观望/价差），并说明推荐DTE和OTM%范围。",
     },
     "risk_command_center": {
-        "synthesis": "基于以下多因子风险数据，分析{currency}的风险状况:\n- 现货: ${spot}\n- 规则评分:\n{rule_scores}\n- 数据:\n{data_snapshot}\n\n请给出综合风险评估。",
+        "synthesis": "基于以下多因子风险数据，分析{currency}的风险状况:\n- 现货: ${spot}\n- 规则评分:\n{rule_scores}\n- 数据:\n{data_snapshot}\n\n请给出综合风险评估。\n\n加密市场结构背景:\n{market_context}",
         "bull_context": "低风险因素:\n- 现货远高于支撑位\n- DVOL处于低位\n- 趋势向上",
         "bear_context": "高风险因素:\n- 现货接近或跌破支撑位\n- DVOL飙升\n- 趋势恶化",
         "judge_criteria": "综合判断风险等级，给出仓位建议（正常/减仓/暂停）和具体风控措施。",
     },
     "strategy_center": {
-        "synthesis": "基于以下数据，分析{currency}的策略方向:\n- 现货: ${spot}\n- DVOL: {dvol}\n- 规则评分:\n{rule_scores}\n\n请给出策略推荐。",
+        "synthesis": "基于以下数据，分析{currency}的策略方向:\n- 现货: ${spot}\n- DVOL: {dvol}\n- 规则评分:\n{rule_scores}\n\n请给出策略推荐。\n\n加密市场结构背景:\n{market_context}",
         "bull_context": "做多策略机会:\n- 低波动率窗口\n- 趋势支撑\n- 风险可控",
         "bear_context": "做空/防御策略:\n- 高波动率环境\n- 趋势恶化\n- 风险升高",
         "judge_criteria": "给出具体策略推荐（卖PUT/卖CALL/铁鹰/日历价差等），说明推荐的DTE、OTM%和执行时机。",
@@ -843,16 +991,44 @@ LLM_PROMPT_TEMPLATES: Dict[str, Dict[str, str]] = {
         "judge_criteria": "判定GEX对市场的影响方向，给出操作建议。",
     },
     "money_flow": {
-        "synthesis": "基于以下数据，分析{currency}的资金流向:\n- 规则评分:\n{rule_scores}\n- 数据:\n{data_snapshot}\n\n请给出资金流向解读。",
+        "synthesis": "基于以下数据，分析{currency}的资金流向:\n- 规则评分:\n{rule_scores}\n- 数据:\n{data_snapshot}\n\n请给出资金流向解读。\n\n加密市场结构背景:\n{market_context}",
         "bull_context": "资金流向利多:\n- 主动买入占优\n- 资金持续流入",
         "bear_context": "资金流向利空:\n- 主动卖出占优\n- 资金持续流出",
         "judge_criteria": "判定资金流向对现货方向的影响，给出跟随或防御策略。",
     },
     "onchain_metrics": {
-        "synthesis": "基于以下数据，分析{currency}的链上指标:\n- 规则评分:\n{rule_scores}\n- 数据:\n{data_snapshot}\n\n请给出链上指标解读。",
+        "synthesis": "基于以下数据，分析{currency}的链上指标:\n- 规则评分:\n{rule_scores}\n- 数据:\n{data_snapshot}\n\n请给出链上指标解读。\n\n加密市场结构背景:\n{market_context}",
         "bull_context": "链上利多:\n- MVRV-Z低估\n- 长期持有者增持",
         "bear_context": "链上利空:\n- MVRV-Z高估\n- 长期持有者减持",
         "judge_criteria": "综合链上数据判定估值水平，给出长期操作建议。",
+    },
+
+    "derivative_metrics": {
+        "synthesis": "基于以下加密原生衍生品数据，分析{currency}的衍生品市场状态:\n"
+                     "- 永续基差: {basis_annualized}% 年化\n"
+                     "- OI-价格背离: {oi_divergence}\n"
+                     "- 清算热力: 1h清算 ${liquidation_total_usd}\n"
+                     "- 资金费率波动率: {funding_volatility}%\n"
+                     "- 期货/现货比: {futures_spot_ratio}x\n"
+                     "- 稳定币流向: {stablecoin_flow}\n"
+                     "- 规则评分:\n{rule_scores}\n\n"
+                     "【重要】请以加密原生视角分析。永续合约占90%+交易量，期货/现货比天然偏高(5-20x)。"
+                     "请重点关注永续基差和OI-价格背离，而非传统杠杆比率。\n\n"
+                     "加密市场结构背景:\n{market_context}",
+        "bull_context": "衍生品利多信号:\n"
+                        "- 永续基差温和(0-8%)\n"
+                        "- OI↑价格↑多头健康加仓\n"
+                        "- 稳定币持续流入\n"
+                        "- 清算压力低\n"
+                        "- 费率波动稳定",
+        "bear_context": "衍生品利空信号:\n"
+                        "- 永续基差>15%年化（杠杆过热）\n"
+                        "- 基差为负（perp<spot）\n"
+                        "- OI↑价格↓空头加仓\n"
+                        "- L2+清算压力\n"
+                        "- 费率剧烈波动",
+        "judge_criteria": "综合永续基差、OI背离、清算数据、稳定币流向、费率波动率五个维度，"
+                         "以加密原生标准判定衍生品市场风险等级，给出具体操作建议。",
     },
 
     # === 测试面板模板 ===
