@@ -3723,17 +3723,25 @@ async function loadLLMConfigStatus() {
         if (resp.ok) {
             const config = await resp.json();
             const status = document.getElementById('llmConfigStatus');
-            if (config.api_key && config.api_key !== '****') {
-                status.textContent = config.model ? `已配置 (${config.model})` : '已配置';
-                status.className = 'text-xs ml-2 text-[#149e61]';
-            } else if (config.api_key === '****') {
-                status.textContent = config.model ? `已配置 (${config.model})` : '已配置';
+            const keyInput = document.getElementById('llmApiKey');
+            if (config.api_key) {
+                // 已保存 — 显示模型名，回填 base_url 和 model
+                const label = config.model || '已配置';
+                status.textContent = `已配置 (${label})`;
                 status.className = 'text-xs ml-2 text-[#149e61]';
                 if (config.base_url) document.getElementById('llmBaseUrl').value = config.base_url;
                 if (config.model) document.getElementById('llmModel').value = config.model;
+                // 密钥输入框显示占位提示，避免用户以为没保存
+                if (keyInput && !keyInput.value) {
+                    keyInput.type = 'password';
+                    keyInput.placeholder = '已保存 ···（点击可修改）';
+                }
             } else {
-                status.textContent = '未配置';
+                status.textContent = '未配置 — 保存后存入数据库，刷新不丢失';
                 status.className = 'text-xs ml-2 text-[#f59e0b]';
+                if (keyInput) {
+                    keyInput.placeholder = 'sk-...';
+                }
             }
         }
     } catch (e) {
@@ -3759,8 +3767,14 @@ async function saveLLMConfig() {
         });
 
         if (resp.ok) {
-            showAlert('配置已保存', 'success');
-            document.getElementById('llmApiKey').value = '';
+            showAlert('配置已保存到数据库，刷新不丢失', 'success');
+            // 安全：保存后将密钥输入框替换为占位提示，表明已持久化
+            const keyInput = document.getElementById('llmApiKey');
+            if (keyInput) {
+                keyInput.type = 'password';
+                keyInput.placeholder = '已保存 ···（点击可修改）';
+                keyInput.value = '';
+            }
             loadLLMConfigStatus();
         } else {
             const err = await resp.json();
