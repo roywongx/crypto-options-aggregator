@@ -370,16 +370,17 @@ class LLMAnalystEngine:
         return "\n".join(parts)
 
     def _parse_json_response(self, response: str) -> Optional[Dict]:
-        """从 LLM 响应中提取 JSON"""
+        """从 LLM 响应中提取 JSON，处理常见的 DeepSeek thinking 模式产物"""
         if not response:
             return None
-        # 尝试直接解析
+
+        # 1. 直接解析
         try:
             return json.loads(response)
         except json.JSONDecodeError:
             pass
 
-        # 尝试提取 ```json ... ``` 块
+        # 2. 提取 ```json ... ``` 块
         match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', response, re.DOTALL)
         if match:
             try:
@@ -387,15 +388,48 @@ class LLMAnalystEngine:
             except json.JSONDecodeError:
                 pass
 
-        # 尝试找到第一个 { 到最后一个 }
+        # 3. 找到第一个 { 到最后一个 }
         start = response.find('{')
         end = response.rfind('}')
         if start != -1 and end != -1 and end > start:
+            candidate = response[start:end + 1]
             try:
-                return json.loads(response[start:end + 1])
+                return json.loads(candidate)
             except json.JSONDecodeError:
+                # 4. 修复常见 LLM JSON 错误：尾部逗号、缺少逗号、单引号
+                pass
+            # 尝试更激进的修复
+            try:
+                fixed = self._fix_llm_json(candidate)
+                if fixed:
+                    return json.loads(fixed)
+            except (json.JSONDecodeError, Exception):
                 pass
 
+        # 5. 如果以上都失败，记录响应前 500 字符并返回 None
+        logger.warning("LLM JSON parse failed, raw response start: %s", response[:500])
+        return None
+
+    @staticmethod
+    def _fix_llm_json(text: str) -> Optional[str]:
+        """修复 LLM 常见的 JSON 语法错误"""
+        import re as _re
+        fixed = text
+        # 移除尾部逗号 (在 ] 或 } 前)
+        fixed = _re.sub(r',\s*([]}])', r'\1', fixed)
+        # 修复单引号为双引号 (只修复 key 和 string value)
+        lines = fixed.split('\n')
+        repaired = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('#') or stripped.startswith('//'):
+                continue  # 移除注释行
+            repaired.append(line)
+        fixed = '\n'.join(repaired)
+        # 移除 // 或 # 行内注释 (简单处理)
+        fixed = _re.sub(r'\s*//.*$', '', fixed, flags=_re.MULTILINE)
+        if fixed.strip().startswith('{'):
+            return fixed
         return None
 
     def _llm_debate(self, context: Dict, synthesis: Dict) -> Dict[str, Any]:
@@ -529,35 +563,42 @@ class LLMAnalystEngine:
   "data_quality_score": 0-100
 }"""
 
-        # 组装全量原始数据
-        raw_data = {
+        # 组装摘要数据（避免 prompt 过大导致 JSON 被截断）
+        data_errors = context.get("errors", [])
+        contracts_count = len(context.get("contracts", []))
+        raw_summary = {
             "currency": context["currency"],
             "spot": context.get("spot", 0),
-            "dvol": context.get("dvol", {}),
-            "onchain": context.get("onchain", {}),
-            "derivatives": context.get("derivatives", {}),
-            "macro": context.get("macro", {}),
-            "iv_term": context.get("iv_term", {}),
-            "max_pain": context.get("max_pain", 0),
-            "risk": context.get("risk", {}),
-            "contracts_count": len(context.get("contracts", [])),
-            "contracts_sample": context.get("contracts", [])[:5],
+            "dvol": context.get("dvol", {}).get("current_dvol", 0) if isinstance(context.get("dvol"), dict) else context.get("dvol", 0),
+            "data_errors": data_errors,
+            "contracts_count": contracts_count,
             "large_trades_count": len(context.get("large_trades", [])),
-            "large_trades_sample": context.get("large_trades", [])[:5],
-            "strategy_summary": context.get("strategy_summary", {}),
-            "data_errors": context.get("errors", []),
+            "max_pain": context.get("max_pain", 0),
         }
 
-        user_prompt = f"""=== 全量原始数据 ===
-{json.dumps(raw_data, ensure_ascii=False, indent=2, default=str)}
+        # 规则报告摘要 — 只提取面板名+信号
+        rules_summary = {}
+        for panel_id, report in rule_reports.items():
+            if isinstance(report, dict):
+                rules_summary[panel_id] = {
+                    "verdict": report.get("verdict", ""),
+                    "score": report.get("score", 0),
+                    "factors_count": len(report.get("factors", [])),
+                }
 
-=== 规则引擎报告 ===
-{json.dumps(rule_reports, ensure_ascii=False, indent=2, default=str)}
+        user_prompt = f"""=== 数据摘要 ===
+{json.dumps(raw_summary, ensure_ascii=False, indent=2, default=str)}
 
-=== LLM 综合分析 ===
-{json.dumps(synthesis, ensure_ascii=False, indent=2, default=str)}
+=== 数据质量问题 ===
+{json.dumps(data_errors, ensure_ascii=False, indent=2, default=str)}
 
-请审查以上数据，返回异常检测 JSON。"""
+=== 规则引擎摘要 ===
+{json.dumps(rules_summary, ensure_ascii=False, indent=2, default=str)}
+
+=== LLM 综合研判 ===
+{json.dumps(synthesis, ensure_ascii=False, indent=2, default=str) if synthesis else "无"}
+
+请审查以上数据，仅返回 JSON，不要包含任何其他内容。"""
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -569,7 +610,7 @@ class LLMAnalystEngine:
         try:
             response = ai_chat_with_config(
                 messages, preset="analysis", temperature=0.2,
-                max_tokens=2000, custom_config=custom_config
+                max_tokens=4000, custom_config=custom_config
             )
             if not response:
                 return {"success": False, "error": "LLM 无响应", "anomalies": [], "logic_issues": [], "data_quality_score": 0}
