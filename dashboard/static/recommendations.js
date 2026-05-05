@@ -41,6 +41,7 @@ const PANEL_TARGETS = {
     gex_chart:           '#gexChartContainer',
     money_flow:          '#moneyFlowSection',
     onchain_metrics:     '#onchainGrid',
+    derivative_metrics:  '#derivativeSection',
 };
 
 // ============================================================
