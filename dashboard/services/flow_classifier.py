@@ -17,39 +17,73 @@ FLOW_LABEL_MAP = {
 }
 
 def _classify_flow_heuristic(direction: str, option_type: str, delta: float, strike: float, spot: float) -> str:
-    """流向分类 - 基于期权希腊字母和行权价相对现货位置"""
+    """流向分类 - 基于期权希腊字母和行权价相对现货位置
+
+    优先级: delta 值 > strike/spot 价内价外判断
+    当 delta 不可用 (≈0) 时，用 strike vs spot 关系判断 moneyness。
+    """
     if not direction or direction == "unknown" or not option_type:
         return "unknown"
 
     d = abs(delta or 0)
+    is_put = option_type.upper() in ("PUT", "P")
+    is_call = option_type.upper() in ("CALL", "C")
+
+    # 用 strike/spot 判断 moneyness（delta=0 时作为 fallback）
+    if spot > 0 and strike > 0:
+        otm_pct = abs(strike - spot) / spot
+        if is_put:
+            itm = strike > spot
+            deep_itm = itm and otm_pct > 0.10  # 行权价偏离现货 >10%
+        elif is_call:
+            itm = strike < spot
+            deep_itm = itm and otm_pct > 0.10
+        else:
+            return "unknown"
+    else:
+        # 无 spot/strike 信息，靠 delta 近似
+        itm = d >= 0.50
+        deep_itm = d >= 0.70
+        otm_pct = 0
+
+    # delta 可信时用 delta 主判，以价内外为辅助分界
+    use_delta = d > 0.05
 
     if direction == "buy":
-        if option_type.upper() in ("PUT", "P"):
-            if d >= 0.70:
+        if is_put:
+            if use_delta and d >= 0.70:
                 return "buy_put_deep_itm"
-            elif d >= 0.40:
+            if deep_itm:
+                return "buy_put_deep_itm"
+            if use_delta and d >= 0.40:
                 return "buy_put_atm"
-            else:
-                return "buy_put_otm"
-        elif option_type.upper() in ("CALL", "C"):
-            if d >= 0.40:
+            if itm and not deep_itm:
+                return "buy_put_atm"
+            return "buy_put_otm"
+        elif is_call:
+            if use_delta and d >= 0.40:
                 return "buy_call_atm_itm"
-            else:
-                return "buy_call_otm"
+            if itm and not deep_itm:
+                return "buy_call_atm_itm"
+            return "buy_call_otm"
 
     elif direction == "sell":
-        if option_type.upper() in ("PUT", "P"):
-            if d >= 0.70:
+        if is_put:
+            if use_delta and d >= 0.70:
                 return "sell_put_deep_itm"
-            elif d >= 0.40:
+            if deep_itm:
+                return "sell_put_deep_itm"
+            if use_delta and d >= 0.40:
                 return "sell_put_atm_itm"
-            else:
-                return "sell_put_otm"
-        elif option_type.upper() in ("CALL", "C"):
-            if d >= 0.40:
+            if itm and not deep_itm:
+                return "sell_put_atm_itm"
+            return "sell_put_otm"
+        elif is_call:
+            if use_delta and d >= 0.40:
                 return "sell_call_itm"
-            else:
-                return "sell_call_otm"
+            if itm and not deep_itm:
+                return "sell_call_itm"
+            return "sell_call_otm"
 
     return "unknown"
 
@@ -131,6 +165,11 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
 
     delta = float(trade.get('delta', 0) or 0)
     flow_label = trade.get('flow_label', '')
+    if not flow_label or flow_label == 'unknown':
+        # 自动推断流向标签
+        from services.spot_price import get_spot_price
+        sp = get_spot_price(currency) or 0
+        flow_label = _classify_flow_heuristic(direction, option_type, delta, strike, sp)
     severity = trade.get('severity', '') or _severity_from_notional(notional_usd)
 
     return {

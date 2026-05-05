@@ -90,9 +90,9 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
         )
         if trades_rows:
             data["large_trades"] = [dict(r) for r in trades_rows]
-            # Compute PCR from trade directions
-            put_count = sum(1 for r in trades_rows if (r["direction"] or "").lower() in ("put", "buy_put"))
-            call_count = sum(1 for r in trades_rows if (r["direction"] or "").lower() in ("call", "buy_call"))
+            # Compute PCR from option_type (not direction — direction is buy/sell)
+            put_count = sum(1 for r in trades_rows if str(r.get("option_type", "")).upper() in ("PUT", "P"))
+            call_count = sum(1 for r in trades_rows if str(r.get("option_type", "")).upper() in ("CALL", "C"))
             data["pcr"] = round(put_count / call_count, 2) if call_count > 0 else 1.0
         else:
             data["large_trades"] = []

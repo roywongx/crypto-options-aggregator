@@ -22,6 +22,23 @@ from services.instrument import _parse_inst_name
 from services.risk_framework import RiskFramework, CalculationEngine, _risk_emoji
 from services.margin_calculator import calc_margin
 from services.flow_classifier import _classify_flow_heuristic, parse_trade_alert, _severity_from_notional, get_flow_label_info
+
+def _enrich_trades_with_flow(trades: list, currency: str) -> list:
+    """为原始交易列表补充 flow_label（大宗异动/大单风向标依赖此字段）"""
+    from services.spot_price import get_spot_price
+    spot = get_spot_price(currency) or 0
+    for t in trades:
+        if not isinstance(t, dict):
+            continue
+        fl = t.get('flow_label', '')
+        if fl and fl != 'unknown':
+            continue
+        direction = t.get('direction', '')
+        opt_type = t.get('option_type', '')
+        delta = float(t.get('delta', 0) or 0)
+        strike = float(t.get('strike', 0) or 0)
+        t['flow_label'] = _classify_flow_heuristic(direction, opt_type, delta, strike, spot)
+    return trades
 from services.spot_price import get_spot_price, get_spot_price_async, get_spot_price_binance, get_spot_price_deribit, _get_spot_from_scan
 from services.trades import generate_wind_sentiment, fetch_deribit_summaries
 from db.connection import get_db_connection as _db_conn, execute_read, execute_write, execute_transaction
@@ -66,6 +83,8 @@ def save_scan_record(data: Dict[str, Any]):
     large_trades = data.get('large_trades_details', []) or data.get('large_trades', [])
     contracts = data.get('contracts', [])
     currency = data.get('currency', 'BTC')
+    # 补充 flow_label（上游数据不含此字段）
+    _enrich_trades_with_flow(large_trades, currency)
 
     # 脱敏 raw_output
     dvol_raw = data.get('dvol_raw', {})
@@ -509,6 +528,9 @@ async def quick_scan(params: QuickScanParams = None):
             })
 
     strategy_contracts = _apply_strategy_filter(quality_contracts, dvol_current, spot)
+
+    # 为大宗异动/大单风向标补充 flow_label（上游数据不含此字段）
+    _enrich_trades_with_flow(large_trades, currency)
 
     large_trades_count = len(large_trades)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
