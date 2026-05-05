@@ -152,8 +152,28 @@ class Config:
         self.LLM_STREAMING_ENABLED = _get_env("LLM_STREAMING_ENABLED", True, env)
         self.LLM_DEBATE_STEPS = _get_env("LLM_DEBATE_STEPS", 4, env)
         self.LLM_THINKING_ENABLED = _get_env("LLM_THINKING_ENABLED", True, env)
-        self.LLM_REASONING_EFFORT = _get_env("LLM_REASONING_EFFORT", "max", env)
+        self.LLM_REASONING_EFFORT = _get_env("LLM_REASONING_EFFORT", "high", env)
         self.LLM_DEEPSEEK_BASE_URL = _get_env("LLM_DEEPSEEK_BASE_URL", "https://api.deepseek.com", env)
+
+        # === 加密原生指标配置 ===
+        self.PERP_BASIS_THRESHOLD_HIGH = _get_env("PERP_BASIS_THRESHOLD_HIGH", 15.0, env)
+        self.PERP_BASIS_THRESHOLD_EXTREME = _get_env("PERP_BASIS_THRESHOLD_EXTREME", 30.0, env)
+        self.PERP_BASIS_PERCENTILE_WINDOW = _get_env("PERP_BASIS_PERCENTILE_WINDOW", 30, env)
+
+        self.FUTURES_SPOT_RATIO_HIGH = _get_env("FUTURES_SPOT_RATIO_HIGH", 8.0, env)
+        self.FUTURES_SPOT_RATIO_EXTREME = _get_env("FUTURES_SPOT_RATIO_EXTREME", 15.0, env)
+        self.FUTURES_SPOT_RATIO_STILL_OK = _get_env("FUTURES_SPOT_RATIO_STILL_OK", 3.0, env)
+
+        self.LIQUIDATION_HEAT_L2_THRESHOLD = _get_env("LIQUIDATION_HEAT_L2_THRESHOLD", 5_000_000, env)
+        self.LIQUIDATION_HEAT_L3_THRESHOLD = _get_env("LIQUIDATION_HEAT_L3_THRESHOLD", 20_000_000, env)
+
+        self.STABLECOIN_INFLOW_HIGH = _get_env("STABLECOIN_INFLOW_HIGH", 5.0, env)
+        self.STABLECOIN_OUTFLOW_HIGH = _get_env("STABLECOIN_OUTFLOW_HIGH", -5.0, env)
+
+        self.OI_DIVERGENCE_STD_THRESHOLD = _get_env("OI_DIVERGENCE_STD_THRESHOLD", 1.5, env)
+        self.FUNDING_VOLATILITY_THRESHOLD = _get_env("FUNDING_VOLATILITY_THRESHOLD", 0.1, env)
+
+        self.MARKET_CONTEXT_CACHE_TTL = _get_env("MARKET_CONTEXT_CACHE_TTL", 300, env)
 
         # === 计算引擎配置 ===
         self.CALC_APR_MAX = _get_env("CALC_APR_MAX", 200.0, env)
