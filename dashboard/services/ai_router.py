@@ -96,7 +96,21 @@ def deepseek_chat(
             return "".join(content_parts)
         else:
             msg = response.choices[0].message
-            return msg.content or getattr(msg, "reasoning_content", None) or ""
+            content = msg.content
+            if content and content.strip():
+                return content
+            # content 为空时不回退到 reasoning_content（思维链文本，非 JSON）
+            # 记录日志方便排查
+            rc = getattr(msg, "reasoning_content", None)
+            if rc:
+                logger.warning(
+                    "DeepSeek content is empty (len=%d), reasoning_content len=%d — "
+                    "not falling back to reasoning_content as it is not the model output",
+                    len(content or ""), len(rc or "")
+                )
+            else:
+                logger.warning("DeepSeek returned empty content and no reasoning_content")
+            return ""
 
     except Exception as e:
         logger.warning("DeepSeek API 调用失败 (%s): %s", type(e).__name__, e)
@@ -163,7 +177,16 @@ def _deepseek_chat_via_httpx(
             else:
                 data = resp.json()
                 msg = data["choices"][0].get("message", {})
-                return msg.get("content") or msg.get("reasoning_content", "")
+                content = msg.get("content")
+                if content and content.strip():
+                    return content
+                rc = msg.get("reasoning_content")
+                if rc:
+                    logger.warning(
+                        "DeepSeek httpx content empty, reasoning_content len=%d — "
+                        "not falling back to reasoning_content", len(rc or "")
+                    )
+                return ""
         else:
             logger.warning("DeepSeek API HTTP %d: %s", resp.status_code, resp.text[:500])
             return None
@@ -236,6 +259,10 @@ def ai_chat_with_config(
         )
         if has_json_instruct:
             response_format = {"type": "json_object"}
+            # 重要: json_object 模式与 thinking 模式冲突
+            # thinking 模式可能导致 content 为空，reasoning_content 包含思维链文本
+            # 对 JSON 结构化输出请求禁用 thinking，确保返回纯 JSON
+            thinking = False
 
     return deepseek_chat(
         messages=messages,

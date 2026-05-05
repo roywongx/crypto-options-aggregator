@@ -412,22 +412,36 @@ class LLMAnalystEngine:
 
     @staticmethod
     def _fix_llm_json(text: str) -> Optional[str]:
-        """修复 LLM 常见的 JSON 语法错误"""
+        """修复 LLM 常见的 JSON 语法错误：尾部逗号、注释行、Python 关键字"""
         import re as _re
         fixed = text
-        # 移除尾部逗号 (在 ] 或 } 前)
+
+        # 1. 移除尾部逗号 (在 ] 或 } 前)
         fixed = _re.sub(r',\s*([]}])', r'\1', fixed)
-        # 修复单引号为双引号 (只修复 key 和 string value)
+
+        # 2. 移除整行注释（以 // 或 # 开头的行）
         lines = fixed.split('\n')
         repaired = []
         for line in lines:
             stripped = line.strip()
             if stripped.startswith('#') or stripped.startswith('//'):
-                continue  # 移除注释行
+                continue
             repaired.append(line)
         fixed = '\n'.join(repaired)
-        # 移除 // 或 # 行内注释 (简单处理)
-        fixed = _re.sub(r'\s*//.*$', '', fixed, flags=_re.MULTILINE)
+
+        # 3. 移除行内 // 注释（只移除 JSON 结构字符后面的，保护字符串内的 //）
+        fixed = _re.sub(
+            r'([\}\]\"\d,])\s*//[^\n]*$',
+            r'\1',
+            fixed,
+            flags=_re.MULTILINE
+        )
+
+        # 4. 转换 Python 关键字为 JSON 关键字（不在字符串内的）
+        fixed = _re.sub(r'(?<=:)\s*None\b', ' null', fixed)
+        fixed = _re.sub(r'(?<=:)\s*True\b', ' true', fixed)
+        fixed = _re.sub(r'(?<=:)\s*False\b', ' false', fixed)
+
         if fixed.strip().startswith('{'):
             return fixed
         return None
