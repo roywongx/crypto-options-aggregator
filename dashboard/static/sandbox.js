@@ -17,7 +17,7 @@ export async function runSandbox(deps) {
 
     var resultDiv = document.getElementById('sandboxResult');
     if (!resultDiv) { alert('沙盘容器未找到'); return; }
-    resultDiv.innerHTML = '<div class="text-center py-4 text-cyan-400"><i class="fas fa-spinner fa-spin mr-2"></i>🔄 推演计算中...</div>';
+    resultDiv.innerHTML = '<div class="text-center py-4 text-[#7132f5]"><i class="fas fa-spinner fa-spin mr-2"></i>🔄 推演计算中...</div>';
 
     try {
         var resp = await safeFetch(API_BASE + '/api/sandbox/simulate', {
@@ -36,10 +36,10 @@ export async function runSandbox(deps) {
 
         var safety = d.safety_assessment || {};
         var safetyColors = {
-            'SAFE': 'bg-green-900/30 border-green-500/40 text-green-300',
-            'WARNING': 'bg-yellow-900/30 border-yellow-500/40 text-yellow-300',
-            'DANGER': 'bg-red-900/30 border-red-500/40 text-red-300',
-            'CRITICAL': 'bg-red-900/50 border-red-500/60 text-red-200'
+            'SAFE': 'bg-[#149e61]/10 border-[#149e61]/40 text-[#149e61]',
+            'WARNING': 'bg-[#f59e0b]/10 border-[#f59e0b]/40 text-[#f59e0b]',
+            'DANGER': 'bg-[#ef4444]/10 border-[#ef4444]/40 text-[#ef4444]',
+            'CRITICAL': 'bg-[#ef4444]/15 border-[#ef4444]/60 text-[#ef4444]'
         };
         var sc = safetyColors[safety.level] || 'bg-gray-800 border-gray-600 text-gray-300';
         html += '<div class="p-4 rounded-lg border ' + sc + '">';
@@ -58,24 +58,24 @@ export async function runSandbox(deps) {
         html += '<div class="text-xs font-semibold text-gray-400 mb-2">📉 崩盘情景</div>';
         html += '<div class="space-y-1 text-xs">';
         html += '<div class="flex justify-between"><span class="text-gray-500">当前价格</span><span class="font-mono">$' + (crashScen.from_price || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">崩盘目标</span><span class="font-mono text-red-400">$' + (crashScen.to_price || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">跌幅</span><span class="font-mono text-red-400">' + (crashScen.drop_pct || 0) + '%</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">崩盘目标</span><span class="font-mono text-[#ef4444]">$' + (crashScen.to_price || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">跌幅</span><span class="font-mono text-[#ef4444]">' + (crashScen.drop_pct || 0) + '%</span></div>';
         html += '</div></div>';
 
         html += '<div class="p-3 rounded-lg bg-gray-800 border border-gray-700/30">';
         html += '<div class="text-xs font-semibold text-gray-400 mb-2">💥 损失分解</div>';
         html += '<div class="space-y-1 text-xs">';
-        html += '<div class="flex justify-between"><span class="text-gray-500">本金损失</span><span class="font-mono text-red-400">$' + (loss.intrinsic_loss || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">Vega 冲击</span><span class="font-mono text-orange-400">$' + (loss.vega_impact || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">总损失</span><span class="font-mono text-red-300 font-bold">$' + (loss.total_loss || 0).toLocaleString() + '</span></div>';
-        html += '<div class="flex justify-between"><span class="text-gray-500">损失比例</span><span class="font-mono text-red-400">' + (loss.loss_pct || 0) + '%</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">本金损失</span><span class="font-mono text-[#ef4444]">$' + (loss.intrinsic_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">Vega 冲击</span><span class="font-mono text-[#f59e0b]">$' + (loss.vega_impact || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">总损失</span><span class="font-mono text-[#ef4444] font-bold">$' + (loss.total_loss || 0).toLocaleString() + '</span></div>';
+        html += '<div class="flex justify-between"><span class="text-gray-500">损失比例</span><span class="font-mono text-[#ef4444]">' + (loss.loss_pct || 0) + '%</span></div>';
         html += '</div></div>';
         html += '</div>';
 
         var best = d.best_plan;
         if (best) {
-            var planBorder = best.status === 'success' ? 'border-green-500/40' : best.status === 'partial' ? 'border-yellow-500/40' : 'border-red-500/40';
-            var planBg = best.status === 'success' ? 'bg-green-900/10' : best.status === 'partial' ? 'bg-yellow-900/10' : 'bg-red-900/10';
+            var planBorder = best.status === 'success' ? 'border-[#149e61]/40' : best.status === 'partial' ? 'border-[#f59e0b]/40' : 'border-[#ef4444]/40';
+            var planBg = best.status === 'success' ? 'bg-[#149e61]/10' : best.status === 'partial' ? 'bg-[#f59e0b]/10' : 'bg-[#ef4444]/10';
             html += '<div class="p-3 rounded-lg border ' + planBorder + ' ' + planBg + ' mb-3">';
             html += '<div class="text-sm font-bold mb-2">🎯 最佳恢复方案</div>';
             html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">';
@@ -87,12 +87,12 @@ export async function runSandbox(deps) {
             html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">';
             html += '<div><span class="text-gray-500 block">每张权利金</span><span class="font-mono">$' + best.premium_per_contract + '</span></div>';
             html += '<div><span class="text-gray-500 block">加仓数量</span><span class="font-mono">' + best.contracts + 'x</span></div>';
-            html += '<div><span class="text-gray-500 block">所需保证金</span><span class="font-mono text-yellow-400">$' + best.margin_required.toLocaleString() + '</span></div>';
-            var nc = best.net_recovery >= 0 ? 'text-green-400' : 'text-red-400';
+            html += '<div><span class="text-gray-500 block">所需保证金</span><span class="font-mono text-[#f59e0b]">$' + best.margin_required.toLocaleString() + '</span></div>';
+            var nc = best.net_recovery >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
             html += '<div><span class="text-gray-500 block">净恢复</span><span class="font-mono ' + nc + '">$' + best.net_recovery.toLocaleString() + '</span></div>';
             html += '</div>';
             html += '<div class="grid grid-cols-2 gap-2 text-xs mt-2">';
-            var rc = best.remaining_reserve >= 0 ? 'text-green-400' : 'text-red-400';
+            var rc = best.remaining_reserve >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
             html += '<div><span class="text-gray-500 block">剩余后备金</span><span class="font-mono ' + rc + '">$' + best.remaining_reserve.toLocaleString() + '</span></div>';
             html += '<div><span class="text-gray-500 block">安全距离</span><span class="font-mono">' + best.distance_from_crash + '%</span></div>';
             html += '</div>';
@@ -117,9 +117,9 @@ export async function runSandbox(deps) {
             html += '</tr></thead>';
             html += '<tbody class="divide-y divide-gray-800/30">';
             d.recovery_plans.forEach(function(p) {
-                var stClass = p.status === 'success' ? 'text-green-400' : p.status === 'partial' ? 'text-yellow-400' : 'text-red-400';
+                var stClass = p.status === 'success' ? 'text-[#149e61]' : p.status === 'partial' ? 'text-[#f59e0b]' : 'text-[#ef4444]';
                 var stText = p.status === 'success' ? '✅' : p.status === 'partial' ? '⚠️' : '🔴';
-                var nc2 = p.net_recovery >= 0 ? 'text-green-400' : 'text-red-400';
+                var nc2 = p.net_recovery >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
                 html += '<tr class="hover:bg-gray-800/30">';
                 html += '<td class="py-1 px-2 text-left font-mono text-gray-300">' + safeHTML(p.symbol || '-') + '</td>';
                 html += '<td class="py-1 px-2 font-mono">$' + p.strike.toLocaleString() + '</td>';
@@ -127,7 +127,7 @@ export async function runSandbox(deps) {
                 html += '<td class="py-1 px-2 font-mono">' + p.apr + '%</td>';
                 html += '<td class="py-1 px-2 font-mono">$' + p.premium_per_contract + '</td>';
                 html += '<td class="py-1 px-2 font-mono">' + p.contracts + 'x</td>';
-                html += '<td class="py-1 px-2 font-mono text-yellow-400">$' + p.margin_required.toLocaleString() + '</td>';
+                html += '<td class="py-1 px-2 font-mono text-[#f59e0b]">$' + p.margin_required.toLocaleString() + '</td>';
                 html += '<td class="py-1 px-2 font-mono ' + nc2 + '">$' + p.net_recovery.toLocaleString() + '</td>';
                 html += '<td class="py-1 px-2 ' + stClass + '">' + stText + '</td>';
                 html += '</tr>';
@@ -136,12 +136,12 @@ export async function runSandbox(deps) {
         }
 
         if (d.total_candidates === 0) {
-            html += '<div class="text-yellow-400 text-xs mt-2 p-2 bg-yellow-900/20 rounded">⚠️ 该价格水平下无可用恢复合约（链上无深度或IV过高）</div>';
+            html += '<div class="text-[#f59e0b] text-xs mt-2 p-2 bg-[#f59e0b]/10 rounded">⚠️ 该价格水平下无可用恢复合约（链上无深度或IV过高）</div>';
         }
 
         resultDiv.innerHTML = html;
     } catch(e) {
-        resultDiv.innerHTML = '<div class="text-red-400 text-sm p-3">❌ 错误: ' + safeHTML(e.message) + '</div>';
+        resultDiv.innerHTML = '<div class="text-[#ef4444] text-sm p-3">❌ 错误: ' + safeHTML(e.message) + '</div>';
     }
 }
 

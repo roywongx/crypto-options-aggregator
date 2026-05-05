@@ -858,7 +858,7 @@ function renderStrategyResults(data) {
         html += '<tr class="border-b border-gray-800/50 ' + rowBg + ' cursor-pointer strategy-row">';
         html += '<td class="py-2 px-2">' + (i === 0 ? '1' : i + 1) + '</td>';
         html += '<td class="py-2 px-2">' + safeHTML(r.platform) + '</td>';
-        const _isPut = r.option_type === 'P' || r.option_type === 'PUT';
+        const _isPut = r.option_type === 'P' || r.option_type === 'PUT' || r.option_type === 'put';
         html += '<td class="py-2 px-2">' + (_isPut ? '<span class="text-[#149e61]">PUT</span>' : '<span class="text-[#ef4444]">CALL</span>') + '</td>';
         html += '<td class="py-2 px-2 text-right font-mono">' + (r.strike || 0).toLocaleString() + '</td>';
         html += '<td class="py-2 px-2 text-xs">' + safeHTML(r.expiry || '') + '</td>';
@@ -2038,28 +2038,18 @@ function renderTablePage() {
         let riskBadge = '';
         let riskClass = '';
 
-        let distancePct = null;
+        const riskLevel = contract.risk_level || 'normal';
         const strikeVal = Number(contract.strike);
-        if (currentSpotPrice && strikeVal > 0 && Number.isFinite(strikeVal)) {
-            distancePct = Math.abs(strikeVal - currentSpotPrice) / currentSpotPrice * 100;
-        }
-
-        const isHighDelta = deltaAbs > 0.45;
-        const isNearStrike = distancePct !== null && distancePct < 2;
-
-        if (isHighDelta && isNearStrike) {
+        if (riskLevel === 'extreme') {
             riskClass = 'risk-alert-high';
             riskBadge = '<span class="risk-badge bg-[#ef4444] text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation-triangle"></i> 极高</span>';
-            highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45 且 价格接近Strike(${distancePct.toFixed(1)}%)` });
-        } else if (isHighDelta) {
+            highRiskContracts.push({ contract, reason: `后端判定 extreme: delta=${deltaAbs.toFixed(3)}` });
+        } else if (riskLevel === 'high') {
             riskClass = 'risk-alert-high';
             riskBadge = '<span class="risk-badge bg-[#ef4444] text-[10px] text-white px-1.5 py-0.5 rounded font-bold"><i class="fas fa-exclamation"></i> 高</span>';
-            highRiskContracts.push({ contract, reason: `Delta(${deltaAbs.toFixed(3)})>0.45` });
-        } else if (isNearStrike) {
-            riskClass = 'risk-alert-medium';
-            riskBadge = '<span class="bg-[#f59e0b] text-[10px] text-white px-1.5 py-0.5 rounded"><i class="fas fa-exclamation-circle"></i> 接近</span>';
-        } else if (deltaAbs > 0.35) {
-            riskBadge = '<span class="bg-[#f59e0b]/100 text-[10px] text-white px-1.5 py-0.5 rounded">警告</span>';
+            highRiskContracts.push({ contract, reason: `后端判定 high: delta=${deltaAbs.toFixed(3)}` });
+        } else if (riskLevel === 'warning') {
+            riskBadge = '<span class="bg-[#f59e0b] text-[10px] text-white px-1.5 py-0.5 rounded">警告</span>';
         } else {
             riskBadge = '<span class="bg-[#149e61]/50 text-[10px] text-white px-1.5 py-0.5 rounded">正常</span>';
         }
@@ -2124,7 +2114,7 @@ function renderTablePage() {
     if (highRiskContracts.length > 0 && 'Notification' in window && Notification.permission === 'granted') {
         new Notification('期权风险预警', {
             body: `检测到 ${highRiskContracts.length} 个高风险合约，建议执行滚仓操作`,
-            icon: '/static/favicon.ico'
+            icon: '/static/favicon.svg'
         });
     }
     if (highRiskContracts.length > 0) {
@@ -2697,7 +2687,7 @@ function applyPreset(presetName) {
         (presetName === 'conservative' ? 'Con' : presetName === 'standard' ? 'Std' : 'Agg'));
     const colorMap = {conservative: '#149e61', standard: '#7132f5', aggressive: '#7132f5'};
     const c = colorMap[presetName];
-    activeBtn.classList.add(`bg-${c}-500/15`, `text-${c}-300`, `ring-1`, `ring-${c}-500/30`);
+    activeBtn.classList.add(`bg-[${c}]/15`, `text-[${c}]`, `ring-1`, `ring-[${c}]/30`);
 
     updateParamDisplay();
 }
@@ -4507,4 +4497,10 @@ function renderGreeksAnalysis(analysis) {
 document.addEventListener('DOMContentLoaded', () => {
     loadIVSmile();
     loadGreeksSummary();
+
+    // 统一投资推荐 — 注入信号灯 + 顶部汇总条
+    if (window.Rec) {
+        window.Rec.injectAllSignals().catch(() => {});
+        window.Rec.renderSummaryBar().catch(() => {});
+    }
 });

@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@source "static/index.html";
+@source "static/*.js";
+@source "static/safelist-classes.html";
+
+@theme {
+  --color-brand: #7132f5;
+  --color-brand-hover: #8b5cf6;
+  --color-pos: #149e61;
+  --color-neg: #ef4444;
+  --color-warn: #f59e0b;
+}

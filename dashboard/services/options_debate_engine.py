@@ -117,7 +117,8 @@ def _clamp(val: float, lo: float = -100, hi: float = 100) -> float:
     return max(lo, min(hi, val))
 
 
-from services.shared_calculations import norm_cdf as _norm_cdf
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
 def _bs_greeks(option_type: str, strike: float, spot: float,

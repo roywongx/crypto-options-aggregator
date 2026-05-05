@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -253,7 +253,7 @@ from api import (
     scan_router, dashboard_router, paper_trading_router,
     mcp_router, exchanges_router, datahub_router, health_router, macro_router,
     refresh_router, strategy_router, sandbox_router, risk_router,
-    llm_analyst_router
+    llm_analyst_router, recommendations_router
 )
 
 # 公开路由（无需鉴权）
@@ -278,12 +278,18 @@ app.include_router(strategy_router, dependencies=protected_dependencies)
 app.include_router(sandbox_router, dependencies=protected_dependencies)
 app.include_router(risk_router, dependencies=protected_dependencies)
 app.include_router(llm_analyst_router, dependencies=protected_dependencies)
+app.include_router(recommendations_router, dependencies=protected_dependencies)
 
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
     html_path = Path(__file__).parent / "static" / "index.html"
     return HTMLResponse(content=html_path.read_text(encoding='utf-8'))
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(Path(__file__).parent / "static" / "favicon.svg")
 
 
 # 启动服务器

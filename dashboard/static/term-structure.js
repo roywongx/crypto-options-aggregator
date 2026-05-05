@@ -56,9 +56,9 @@ export async function loadTermStructure(deps, retryCount = 0) {
             if (best && bestDiff <= maxAllowedDiff) {
                 const iv = best.avg_iv;
                 el.textContent = iv.toFixed(1) + '%';
-                if (iv > 70) el.className = 'font-mono text-sm font-bold text-red-400';
-                else if (iv > 55) el.className = 'font-mono text-sm font-bold text-yellow-400';
-                else el.className = 'font-mono text-sm font-bold text-cyan-400';
+                if (iv > 70) el.className = 'font-mono text-sm font-bold text-[#ef4444]';
+                else if (iv > 55) el.className = 'font-mono text-sm font-bold text-[#f59e0b]';
+                else el.className = 'font-mono text-sm font-bold text-[#7132f5]';
                 if (dteEl) dteEl.textContent = best.dte !== target ? `DTE ${best.dte}` : '';
             } else {
                 el.textContent = '--';
@@ -75,14 +75,14 @@ export async function loadTermStructure(deps, retryCount = 0) {
             if (frontIv && backIv) {
                 if (frontIv > backIv) {
                     structLabel.textContent = 'Backwardation';
-                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium';
+                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-[#ef4444]/20 text-[#ef4444] font-medium';
                 } else {
                     structLabel.textContent = 'Contango';
-                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-medium';
+                    structLabel.className = 'text-xs px-2 py-0.5 rounded-full bg-[#149e61]/20 text-[#149e61] font-medium';
                 }
                 const slope = ((backIv - frontIv) / frontIv * 100).toFixed(1);
                 slopeLabel.textContent = (slope > 0 ? '+' : '') + slope + '%';
-                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+                slopeLabel.className = 'text-xs px-2 py-0.5 rounded-full ' + (slope >= 0 ? 'bg-[#149e61]/10 text-[#149e61]' : 'bg-[#ef4444]/10 text-[#ef4444]');
             }
         }
 
@@ -124,7 +124,7 @@ export async function loadTermStructure(deps, retryCount = 0) {
             if (!errDiv) {
                 errDiv = document.createElement('div');
                 errDiv.id = 'termStructureError';
-                errDiv.className = 'text-yellow-500 text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
+                errDiv.className = 'text-[#f59e0b] text-center py-8 text-sm absolute inset-0 bg-gray-900/90 z-10';
                 ctx.parentElement.appendChild(errDiv);
             }
             errDiv.textContent = '⚠️ Chart.js 未加载';
@@ -211,7 +211,7 @@ export async function loadTermStructure(deps, retryCount = 0) {
             if (slopeLabel2 && analysis.slope) {
                 const s = analysis.slope;
                 slopeLabel2.textContent = (s.percent > 0 ? '+' : '') + s.percent + '%';
-                slopeLabel2.className = 'text-xs px-2 py-0.5 rounded-full ' + (s.percent >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400');
+                slopeLabel2.className = 'text-xs px-2 py-0.5 rounded-full ' + (s.percent >= 0 ? 'bg-[#149e61]/10 text-[#149e61]' : 'bg-[#ef4444]/10 text-[#ef4444]');
             }
             const msEl = document.getElementById('ivMarketState');
             const msAdvice = document.getElementById('ivMarketAdvice');
@@ -225,7 +225,7 @@ export async function loadTermStructure(deps, retryCount = 0) {
             const vrpDesc = document.getElementById('ivVRPDesc');
             if (vrpEl && analysis.vrp) {
                 const v = analysis.vrp;
-                const vrpColor = v.signal && v.signal.includes('SELL') ? 'text-green-400' : v.signal === 'BUY_EDGE' ? 'text-blue-400' : 'text-gray-400';
+                const vrpColor = v.signal && v.signal.includes('SELL') ? 'text-[#149e61]' : v.signal === 'BUY_EDGE' ? 'text-[#7132f5]' : 'text-gray-400';
                 vrpEl.textContent = (v.value > 0 ? '+' : '') + v.value + '%';
                 vrpEl.className = 'text-lg font-bold ' + vrpColor;
                 if (vrpDesc) vrpDesc.textContent = v.description;
@@ -234,22 +234,22 @@ export async function loadTermStructure(deps, retryCount = 0) {
             if (slopeGrade && analysis.slope) {
                 const s = analysis.slope;
                 slopeGrade.textContent = s.grade || '--';
-                slopeGrade.className = 'text-xs font-bold ' + (s.grade === 'SEVERELY_INVERTED' || s.grade === 'INVERTED' ? 'text-red-400' : s.grade === 'STEEP' || s.grade === 'VERY_STEEP' ? 'text-green-400' : 'text-gray-400');
+                slopeGrade.className = 'text-xs font-bold ' + (s.grade === 'SEVERELY_INVERTED' || s.grade === 'INVERTED' ? 'text-[#ef4444]' : s.grade === 'STEEP' || s.grade === 'VERY_STEEP' ? 'text-[#149e61]' : 'text-gray-400');
             }
             const curvEl = document.getElementById('ivCurvatureType');
             if (curvEl && analysis.curvature) {
                 curvEl.textContent = analysis.curvature.type || '--';
-                curvEl.className = 'text-xs font-bold ' + (analysis.curvature.type === 'HUMP' ? 'text-yellow-400' : 'text-gray-400');
+                curvEl.className = 'text-xs font-bold ' + (analysis.curvature.type === 'HUMP' ? 'text-[#f59e0b]' : 'text-gray-400');
             }
             const regEl = document.getElementById('ivRegime');
             if (regEl && analysis.iv_levels) {
                 const il = analysis.iv_levels;
                 regEl.textContent = il.avg_iv + '%';
-                regEl.className = 'text-xs font-bold ' + (il.regime === 'EXTREME' ? 'text-red-400' : il.regime === 'HIGH' ? 'text-orange-400' : il.regime === 'LOW' || il.regime === 'VERY_LOW' ? 'text-blue-400' : 'text-green-400');
+                regEl.className = 'text-xs font-bold ' + (il.regime === 'EXTREME' ? 'text-[#ef4444]' : il.regime === 'HIGH' ? 'text-[#f59e0b]' : il.regime === 'LOW' || il.regime === 'VERY_LOW' ? 'text-[#7132f5]' : 'text-[#149e61]');
             }
             const recsEl = document.getElementById('ivRecommendations');
             if (recsEl && analysis.recommendations && analysis.recommendations.length > 0) {
-                const typeColors = {'warning': 'border-red-500/30 bg-red-500/5', 'opportunity': 'border-green-500/30 bg-green-500/5', 'info': 'border-blue-500/30 bg-blue-500/5'};
+                const typeColors = {'warning': 'border-[#ef4444]/30 bg-[#ef4444]/5', 'opportunity': 'border-[#149e61]/30 bg-[#149e61]/5', 'info': 'border-[#7132f5]/30 bg-[#7132f5]/5'};
                 const fragment = document.createDocumentFragment();
                 analysis.recommendations.forEach(r => {
                     const div = document.createElement('div');
@@ -263,7 +263,7 @@ export async function loadTermStructure(deps, retryCount = 0) {
                     body.textContent = r.body || '';
                     div.appendChild(body);
                     const action = document.createElement('div');
-                    action.className = 'text-[11px] text-cyan-300 mt-1 font-medium';
+                    action.className = 'text-[11px] text-[#8b5cf6] mt-1 font-medium';
                     action.textContent = '→ ' + (r.action || '');
                     div.appendChild(action);
                     fragment.appendChild(div);
@@ -293,7 +293,7 @@ export function showTermStructureError(message, safeHTML) {
             errDiv.className = 'text-gray-500 text-center py-8 text-xs absolute inset-0 bg-gray-900/90 z-10';
             el.parentElement.appendChild(errDiv);
         }
-        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-yellow-400 text-2xl mb-2"></i><br>' +
+        errDiv.innerHTML = '<i class="fas fa-exclamation-triangle text-[#f59e0b] text-2xl mb-2"></i><br>' +
             '数据加载失败: ' + safeHTML(message) + '<br>' +
             '<button onclick="window.loadTermStructure()" class="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded">' +
             '<i class="fas fa-redo mr-1"></i>重试</button>';

@@ -36,12 +36,11 @@ def cleanup_old_records(conn: sqlite3.Connection, days: int = 30) -> dict:
     """清理指定天数之前的旧记录"""
     cursor = conn.cursor()
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    cutoff_str = cutoff_date.strftime('%Y-%m-%d %H:%M:%S')
 
-    cursor.execute("DELETE FROM scan_records WHERE timestamp < ?", (cutoff_str,))
+    cursor.execute("DELETE FROM scan_records WHERE timestamp < ?", (cutoff_date,))
     scans_deleted = cursor.rowcount
 
-    cursor.execute("DELETE FROM large_trades_history WHERE timestamp < ?", (cutoff_str,))
+    cursor.execute("DELETE FROM large_trades_history WHERE timestamp < ?", (cutoff_date,))
     trades_deleted = cursor.rowcount
 
     conn.commit()

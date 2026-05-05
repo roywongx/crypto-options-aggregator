@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; connect-src 'self' ws: wss: http: https:; img-src 'self' data:;">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; connect-src 'self' ws: wss: http: https:; img-src 'self' data:;">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <title>加密期权监控面板</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/tailwind-output.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -110,7 +110,7 @@
         </header>
 
         <!-- 顶部指标卡片 -->
-        <section class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
+        <section id="metricCardsSection" class="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
             <div class="bg-[#1a1b23] metric-card rounded-2xl p-4 border border-[rgba(71,73,85,0.3)]">
                 <div class="text-xs text-[#9497a9] mb-1">恐惧贪婪</div>
                 <div class="num-hero" id="fearGreedValue">--</div>
@@ -260,7 +260,7 @@
 
 
         <!-- 策略推荐中心 v2 -->
-        <section class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
+        <section id="strategyCenterSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
                     <i class="fas fa-chess-queen text-[#7132f5]"></i>
@@ -667,8 +667,8 @@
 
         <!-- 主内容区域 -->
         <div class="space-y-6">
-            <!-- 机会列表表格 - 精简为12列核心数据 -->
-            <div class="card-glass rounded-xl p-5">
+            <!-- 机会列表表格 -->
+            <div id="opportunitiesSection" class="card-glass rounded-xl p-5">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-lg font-semibold flex items-center gap-2">
                         <i class="fas fa-list-ol text-[#7132f5]"></i>
@@ -743,7 +743,7 @@
 
             <!-- 图表区域：DVOL趋势独占一行 -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-6 border-t border-[rgba(71,73,85,0.3)]">
-                <div class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
+                <div id="dvolSection" class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
                     <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-[#7132f5]"><i class="fas fa-chart-area"></i> DVOL 趋势</h3>
                     <div class="relative h-64">
                         <canvas id="dvolChart"></canvas>
@@ -754,7 +754,7 @@
                         <button class="dvol-period-btn text-xs px-3 py-1.5 rounded-lg bg-[#22232e]/50 hover:bg-[#2a2b38] transition" data-period="720">30天</button>
                     </div>
                 </div>
-                <div class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
+                <div id="pcrSection" class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
                     <h3 class="text-sm font-semibold mb-3 flex items-center gap-2 text-[#7132f5]"><i class="fas fa-chart-pie"></i> Put/Call Ratio 趋势</h3>
                     <div class="relative h-64">
                         <canvas id="pcrChart"></canvas>
@@ -771,7 +771,7 @@
             <!-- 信息卡片区域 - 移除重复的图表，优化布局 -->
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 mt-5">
                 <!-- 大宗异动 -->
-                <div class="card-glass rounded-xl p-5">
+                <div id="largeTradesSection" class="card-glass rounded-xl p-5">
                     <div class="flex items-center justify-between mb-3">
                         <h2 class="text-lg font-semibold flex items-center gap-2">
                             <i class="fas fa-fish text-[#7132f5]"></i>
@@ -810,7 +810,7 @@
                 </div>
 
                 <!-- 大单风向标 v2 -->
-                <div class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
+                <div id="moneyFlowSection" class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-wind text-[#7132f5]"></i>
                         大单风向标
@@ -864,7 +864,7 @@
                 </div>
 
                 <!-- Module 1: IV Term Structure v2.0 -->
-                <div class="card-glass rounded-xl p-5">
+                <div id="ivTermStructureSection" class="card-glass rounded-xl p-5">
                     <div class="flex items-center justify-between mb-3">
                         <h2 class="text-lg font-semibold flex items-center gap-2">
                             <i class="fas fa-chart-area text-[#7132f5]"></i>
@@ -958,7 +958,7 @@
                 </div>
 
                 <!-- Module 2: Max Pain & Gamma Flip -->
-                <div class="card-glass rounded-xl p-5">
+                <div id="maxPainSection" class="card-glass rounded-xl p-5">
                     <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
                         <i class="fas fa-crosshairs text-[#7132f5]"></i>
                         最大痛点 / Gamma Flip
@@ -1058,7 +1058,7 @@
                 </div>
 
                 <!-- Module 3: Martingale Sandbox v2.0 -->
-                <div class="card-glass rounded-xl p-5 xl:col-span-2">
+                <div id="sandboxSection" class="card-glass rounded-xl p-5 xl:col-span-2">
                     <h2 class="text-lg font-semibold mb-3 flex items-center gap-2">
                         <i class="fas fa-flask text-[#7132f5]"></i>
                         🧪 马丁格尔沙盘推演 v2.0
@@ -1179,6 +1179,7 @@
     </div>
 
     <script type="module" src="/static/app.js?v=904&t=1777626800"></script>
+    <script type="module" src="/static/recommendations.js?v=5&t=1777970000"></script>
     
 <div style="display:none" data-app-version="v903"></div></body>
 </html>

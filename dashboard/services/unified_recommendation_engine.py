@@ -7,6 +7,7 @@
 
 调用链: API → engine.analyze(panel_id, data) → PanelConfig.rule_fns → SignalCalc → ReportBuilder
 """
+import time
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -24,7 +25,7 @@ class RuleResult:
     """单个规则函数的输出"""
     name: str = ""
     score: float = 0       # 0-100, 越高越好/越安全
-    max: float = 100.0
+    max_score: float = 100.0
     verdict: str = ""      # 一句话中文判断
     reasoning: List[str] = field(default_factory=list)
 
@@ -37,7 +38,7 @@ class SignalCalculator:
     """将规则评分聚合为信号灯"""
 
     BULLISH_THRESHOLD = 60   # >= 60 看多
-    BEARISH_THRESHOLD = 40   # <= 40 看空
+    BEARISH_THRESHOLD = 40   # <= 40 看空 (exclusive)
     CAUTION_EXTREME = 15     # 任一规则 <= 15 触发 caution
 
     @staticmethod
@@ -61,14 +62,14 @@ class SignalCalculator:
 
         any_extreme = any(r.score <= SignalCalculator.CAUTION_EXTREME for r in results)
         if any_extreme:
-            return SignalCalculator._make_signal("caution", "存在极端风险因子", int(scored))
+            return SignalCalculator._make_signal("caution", "存在极端风险因子", round(scored))
 
         if scored >= SignalCalculator.BULLISH_THRESHOLD:
-            return SignalCalculator._make_signal("bullish", "综合评分偏多", int(scored))
+            return SignalCalculator._make_signal("bullish", "综合评分偏多", round(scored))
         elif scored < SignalCalculator.BEARISH_THRESHOLD:
-            return SignalCalculator._make_signal("bearish", "综合评分偏空", int(scored))
+            return SignalCalculator._make_signal("bearish", "综合评分偏空", round(scored))
         else:
-            return SignalCalculator._make_signal("neutral", "综合评分中性", int(scored))
+            return SignalCalculator._make_signal("neutral", "综合评分中性", round(scored))
 
     @staticmethod
     def worst_case(results: List[RuleResult]) -> Dict[str, Any]:
@@ -76,14 +77,14 @@ class SignalCalculator:
         if not results:
             return SignalCalculator._make_signal("neutral", "数据不足", 0)
         worst = min(results, key=lambda r: r.score)
-        if worst.score <= 20:
-            return SignalCalculator._make_signal("caution", "关键风险因子告警", int(worst.score))
+        if worst.score <= SignalCalculator.CAUTION_EXTREME:
+            return SignalCalculator._make_signal("caution", "关键风险因子告警", round(worst.score))
         elif worst.score <= 40:
-            return SignalCalculator._make_signal("bearish", "存在显著风险", int(worst.score))
+            return SignalCalculator._make_signal("bearish", "存在显著风险", round(worst.score))
         elif worst.score >= 65:
-            return SignalCalculator._make_signal("bullish", "风险可控", int(worst.score))
+            return SignalCalculator._make_signal("bullish", "风险可控", round(worst.score))
         else:
-            return SignalCalculator._make_signal("neutral", "风险中性", int(worst.score))
+            return SignalCalculator._make_signal("neutral", "风险中性", round(worst.score))
 
     @staticmethod
     def majority(results: List[RuleResult]) -> Dict[str, Any]:
@@ -92,7 +93,7 @@ class SignalCalculator:
             return SignalCalculator._make_signal("neutral", "数据不足", 0)
         bulls = sum(1 for r in results if r.score >= 60)
         bears = sum(1 for r in results if r.score <= 40)
-        avg_score = int(sum(r.score for r in results) / len(results))
+        avg_score = round(sum(r.score for r in results) / len(results))
         if bulls > bears and bulls > len(results) / 3:
             return SignalCalculator._make_signal("bullish", "多数信号看多", avg_score)
         elif bears > bulls and bears > len(results) / 3:
@@ -131,14 +132,16 @@ class ReportBuilder:
             }
 
         factors = [
-            {"name": r.name, "score": round(r.score, 1), "max": r.max, "verdict": r.verdict}
+            {"name": r.name, "score": round(r.score, 1), "max": r.max_score, "verdict": r.verdict}
             for r in results
         ]
 
         logic_chain = []
-        for i, r in enumerate(results, 1):
+        step = 1
+        for r in results:
             for reason in r.reasoning:
-                logic_chain.append(f"{i}. {reason}")
+                logic_chain.append(f"{step}. {reason}")
+                step += 1
 
         risk_flags = [r.verdict for r in results if r.score <= 25]
         summary_parts = [f"{r.name}: {r.verdict}" for r in results]
@@ -167,13 +170,18 @@ class ReportBuilder:
 # LLM Prompt 构建器
 # ============================================================
 
+class _SafeDict(dict):
+    """dict subclass that returns {key} for missing keys during str.format_map"""
+    def __missing__(self, key):
+        return '{' + key + '}'
+
+
 class LLMPromptBuilder:
 
     @staticmethod
     def build(panel_id: str, rule_report: Dict[str, Any],
               data_snapshot: Dict[str, Any], currency: str = "BTC") -> Dict[str, str]:
         """为面板构建完整 LLM prompt（复用 panel_analyzers 的模板）"""
-        # 延迟导入以避免循环依赖（panel_analyzers 需要从 engine 导入 RuleResult）
         from services.panel_analyzers import get_llm_prompt
         template = get_llm_prompt(panel_id)
 
@@ -188,24 +196,18 @@ class LLMPromptBuilder:
 
         data_text = LLMPromptBuilder._format_data_snapshot(data_snapshot)
 
-        # 使用 safe format — 如果模板中有未提供的字段，保留占位符
-        format_args = {
+        format_args = _SafeDict({
             "currency": currency, "spot": spot, "dvol": dvol, "dvol_z": dvol_z,
             "rule_scores": rule_scores_text, "data_snapshot": data_text,
+            "panel_id": panel_id,
             **data_snapshot,
-        }
-
-        def safe_format(s: str) -> str:
-            try:
-                return s.format(**format_args)
-            except KeyError:
-                return s
+        })
 
         return {
-            "synthesis": safe_format(template.get("synthesis", "")),
-            "bull_context": safe_format(template.get("bull_context", "")),
-            "bear_context": safe_format(template.get("bear_context", "")),
-            "judge_criteria": safe_format(template.get("judge_criteria", "")),
+            "synthesis": template.get("synthesis", "").format_map(format_args),
+            "bull_context": template.get("bull_context", "").format_map(format_args),
+            "bear_context": template.get("bear_context", "").format_map(format_args),
+            "judge_criteria": template.get("judge_criteria", "").format_map(format_args),
         }
 
     @staticmethod
@@ -236,6 +238,7 @@ class UnifiedRecommendationEngine:
     def analyze(self, panel_id: str, data: Dict[str, Any],
                 currency: str = "BTC") -> Dict[str, Any]:
         """分析单个面板，返回三层标准输出"""
+        t0 = time.perf_counter()
         config = self.panels.get(panel_id)
         if not config:
             raise ValueError(f"Unknown panel: {panel_id}")
@@ -267,6 +270,8 @@ class UnifiedRecommendationEngine:
         action_template = config.get("default_action", "")
         report = ReportBuilder.build(results, action_template)
 
+        computation_ms = round((time.perf_counter() - t0) * 1000, 2)
+
         return {
             "panel_id": panel_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -274,7 +279,7 @@ class UnifiedRecommendationEngine:
             "signal": signal,
             "report": report,
             "llm_analysis": None,
-            "meta": {"rules_version": "1.0", "computation_ms": 0},
+            "meta": {"rules_version": "1.0", "computation_ms": computation_ms},
         }
 
     def analyze_all(self, data: Dict[str, Any],

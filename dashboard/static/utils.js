@@ -41,7 +41,8 @@ export function getApiKey() {
 
 export async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    const timeout = options.timeout || API_TIMEOUT_MS;
+    const timer = setTimeout(() => controller.abort(), timeout);
     try {
         const apiKey = getApiKey();
         const headers = apiKey ? {'X-API-Key': apiKey} : {};
@@ -101,11 +102,11 @@ export function getFieldName(field) {
 
 export function getRecommendationColor(rec) {
     const colors = {
-        'BEST': 'text-green-400 bg-green-900/30',
-        'GOOD': 'text-blue-400 bg-blue-900/30',
-        'OK': 'text-gray-400 bg-gray-800/30',
-        'CAUTION': 'text-orange-400 bg-orange-900/30',
-        'SKIP': 'text-red-400 bg-red-900/30',
+        'BEST': 'text-[#149e61] bg-[#149e61]/10',
+        'GOOD': 'text-[#7132f5] bg-[#7132f5]/10',
+        'OK': 'text-[#9497a9] bg-[#22232e]/30',
+        'CAUTION': 'text-[#f59e0b] bg-[#f59e0b]/10',
+        'SKIP': 'text-[#ef4444] bg-[#ef4444]/10',
     };
     return colors[rec] || colors['SKIP'];
 }

@@ -31,6 +31,7 @@ from .strategy import router as strategy_router
 from .sandbox import router as sandbox_router
 from .risk import router as risk_router
 from .llm_analyst import router as llm_analyst_router
+from .recommendations import router as recommendations_router
 
 __all__ = [
     "scan_router",
@@ -46,4 +47,5 @@ __all__ = [
     "sandbox_router",
     "risk_router",
     "llm_analyst_router",
+    "recommendations_router",
 ]

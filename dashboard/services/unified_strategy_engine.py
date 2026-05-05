@@ -471,7 +471,7 @@ class UnifiedStrategyEngine:
                 "strike": level.strike,
                 "expiry": level.expiry,
                 "dte": level.dte,
-                "option_type": level.direction.value,
+                "option_type": level.direction.value.upper(),
                 "premium_usd": level.premium_usd,
                 "iv": level.iv,
                 "delta": level.delta,

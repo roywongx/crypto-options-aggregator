@@ -99,7 +99,7 @@ class Config:
         self.LARGE_TRADE_THRESHOLD_USD = _get_env("LARGE_TRADE_THRESHOLD_USD", 500_000, env)
         self.SCAN_CLEANUP_LIMIT_CONTRACTS = _get_env("SCAN_CLEANUP_LIMIT_CONTRACTS", 30, env)
         self.SCAN_CLEANUP_LIMIT_TRADES = _get_env("SCAN_CLEANUP_LIMIT_TRADES", 20, env)
-        self.SCAN_INTERVAL_SECONDS = _get_env("SCAN_INTERVAL_SECONDS", 300, env)
+        self.SCAN_INTERVAL_SECONDS = _get_env("SCAN_INTERVAL_SECONDS", 600, env)
         
         # === 并发配置 ===
         self.MAX_WORKERS_SCAN = _get_env("MAX_WORKERS_SCAN", 4, env)
@@ -143,7 +143,18 @@ class Config:
         self.RISK_SCORE_REGULAR = _get_env("RISK_SCORE_REGULAR", 1.1, env)
         self.RISK_SCORE_ABOVE_SPOT = _get_env("RISK_SCORE_ABOVE_SPOT", 0.8, env)
         self.RISK_CACHE_TTL_SECONDS = _get_env("RISK_CACHE_TTL_SECONDS", 14400, env)
-        
+
+        # === LLM 分析配置 ===
+        self.LLM_ANALYSIS_ENABLED = _get_env("LLM_ANALYSIS_ENABLED", True, env)
+        self.LLM_CACHE_TTL_SECONDS = _get_env("LLM_CACHE_TTL_SECONDS", 3600, env)
+        self.LLM_MAX_TOKENS_PER_PANEL = _get_env("LLM_MAX_TOKENS_PER_PANEL", 4000, env)
+        self.LLM_DEFAULT_MODEL = _get_env("LLM_DEFAULT_MODEL", "deepseek-v4-pro", env)
+        self.LLM_STREAMING_ENABLED = _get_env("LLM_STREAMING_ENABLED", True, env)
+        self.LLM_DEBATE_STEPS = _get_env("LLM_DEBATE_STEPS", 4, env)
+        self.LLM_THINKING_ENABLED = _get_env("LLM_THINKING_ENABLED", True, env)
+        self.LLM_REASONING_EFFORT = _get_env("LLM_REASONING_EFFORT", "max", env)
+        self.LLM_DEEPSEEK_BASE_URL = _get_env("LLM_DEEPSEEK_BASE_URL", "https://api.deepseek.com", env)
+
         # === 计算引擎配置 ===
         self.CALC_APR_MAX = _get_env("CALC_APR_MAX", 200.0, env)
         self.CALC_POP_MAX = _get_env("CALC_POP_MAX", 100.0, env)

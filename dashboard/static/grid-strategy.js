@@ -94,22 +94,12 @@ function applyGridPreset(presetId) {
     if (preset.min_apr !== undefined) { const el = document.getElementById('gridMinApr'); if (el) el.value = preset.min_apr; }
     
     document.querySelectorAll('#gridPresetButtons button').forEach(btn => {
-        btn.classList.remove('ring-1', 'bg-purple-500/15', 'text-purple-300', 'ring-purple-500/30',
-            'bg-green-500/15', 'text-green-300', 'ring-green-500/30',
-            'bg-blue-500/15', 'text-blue-300', 'ring-blue-500/30',
-            'bg-orange-500/15', 'text-orange-300', 'ring-orange-500/30');
+        btn.classList.remove('ring-1', 'bg-[#7132f5]/15', 'text-[#8b5cf6]', 'ring-[#7132f5]/30');
     });
-    
+
     const activeBtn = document.querySelector(`#gridPresetButtons button[data-preset="${CSS.escape(presetId)}"]`);
     if (activeBtn) {
-        const colorMap = {
-            'sell_put_grid': 'purple',
-            'conservative': 'green',
-            'balanced': 'blue',
-            'aggressive': 'orange'
-        };
-        const c = colorMap[presetId] || 'purple';
-        activeBtn.classList.add(`bg-${c}-500/15`, `text-${c}-300`, `ring-1`, `ring-${c}-500/30`);
+        activeBtn.classList.add('bg-[#7132f5]/15', 'text-[#8b5cf6]', 'ring-1', 'ring-[#7132f5]/30');
     }
 }
 
@@ -168,7 +158,7 @@ function updateGridDisplay(data) {
             putLevelsDiv.innerHTML = '';
             data.put_levels.forEach(level => {
                 const card = document.createElement('div');
-                card.className = 'bg-gray-800/50 p-3 rounded-lg border-l-4 border-green-500';
+                card.className = 'bg-gray-800/50 p-3 rounded-lg border-l-4 border-[#149e61]';
                 card.innerHTML = `
                     <div class="flex justify-between items-center">
                         <div>
@@ -177,7 +167,7 @@ function updateGridDisplay(data) {
                             <div class="text-xs text-gray-400">${gridSafeHTML(level.dte)}天 · Delta ${gridSafeHTML(level.delta)} · 距离${gridSafeHTML(level.distance_pct)}%</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-green-400 font-bold">${gridSafeHTML(level.apr)}% APR</div>
+                            <div class="text-[#149e61] font-bold">${gridSafeHTML(level.apr)}% APR</div>
                             <div class="text-xs text-gray-400">$${gridSafeHTML(level.premium_usd)}</div>
                             <div class="text-xs ${getRecommendationColor(level.recommendation)}">${gridSafeHTML(level.recommendation)}</div>
                         </div>
@@ -200,7 +190,7 @@ function updateGridDisplay(data) {
             callLevelsDiv.innerHTML = '';
             data.call_levels.forEach(level => {
                 const card = document.createElement('div');
-                card.className = 'bg-gray-800/50 p-3 rounded-lg border-l-4 border-blue-500';
+                card.className = 'bg-gray-800/50 p-3 rounded-lg border-l-4 border-[#7132f5]';
                 card.innerHTML = `
                     <div class="flex justify-between items-center">
                         <div>
@@ -209,7 +199,7 @@ function updateGridDisplay(data) {
                             <div class="text-xs text-gray-400">${gridSafeHTML(level.dte)}天 · Delta ${gridSafeHTML(level.delta)} · 距离+${gridSafeHTML(Math.abs(level.distance_pct))}%</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-blue-400 font-bold">${gridSafeHTML(level.apr)}% APR</div>
+                            <div class="text-[#7132f5] font-bold">${gridSafeHTML(level.apr)}% APR</div>
                             <div class="text-xs text-gray-400">$${gridSafeHTML(level.premium_usd)}</div>
                             <div class="text-xs ${getRecommendationColor(level.recommendation)}">${gridSafeHTML(level.recommendation)}</div>
                         </div>
@@ -236,7 +226,7 @@ function updateGridDisplay(data) {
             <div class="bg-gray-800/50 p-4 rounded-lg space-y-2">
                 <div class="text-lg font-bold ${getSignalColor(data.dvol_signal)}">${gridSafeHTML(signalLabels[data.dvol_signal] || data.dvol_signal)}</div>
                 <div class="text-sm text-gray-300">推荐比例: <b>${gridSafeHTML(data.recommended_ratio || '5:5')}</b></div>
-                <div class="text-sm text-gray-300">潜在总权利金: <b class="text-green-400">$${gridSafeHTML((data.total_potential_premium || 0).toLocaleString())}</b></div>
+                <div class="text-sm text-gray-300">潜在总权利金: <b class="text-[#149e61]">$${gridSafeHTML((data.total_potential_premium || 0).toLocaleString())}</b></div>
                 <div class="text-sm text-gray-300">现货: <b>$${gridSafeHTML((data.spot_price || 0).toLocaleString())}</b></div>
             </div>
         `;
@@ -349,11 +339,11 @@ function renderGridScenarios(data) {
         
         const totalPnl = putPnl + callPnl;
         const isCurrent = Math.abs(s.price - spot) < 0.01;
-        const pnlColor = totalPnl >= 0 ? 'text-green-400' : 'text-red-400';
-        const bgColor = isCurrent ? 'bg-purple-500/10 border-purple-500/30' : 'bg-gray-800/40';
+        const pnlColor = totalPnl >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
+        const bgColor = isCurrent ? 'bg-[#7132f5]/10 border-[#7132f5]/30' : 'bg-[#22232e]/40';
         
         return `
-            <div class="p-3 ${bgColor} rounded-lg border ${isCurrent ? 'border-purple-500/30' : 'border-gray-700/30'}">
+            <div class="p-3 ${bgColor} rounded-lg border ${isCurrent ? 'border-[#7132f5]/30' : 'border-[rgba(71,73,85,0.3)]'}">
                 <div class="text-xs text-gray-400 mb-1">${gridSafeHTML(s.label)}</div>
                 <div class="text-sm font-medium">$${gridSafeHTML(s.price.toLocaleString(undefined, {maximumFractionDigits: 0}))}</div>
                 <div class="text-sm font-bold ${pnlColor}">$${gridSafeHTML(totalPnl.toLocaleString(undefined, {maximumFractionDigits: 0}))}</div>
@@ -364,20 +354,20 @@ function renderGridScenarios(data) {
 
 function getRecommendationColor(recommendation) {
     const colors = {
-        'BEST': 'text-green-400',
-        'GOOD': 'text-blue-400',
-        'OK': 'text-yellow-400',
-        'CAUTION': 'text-orange-400',
-        'SKIP': 'text-red-400'
+        'BEST': 'text-[#149e61]',
+        'GOOD': 'text-[#7132f5]',
+        'OK': 'text-[#f59e0b]',
+        'CAUTION': 'text-[#f59e0b]',
+        'SKIP': 'text-[#ef4444]'
     };
     return colors[recommendation] || 'text-gray-400';
 }
 
 function getSignalColor(signal) {
     const colors = {
-        'FAVOR_PUT': 'text-green-400',
-        'FAVOR_CALL': 'text-blue-400',
-        'NEUTRAL': 'text-yellow-400'
+        'FAVOR_PUT': 'text-[#149e61]',
+        'FAVOR_CALL': 'text-[#7132f5]',
+        'NEUTRAL': 'text-[#f59e0b]'
     };
     return colors[signal] || 'text-gray-400';
 }

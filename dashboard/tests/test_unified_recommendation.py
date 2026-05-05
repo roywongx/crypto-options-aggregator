@@ -9,9 +9,16 @@ from services.unified_recommendation_engine import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _use_capsys(capsys):
+    """Ensure capsys fixture is active for all tests to prevent capture cascade failures
+    when engine wrappers import modules with thread/process side effects."""
+    pass
+
+
 class TestRuleResult:
     def test_create_rule_result(self):
-        r = RuleResult(name="test", score=85, max=100, verdict="正面", reasoning=["理由1"])
+        r = RuleResult(name="test", score=85, max_score=100, verdict="正面", reasoning=["理由1"])
         assert r.name == "test"
         assert r.score == 85
         assert r.verdict == "正面"
@@ -110,8 +117,8 @@ class TestSignalCalculator:
 class TestReportBuilder:
     def test_build_report_with_factors(self):
         results = [
-            RuleResult(name="因子A", score=80, max=100, verdict="良好", reasoning=["A1", "A2"]),
-            RuleResult(name="因子B", score=60, max=100, verdict="适中", reasoning=["B1"]),
+            RuleResult(name="因子A", score=80, max_score=100, verdict="良好", reasoning=["A1", "A2"]),
+            RuleResult(name="因子B", score=60, max_score=100, verdict="适中", reasoning=["B1"]),
         ]
         report = ReportBuilder.build(results, action="测试建议")
         assert "因子A" in report["summary"]
@@ -142,8 +149,10 @@ class TestReportBuilder:
 class TestUnifiedRecommendationEngine:
     def test_engine_init_loads_panels(self):
         engine = UnifiedRecommendationEngine()
-        assert len(engine.panels) > 0
+        assert len(engine.panels) >= 16
         assert "test_panel" in engine.panels
+        assert "risk_command_center" in engine.panels
+        assert "iv_term_structure" in engine.panels
 
     def test_analyze_returns_valid_structure(self):
         engine = UnifiedRecommendationEngine()
@@ -156,6 +165,16 @@ class TestUnifiedRecommendationEngine:
         signal = result["signal"]
         assert signal["signal"] in ("bullish", "bearish", "neutral", "caution")
         assert 0 <= signal["confidence"] <= 100
+        assert result["meta"]["computation_ms"] > 0
+
+    def test_analyze_with_real_panel(self):
+        engine = UnifiedRecommendationEngine()
+        result = engine.analyze("metric_cards", {
+            "spot": 90000, "dvol": 62, "dvol_z": 0.8,
+            "fear_greed": 35, "trend_strength": 0.6,
+        })
+        assert result["panel_id"] == "metric_cards"
+        assert result["signal"]["signal"] in ("bullish", "bearish", "neutral", "caution")
 
     def test_analyze_unknown_panel_raises(self):
         engine = UnifiedRecommendationEngine()
@@ -165,13 +184,25 @@ class TestUnifiedRecommendationEngine:
     def test_analyze_all_returns_all_panels(self):
         engine = UnifiedRecommendationEngine()
         results = engine.analyze_all({"spot": 90000})
-        assert len(results) >= 2
+        assert len(results) >= 16
         for pid, r in results.items():
             assert r["panel_id"] == pid
             assert "signal" in r
             assert "report" in r
 
-    def test_llm_prompt_builder(self):
+    def test_rule_error_handling(self):
+        """Rules that throw are caught and produce error result"""
+        engine = UnifiedRecommendationEngine()
+        # Use a panel with wrappers that need real data — missing data shouldn't crash
+        result = engine.analyze("risk_command_center", {"spot": 90000})
+        assert result["signal"]["signal"] in ("bullish", "bearish", "neutral", "caution")
+
+    def test_majority_formula_panel(self):
+        engine = UnifiedRecommendationEngine()
+        result = engine.analyze("pcr_chart", {"pcr": 0.8, "fear_greed": 40})
+        assert result["signal"]["signal"] in ("bullish", "bearish", "neutral", "caution")
+
+    def test_llm_prompt_builder_with_real_panel(self):
         report = {
             "summary": "测试摘要",
             "factors": [{"name": "F1", "score": 80, "verdict": "好"}],
@@ -189,3 +220,39 @@ class TestUnifiedRecommendationEngine:
         assert "90000" in prompt["synthesis"]
         assert "bull_context" in prompt
         assert "bear_context" in prompt
+
+    def test_llm_prompt_builder_iv_term_structure(self):
+        report = {
+            "summary": "测试",
+            "factors": [{"name": "期限溢价", "score": 85, "verdict": "陡峭Contango"}],
+            "logic_chain": ["L1"],
+            "suggested_action": "卖PUT",
+            "risk_flags": [],
+        }
+        prompt = LLMPromptBuilder.build(
+            panel_id="iv_term_structure",
+            rule_report=report,
+            data_snapshot={"spot": 90000, "dvol": 62, "term_premium": 8.5},
+            currency="BTC",
+        )
+        assert "BTC" in prompt["synthesis"]
+        assert "90000" in prompt["synthesis"]
+        assert "bull_context" in prompt
+        assert "bear_context" in prompt
+
+    def test_llm_prompt_unknown_panel_gets_default(self):
+        report = {
+            "summary": "",
+            "factors": [],
+            "logic_chain": [],
+            "suggested_action": "",
+            "risk_flags": [],
+        }
+        prompt = LLMPromptBuilder.build(
+            panel_id="nonexistent",
+            rule_report=report,
+            data_snapshot={"spot": 90000},
+            currency="ETH",
+        )
+        assert "ETH" in prompt["synthesis"]
+        assert "synthesis" in prompt

@@ -281,7 +281,7 @@ class LLMAnalystEngine:
         try:
             response = ai_chat_with_config(
                 messages, preset="analysis", temperature=0.3,
-                max_tokens=2000, custom_config=custom_config
+                max_tokens=4000, custom_config=custom_config
             )
             if not response:
                 return {"success": False, "error": "LLM 无响应，请检查 API Key 配置"}
@@ -433,7 +433,7 @@ class LLMAnalystEngine:
         try:
             bull_resp = ai_chat_with_config(
                 bull_prompt, preset="analysis", temperature=0.4,
-                max_tokens=1500, custom_config=custom_config
+                max_tokens=3000, custom_config=custom_config
             )
             if bull_resp:
                 parsed = self._parse_json_response(bull_resp)
@@ -451,7 +451,7 @@ class LLMAnalystEngine:
         try:
             bear_resp = ai_chat_with_config(
                 bear_prompt, preset="analysis", temperature=0.4,
-                max_tokens=1500, custom_config=custom_config
+                max_tokens=3000, custom_config=custom_config
             )
             if bear_resp:
                 parsed = self._parse_json_response(bear_resp)
@@ -486,7 +486,7 @@ class LLMAnalystEngine:
         try:
             judge_resp = ai_chat_with_config(
                 judge_prompt, preset="analysis", temperature=0.2,
-                max_tokens=1500, custom_config=custom_config
+                max_tokens=3000, custom_config=custom_config
             )
             if judge_resp:
                 parsed = self._parse_json_response(judge_resp)

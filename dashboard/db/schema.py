@@ -66,6 +66,8 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_debate_currency_timestamp ON debate_results(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_max_pain_currency_timestamp ON max_pain_history(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_llm_analysis_currency_timestamp ON llm_analysis_results(currency, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_llm_cache_lookup ON llm_analysis_cache(panel_id, currency, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage_log(created_at DESC)",
 ]
 
 SCHEMA_DEBATE_RESULTS = """
@@ -114,6 +116,34 @@ CREATE TABLE IF NOT EXISTS llm_analysis_results (
 )
 """
 
+SCHEMA_LLM_ANALYSIS_CACHE = """
+CREATE TABLE IF NOT EXISTS llm_analysis_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    panel_id TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'BTC',
+    input_hash TEXT NOT NULL,
+    analysis_json TEXT NOT NULL,
+    model_used TEXT,
+    tokens_input INTEGER,
+    tokens_output INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(panel_id, currency, input_hash)
+)
+"""
+
+SCHEMA_LLM_USAGE_LOG = """
+CREATE TABLE IF NOT EXISTS llm_usage_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    panel_id TEXT NOT NULL,
+    model TEXT,
+    tokens_input INTEGER,
+    tokens_output INTEGER,
+    latency_ms INTEGER,
+    cost_estimate REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'top_contracts_data', 'raw_output']
 TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
 
@@ -135,6 +165,8 @@ def init_database_schema(conn: sqlite3.Connection):
     cursor.execute(SCHEMA_MAX_PAIN_HISTORY)
     cursor.execute(SCHEMA_LLM_CONFIG)
     cursor.execute(SCHEMA_LLM_ANALYSIS_RESULTS)
+    cursor.execute(SCHEMA_LLM_ANALYSIS_CACHE)
+    cursor.execute(SCHEMA_LLM_USAGE_LOG)
 
     for idx in INDEXES:
         cursor.execute(idx)

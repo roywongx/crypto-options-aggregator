@@ -1,6 +1,5 @@
 """数据刷新 API"""
 from fastapi import APIRouter, Query
-from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api", tags=["refresh"])
 
@@ -13,7 +12,7 @@ async def refresh_dvol(currency: str = Query(default="BTC")):
     import json
     from datetime import datetime, timezone
 
-    dvol_data = await run_in_threadpool(get_dvol_from_deribit, currency)
+    dvol_data = get_dvol_from_deribit(currency)
     await execute_write_async("""
         INSERT INTO dvol_history (timestamp, currency, current, z_score, signal, trend)
         VALUES (?, ?, ?, ?, ?, ?)

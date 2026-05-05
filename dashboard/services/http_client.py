@@ -29,12 +29,8 @@ def get_sync_client() -> httpx.Client:
 def get_async_client() -> httpx.AsyncClient:
     """获取全局异步 HTTP 客户端"""
     global _async_client
-    if _async_client is None or _async_client.is_closed:
-        _async_client = httpx.AsyncClient(
-            timeout=DEFAULT_TIMEOUT,
-            limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
-            follow_redirects=True,
-        )
+    if _async_client is None:
+        _async_client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
     return _async_client
 
 

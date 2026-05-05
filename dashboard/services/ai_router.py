@@ -1,173 +1,257 @@
 """
-LiteLLM AI 路由服务 - 支持多模型切换
-一行代码路由到 OpenAI/DeepSeek/Claude/Gemini 等
+DeepSeek AI 路由服务 — 原生 DeepSeek v4 API 支持
+支持思考模式 (thinking)、推理强度控制 (reasoning_effort)、JSON 结构化输出
 """
 import os
+import json
 import logging
 from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# LiteLLM 封装
+# 原生 DeepSeek API 调用 (使用 OpenAI SDK 兼容接口)
 # ============================================================
 
-try:
-    from litellm import completion
-    from litellm.exceptions import AuthenticationError, BadRequestError, RateLimitError
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
-    logger.warning("LiteLLM 未安装，AI 路由功能不可用 (pip install litellm)")
+DEEPSEEK_BASE_URL = os.environ.get("LLM_DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-pro"
 
 
-# 预设模型路由配置
-MODEL_PRESETS = {
-    "analysis": {
-        # 复杂推理分析 -> Claude/Gemini
-        "model": "claude-sonnet-4-20250514",
-        "fallback": ["gemini-2.0-flash", "deepseek-chat"],
-    },
-    "code": {
-        # 代码/计算 -> DeepSeek-Coder
-        "model": "deepseek/deepseek-coder",
-        "fallback": ["gpt-4o-mini"],
-    },
-    "fast": {
-        # 快速回复 -> GPT-4o-mini
-        "model": "gpt-4o-mini",
-        "fallback": ["gemini-2.0-flash"],
-    },
-    "chinese": {
-        # 中文优化 -> DeepSeek
-        "model": "deepseek/deepseek-chat",
-        "fallback": ["gpt-4o-mini"],
+def deepseek_chat(
+    messages: List[Dict[str, str]],
+    model: str = DEEPSEEK_DEFAULT_MODEL,
+    max_tokens: int = 4000,
+    thinking: bool = True,
+    reasoning_effort: str = "high",
+    response_format: Optional[Dict[str, str]] = None,
+    stream: bool = False,
+    api_key: str = "",
+    base_url: str = "",
+) -> Optional[str]:
+    """
+    原生 DeepSeek API 聊天 (OpenAI SDK 兼容, 支持思考模式)
+
+    Args:
+        messages: [{"role": "system/user/assistant", "content": "..."}]
+        model: 模型 ID，默认 deepseek-v4-pro
+        max_tokens: 最大输出 token (含推理 token)
+        thinking: 启用思考模式 (temperature/top_p 等参数会被忽略)
+        reasoning_effort: 推理强度 "high" | "max" (默认 max 用于复杂分析)
+        response_format: {"type": "json_object"} 用于结构化输出
+        stream: 启用 SSE 流式输出
+        api_key: DeepSeek API Key
+        base_url: DeepSeek API Base URL (默认 https://api.deepseek.com)
+
+    Returns:
+        AI 回复文本，或 None
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        logger.warning("openai SDK 未安装 (pip install openai)")
+        return _deepseek_chat_via_httpx(messages, model, max_tokens, thinking,
+                                       reasoning_effort, response_format, stream,
+                                       api_key, base_url)
+
+    key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY")
+    if not key:
+        logger.warning("未设置 DeepSeek API Key")
+        return None
+
+    url = base_url or DEEPSEEK_BASE_URL
+
+    try:
+        client = OpenAI(api_key=key, base_url=url)
+
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        }
+
+        if thinking:
+            kwargs["extra_body"] = {
+                "thinking": {"type": "enabled"},
+                "reasoning_effort": reasoning_effort,
+            }
+        else:
+            kwargs["temperature"] = 0.3
+
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        if stream:
+            kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}
+
+        response = client.chat.completions.create(**kwargs)
+
+        if stream:
+            # 收集流式输出
+            content_parts = []
+            for chunk in response:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    content_parts.append(delta.content)
+            return "".join(content_parts)
+        else:
+            msg = response.choices[0].message
+            return msg.content or getattr(msg, "reasoning_content", None) or ""
+
+    except Exception as e:
+        logger.warning("DeepSeek API 调用失败 (%s): %s", type(e).__name__, e)
+        return None
+
+
+def _deepseek_chat_via_httpx(
+    messages, model, max_tokens, thinking, reasoning_effort,
+    response_format, stream, api_key, base_url
+) -> Optional[str]:
+    """降级方案: 直接 httpx 调用 DeepSeek API (不依赖 OpenAI SDK)"""
+    import httpx as _httpx
+
+    key = api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY") or os.environ.get("LITELLM_API_KEY")
+    if not key:
+        return None
+
+    url = (base_url or DEEPSEEK_BASE_URL).rstrip("/") + "/v1/chat/completions"
+
+    body: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "stream": stream,
     }
-}
+
+    if thinking:
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = reasoning_effort
+    else:
+        body["temperature"] = 0.3
+
+    if response_format:
+        body["response_format"] = response_format
+
+    if stream:
+        body["stream_options"] = {"include_usage": True}
+
+    try:
+        resp = _httpx.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream" if stream else "application/json",
+            },
+            json=body,
+            timeout=120.0,
+        )
+        if resp.status_code == 200:
+            if stream:
+                # 手动解析 SSE
+                content_parts = []
+                for line in resp.text.split("\n"):
+                    if line.startswith("data: ") and line.strip() != "data: [DONE]":
+                        try:
+                            chunk = json.loads(line[6:])
+                            delta = (chunk.get("choices", [{}])[0].get("delta") or {})
+                            if delta.get("content"):
+                                content_parts.append(delta["content"])
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            pass
+                return "".join(content_parts)
+            else:
+                data = resp.json()
+                msg = data["choices"][0].get("message", {})
+                return msg.get("content") or msg.get("reasoning_content", "")
+        else:
+            logger.warning("DeepSeek API HTTP %d: %s", resp.status_code, resp.text[:500])
+            return None
+    except Exception as e:
+        logger.warning("DeepSeek API httpx 调用失败: %s", e)
+        return None
+
+
+# ============================================================
+# 兼容旧接口 — 保留 ai_chat_with_config 但内部走 DeepSeek
+# ============================================================
+
+def ai_chat_with_config(
+    messages: List[Dict[str, str]],
+    preset: str = "analysis",
+    temperature: float = 0.3,
+    max_tokens: int = 4000,
+    custom_config: Dict[str, str] = None,
+) -> Optional[str]:
+    """
+    统一 AI 聊天接口 (内部路由到 DeepSeek 原生 API)
+
+    Args:
+        messages: [{"role": "user", "content": "..."}]
+        preset: analysis | fast | debate | audit (对应不同的 reasoning_effort)
+        temperature: 忽略 (思考模式下无效)
+        max_tokens: 最大输出 token (含推理)
+        custom_config: {"api_key": "...", "base_url": "...", "model": "..."}
+
+    Returns:
+        AI 回复文本，或 None
+    """
+    api_key = ""
+    base_url = ""
+    model = DEEPSEEK_DEFAULT_MODEL
+    thinking = True
+    reasoning_effort = "high"
+
+    # 根据 preset 调整推理强度
+    if preset == "fast":
+        thinking = True
+        reasoning_effort = "medium"
+    elif preset in ("analysis", "debate", "audit"):
+        thinking = True
+        reasoning_effort = "high"
+
+    if custom_config:
+        api_key = custom_config.get("api_key", "")
+        base_url = custom_config.get("base_url", "")
+        if custom_config.get("model"):
+            model = custom_config["model"]
+
+    # 判断是否需要 JSON 结构化输出
+    response_format = None
+    if preset in ("analysis", "debate", "audit"):
+        # 在系统提示中要求 JSON 时，使用 json_object 模式提升一致性
+        has_json_instruct = any(
+            "json" in m.get("content", "").lower()
+            for m in messages
+            if m.get("role") == "system"
+        )
+        if has_json_instruct:
+            response_format = {"type": "json_object"}
+
+    return deepseek_chat(
+        messages=messages,
+        model=model,
+        max_tokens=max_tokens,
+        thinking=thinking,
+        reasoning_effort=reasoning_effort,
+        response_format=response_format,
+        api_key=api_key,
+        base_url=base_url,
+    )
 
 
 def ai_chat(
     messages: List[Dict[str, str]],
-    preset: str = "fast",
-    temperature: float = 0.7,
-    max_tokens: int = 1000
+    preset: str = "analysis",
+    temperature: float = 0.3,
+    max_tokens: int = 4000
 ) -> Optional[str]:
-    """
-    通用 AI 聊天接口（使用环境变量配置）
-    
-    Args:
-        messages: [{"role": "user", "content": "..."}]
-        preset: analysis | code | fast | chinese
-        temperature: 0-1
-        max_tokens: 最大输出长度
-    
-    Returns:
-        AI 回复文本，或 None
-    """
+    """通用 AI 聊天接口 (兼容旧签名)"""
     return ai_chat_with_config(messages, preset, temperature, max_tokens)
 
 
-def ai_chat_with_config(
-    messages: List[Dict[str, str]],
-    preset: str = "fast",
-    temperature: float = 0.7,
-    max_tokens: int = 1000,
-    custom_config: Dict[str, str] = None
-) -> Optional[str]:
-    """
-    通用 AI 聊天接口（支持自定义配置）
-    
-    Args:
-        messages: [{"role": "user", "content": "..."}]
-        preset: analysis | code | fast | chinese
-        temperature: 0-1
-        max_tokens: 最大输出长度
-        custom_config: 自定义配置 {"api_key": "...", "base_url": "...", "model": "..."}
-    
-    Returns:
-        AI 回复文本，或 None
-    """
-    if not LITELLM_AVAILABLE:
-        logger.warning("LiteLLM 未安装")
-        return None
-    
-    preset_config = MODEL_PRESETS.get(preset, MODEL_PRESETS["fast"])
-    model = preset_config["model"]
-    fallbacks = preset_config.get("fallback", [])
-    
-    # 优先使用自定义配置
-    api_key = None
-    base_url = None
-    if custom_config:
-        api_key = custom_config.get("api_key")
-        base_url = custom_config.get("base_url")
-        if custom_config.get("model"):
-            model = custom_config["model"]
-            fallbacks = []  # 自定义模型不使用 fallback
-            # OpenRouter 模型需要 openrouter/ 前缀
-            if base_url and "openrouter.ai" in base_url and not model.startswith("openrouter/"):
-                model = f"openrouter/{model}"
-            # 对于自定义 OpenAI 兼容 API，如果模型名不包含 /，添加 openai/ 前缀
-            elif base_url and "/" not in model:
-                model = f"openai/{model}"
-    
-    # 回退到环境变量
-    if not api_key:
-        api_key = os.environ.get("LITELLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.warning("未设置 AI API Key")
-        return None
-    
-    try:
-        kwargs = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "api_key": api_key,
-        }
-        if base_url:
-            kwargs["api_base"] = base_url
-        
-        logger.info("AI 请求参数: model=%s, base_url=%s, messages_count=%d", model, base_url, len(messages))
-        response = completion(**kwargs)
-        logger.info("AI 响应成功: %s", response)
-        if not response or not response.choices:
-            return None
-        msg = response.choices[0].message
-        # 推理模型（如 mimo）回复在 reasoning_content 而非 content
-        return msg.content or getattr(msg, "reasoning_content", None) or ""
-
-    except Exception as e:
-        # 尝试 fallback（仅当未指定自定义模型时）
-        if not custom_config or not custom_config.get("model"):
-            for fallback_model in fallbacks:
-                try:
-                    kwargs["model"] = fallback_model
-                    response = completion(**kwargs)
-                    if not response or not response.choices:
-                        continue
-                    msg = response.choices[0].message
-                    return msg.content or getattr(msg, "reasoning_content", None) or ""
-                except Exception as fb_e:
-                    logger.debug("AI fallback %s failed: %s", fallback_model, fb_e)
-                    continue
-
-        logger.warning("AI 回复失败 (%s): %s", type(e).__name__, e)
-        return None
-
-
 def analyze_large_trades(trade_summary: str, currency: str = "BTC") -> Optional[str]:
-    """
-    分析大宗交易，给出市场解读
-    
-    Args:
-        trade_summary: 交易数据摘要
-        currency: 币种
-    
-    Returns:
-        AI 分析文本
-    """
+    """分析大宗交易，给出市场解读"""
     prompt = f"""作为专业期权交易分析师，请分析以下{currency}大宗交易数据并给出市场解读:
 
 {trade_summary}
@@ -179,12 +263,11 @@ def analyze_large_trades(trade_summary: str, currency: str = "BTC") -> Optional[
 4. 对期权策略的建议
 
 请用简洁的中文回答，不超过200字。"""
-    
+
     return ai_chat(
         [{"role": "user", "content": prompt}],
         preset="analysis",
-        temperature=0.3,
-        max_tokens=500
+        max_tokens=800
     )
 
 
@@ -194,24 +277,13 @@ def suggest_roll_strategy(
     dvol_signal: str = "",
     funding_rate: str = ""
 ) -> Optional[str]:
-    """
-    智能滚仓策略建议
-    
-    Args:
-        current_position: 当前持仓信息
-        market_conditions: 市场条件
-        dvol_signal: DVOL 信号
-        funding_rate: 资金费率
-    
-    Returns:
-        策略建议
-    """
+    """智能滚仓策略建议"""
     macro_context = ""
     if dvol_signal:
         macro_context += f"- DVOL: {dvol_signal}\n"
     if funding_rate:
         macro_context += f"- 资金费率: {funding_rate}\n"
-    
+
     prompt = f"""作为专业期权滚仓策略师，请根据以下信息给出滚仓建议:
 
 当前持仓: {current_position}
@@ -225,12 +297,11 @@ def suggest_roll_strategy(
 4. 风险提示
 
 请用简洁的中文回答，不超过150字。"""
-    
+
     return ai_chat(
         [{"role": "user", "content": prompt}],
-        preset="chinese",
-        temperature=0.3,
-        max_tokens=400
+        preset="fast",
+        max_tokens=600
     )
 
 
@@ -240,42 +311,15 @@ def suggest_roll_strategy(
 
 def simple_openai_chat(
     messages: List[Dict[str, str]],
-    model: str = "gpt-4o-mini",
+    model: str = "",
     temperature: float = 0.7,
-    max_tokens: int = 1000
+    max_tokens: int = 4000
 ) -> Optional[str]:
-    """
-    简单 OpenAI 兼容接口 (不需要 LiteLLM)
-    """
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return None
-    
-    try:
-        import httpx
-        import json
-        
-        response = httpx.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            },
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        else:
-            logger.warning("OpenAI API 错误: %s", response.text)
-            return None
-            
-    except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-        logger.warning("OpenAI 请求失败: %s", str(e))
-        return None
+    """简单 OpenAI 兼容接口 (自动路由到配置的 API)"""
+    return deepseek_chat(
+        messages=messages,
+        model=model or DEEPSEEK_DEFAULT_MODEL,
+        max_tokens=max_tokens,
+        thinking=True,
+        reasoning_effort="high",
+    )

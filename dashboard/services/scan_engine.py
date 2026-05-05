@@ -421,18 +421,31 @@ async def quick_scan(params: QuickScanParams = None):
         logger.info("Quick scan: DataHub not ready, fetching Binance via REST")
         try:
             from binance_options import fetch_binance_options
-            binance_contracts = await asyncio.to_thread(
-                fetch_binance_options,
-                currency=currency,
-                min_dte=_p.min_dte,
-                max_dte=_p.max_dte,
-                max_delta=_p.max_delta,
-                strike=_p.strike,
-                min_vol=config.MIN_VOLUME_FILTER,
-                max_spread=config.MAX_SPREAD_PCT,
-                margin_ratio=_p.margin_ratio,
-                option_type=_p.option_type
-            )
+            opt_type = _p.option_type.upper()
+            if opt_type in ("ALL", "BOTH"):
+                puts = await asyncio.to_thread(
+                    fetch_binance_options, currency=currency,
+                    min_dte=_p.min_dte, max_dte=_p.max_dte, max_delta=_p.max_delta,
+                    strike=_p.strike, min_vol=config.MIN_VOLUME_FILTER,
+                    max_spread=config.MAX_SPREAD_PCT, margin_ratio=_p.margin_ratio,
+                    option_type="PUT"
+                )
+                calls = await asyncio.to_thread(
+                    fetch_binance_options, currency=currency,
+                    min_dte=_p.min_dte, max_dte=_p.max_dte, max_delta=_p.max_delta,
+                    strike=_p.strike, min_vol=config.MIN_VOLUME_FILTER,
+                    max_spread=config.MAX_SPREAD_PCT, margin_ratio=_p.margin_ratio,
+                    option_type="CALL"
+                )
+                binance_contracts = (puts if isinstance(puts, list) else []) + (calls if isinstance(calls, list) else [])
+            else:
+                binance_contracts = await asyncio.to_thread(
+                    fetch_binance_options,
+                    currency=currency, min_dte=_p.min_dte, max_dte=_p.max_dte,
+                    max_delta=_p.max_delta, strike=_p.strike,
+                    min_vol=config.MIN_VOLUME_FILTER, max_spread=config.MAX_SPREAD_PCT,
+                    margin_ratio=_p.margin_ratio, option_type=_p.option_type
+                )
             if not isinstance(binance_contracts, list):
                 binance_contracts = []
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
@@ -468,7 +481,9 @@ async def quick_scan(params: QuickScanParams = None):
             delta_val = s.get('delta', 0)
             iv = s.get('mark_iv', 0)
             oi = s.get('oi', 0)
-            if iv <= 0 or oi < 10:
+            if iv <= 0:
+                continue
+            if oi > 0 and oi < 10:
                 continue
             spread_pct = s.get('spread_pct', 0)
             opt_type = 'P' if 'P' in s.get('symbol', '').upper() else 'C'

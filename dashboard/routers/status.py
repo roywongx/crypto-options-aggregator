@@ -28,7 +28,7 @@ async def get_stats():
         rows = await execute_read_async("SELECT COUNT(*) FROM large_trades_history")
         total_trades = rows[0][0] if rows else 0
         from config import config as _cfg
-        _db = Path(_cfg.db_path)
+        _db = Path(_cfg.db_path())
         db_size = os.path.getsize(_db) if _db.exists() else 0
         return {
             "total_scans": total_scans,
@@ -44,6 +44,23 @@ async def get_stats():
 # 内存缓存: {currency: (data_dict, timestamp)}
 _latest_scan_cache: Dict[str, tuple] = {}
 _LATEST_SCAN_CACHE_TTL = 3  # 3秒缓存，减少高频轮询下的 JSON 反序列化开销
+
+
+def _compute_risk_level(contract: dict, spot: float) -> str:
+    """多因子风险评估 — 综合 delta、距离、DTE 判定"""
+    delta = abs(float(contract.get('delta', 0)))
+    strike = float(contract.get('strike', 0))
+    dte = float(contract.get('dte', 0))
+    if strike <= 0 or spot <= 0:
+        return "normal"
+    distance_pct = abs(strike - spot) / spot * 100
+    if delta > 0.30 and distance_pct < 3 and dte < 7:
+        return "extreme"
+    if delta > 0.30 and distance_pct < 5:
+        return "high"
+    if delta > 0.25 or (delta > 0.15 and distance_pct < 3):
+        return "warning"
+    return "normal"
 
 
 @router.get("/api/latest")
@@ -107,8 +124,16 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
     try:
         contracts = json.loads(rd.get('contracts_data', '')) if rd.get('contracts_data') else []
         if isinstance(contracts, list) and len(contracts) > MAX_CONTRACTS:
-            # 保留最优合约（按 APR 排序）
-            contracts = sorted(contracts, key=lambda x: x.get('apr', 0), reverse=True)[:MAX_CONTRACTS]
+            # 按 quality_score 排序：APR × (1 − delta) × min(1, DTE/14)
+            # 高 delta / 超短 DTE 的合约会被自动降权
+            spot_for_sort = rd.get('spot_price', 0) or 0
+            for c in contracts:
+                delta = abs(float(c.get('delta', 0.5)))
+                dte = max(1, float(c.get('dte', 1)))
+                apr = float(c.get('apr', 0))
+                q_score = apr * max(0.01, 1 - delta) * min(1.0, dte / 14)
+                c['quality_score'] = round(q_score, 2)
+            contracts = sorted(contracts, key=lambda x: x.get('quality_score', 0), reverse=True)[:MAX_CONTRACTS]
     except json.JSONDecodeError:
         contracts = []
 
@@ -117,6 +142,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
         floors = RiskFramework._get_floors()
         regular_floor = floors.get("regular", 0)
         margin_ratio = 0.20
+        spot = rd.get('spot_price', 0) or 0
         for c in contracts:
             if c.get("margin_required") is None:
                 strike = c.get("strike", 0)
@@ -128,6 +154,7 @@ async def get_latest_scan(currency: str = Query(default="BTC")):
                 c["capital_efficiency"] = round(prem / margin * 100, 1) if margin > 0 else 0
             if c.get("support_distance_pct") is None and c.get("option_type") in ("P", "PUT") and regular_floor > 0:
                 c["support_distance_pct"] = round((c.get("strike", 0) - regular_floor) / regular_floor * 100, 1)
+            c["risk_level"] = _compute_risk_level(c, spot)
     except (ImportError, ValueError, KeyError) as e:
         logger.warning("Margin enrichment failed: %s", e)
 
