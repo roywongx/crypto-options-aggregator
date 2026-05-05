@@ -43,11 +43,23 @@ def cleanup_old_records(conn: sqlite3.Connection, days: int = 30) -> dict:
     cursor.execute("DELETE FROM large_trades_history WHERE timestamp < ?", (cutoff_date,))
     trades_deleted = cursor.rowcount
 
+    cursor.execute("DELETE FROM perp_basis_history WHERE timestamp < ?", (cutoff_date,))
+    basis_deleted = cursor.rowcount
+
+    cursor.execute("DELETE FROM oi_history WHERE timestamp < ?", (cutoff_date,))
+    oi_deleted = cursor.rowcount
+
+    cursor.execute("DELETE FROM stablecoin_reserve_history WHERE timestamp < ?", (cutoff_date,))
+    stablecoin_deleted = cursor.rowcount
+
     conn.commit()
 
     return {
         "scans_deleted": scans_deleted,
         "trades_deleted": trades_deleted,
+        "basis_deleted": basis_deleted,
+        "oi_deleted": oi_deleted,
+        "stablecoin_deleted": stablecoin_deleted,
         "cutoff_date": cutoff_date.isoformat()
     }
 

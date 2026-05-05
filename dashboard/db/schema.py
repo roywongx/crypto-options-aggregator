@@ -68,6 +68,9 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_llm_analysis_currency_timestamp ON llm_analysis_results(currency, timestamp DESC)",
     "CREATE INDEX IF NOT EXISTS idx_llm_cache_lookup ON llm_analysis_cache(panel_id, currency, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage_log(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_perp_basis_currency_timestamp ON perp_basis_history(currency, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_oi_currency_timestamp ON oi_history(currency, timestamp DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_stablecoin_reserve_timestamp ON stablecoin_reserve_history(timestamp DESC)",
 ]
 
 SCHEMA_DEBATE_RESULTS = """
@@ -144,6 +147,41 @@ CREATE TABLE IF NOT EXISTS llm_usage_log (
 )
 """
 
+SCHEMA_PERP_BASIS_HISTORY = """
+CREATE TABLE IF NOT EXISTS perp_basis_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'BTC',
+    perp_price REAL NOT NULL,
+    spot_price REAL NOT NULL,
+    basis_annualized REAL NOT NULL,
+    funding_rate REAL
+)
+"""
+
+SCHEMA_OI_HISTORY = """
+CREATE TABLE IF NOT EXISTS oi_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'BTC',
+    open_interest_usd REAL NOT NULL,
+    price REAL NOT NULL,
+    oi_change_24h_pct REAL,
+    price_change_24h_pct REAL
+)
+"""
+
+SCHEMA_STABLECOIN_RESERVE_HISTORY = """
+CREATE TABLE IF NOT EXISTS stablecoin_reserve_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    exchange TEXT NOT NULL DEFAULT 'binance',
+    asset TEXT NOT NULL DEFAULT 'USDT',
+    balance REAL NOT NULL,
+    change_7d_pct REAL
+)
+"""
+
 SCAN_RECORDS_COLUMNS = ['dvol_signal', 'large_trades_details', 'contracts_data', 'top_contracts_data', 'raw_output']
 TRADE_HISTORY_COLUMNS = ['flow_label', 'notional_usd', 'delta', 'instrument_name', 'premium_usd', 'severity']
 
@@ -167,6 +205,9 @@ def init_database_schema(conn: sqlite3.Connection):
     cursor.execute(SCHEMA_LLM_ANALYSIS_RESULTS)
     cursor.execute(SCHEMA_LLM_ANALYSIS_CACHE)
     cursor.execute(SCHEMA_LLM_USAGE_LOG)
+    cursor.execute(SCHEMA_PERP_BASIS_HISTORY)
+    cursor.execute(SCHEMA_OI_HISTORY)
+    cursor.execute(SCHEMA_STABLECOIN_RESERVE_HISTORY)
 
     for idx in INDEXES:
         cursor.execute(idx)
