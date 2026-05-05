@@ -2918,11 +2918,12 @@ function renderNetFlowChart(data) {
     const spot = data.spot || 0;
     const maxNotional = Math.max(...dist.map(d => Math.abs((d.put || 0) - (d.call || 0))), 1);
 
-    // Sort by strike and take top 20
-    const filteredDist = dist
+    // 按距现价最近排序，取最近 20 个行权价（上下各半）
+    const withDist = dist
         .filter(d => d.strike > 0 && (d.put > 0 || d.call > 0))
-        .sort((a, b) => a.strike - b.strike)
-        .slice(0, 20);
+        .map(d => ({...d, _gap: Math.abs((d.strike || 0) - spot)}))
+        .sort((a, b) => a._gap - b._gap);
+    const filteredDist = withDist.slice(0, 20).sort((a, b) => a.strike - b.strike);
 
     if (filteredDist.length === 0) {
         chartEl.innerHTML = '<div class="text-gray-500 text-center py-4">暂无行权价分布数据</div>';
