@@ -1,133 +1,354 @@
 """
-衍生品市场指标服务 v1.0
-基于 Binance Futures API + Deribit API 的衍生品过热检测系统
+加密原生衍生品指标服务 v2.0
+基于 Binance Futures/Spot API 的衍生品市场分析系统
 
-核心指标:
-1. Sharpe Ratio: 风险调整后回报（Binance 日K线）
-2. Funding Rate 热度: 资金费率情绪（Binance Futures）
-3. 期权 OI 变化: 未平仓合约总量趋势（Deribit）
-4. 期货/现货成交量比率: 杠杆热度（Binance）
-
-学术参考:
-- Sharpe Ratio < -1: 历史底部信号
-- Funding Rate > 0.1%: 多头过热
-- Funding Rate < -0.05%: 空头过度
-- Futures/Spot Volume > 3: 杠杆过高
+核心指标（8个）:
+1. 永续基差 (Perp Basis): 年化资金成本
+2. OI-价格背离 (OI-Price Divergence): 量价关系
+3. 资金费率波动率 (Funding Rate Volatility): 情绪稳定性
+4. 清算热力等级 (Liquidation Heat): 加密特有"痛苦指数"
+5. 稳定币交易所储备 (Stablecoin Exchange Reserve): 买盘火力
+6. 期货/现货成交量比 (Futures/Spot Ratio): 保留但重校准阈值
+7. Sharpe Ratio: 保留原有逻辑
+8. 综合过热评估: 加密原生评分
 """
-import httpx
-import logging
 import math
-from typing import Dict, Any, Optional, List, Tuple
+import logging
+from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
+
 from services.api_retry import request_with_retry
+from services.crypto_thresholds import CryptoThresholds
+from services.perp_basis_analyzer import PerpBasisAnalyzer
+from db.connection import execute_read, execute_write
+from config import config
 
 logger = logging.getLogger(__name__)
 
 
 class DerivativeMetrics:
-    """衍生品市场指标服务"""
-    
+    """加密原生衍生品市场指标服务"""
+
+    # ============================================================
+    # 指标 1: 永续基差
+    # ============================================================
+
     @classmethod
-    def get_all_metrics(cls) -> Dict[str, Any]:
-        """获取所有衍生品指标"""
-        # 获取 Sharpe Ratio
-        sharpe_14d, sharpe_30d = cls._calc_sharp_ratio()
-        
-        # 获取资金费率
-        funding_rate, funding_signal = cls._get_funding_rate()
-        
-        # 获取期货/现货成交量比率
-        vol_ratio, vol_ratio_signal = cls._calc_futures_spot_volume_ratio()
-        
-        # 获取衍生品过热综合评分
-        overheating = cls._assess_derivatives_overheating(
-            sharpe_14d=sharpe_14d, sharpe_30d=sharpe_30d,
-            funding_rate=funding_rate, vol_ratio=vol_ratio
-        )
-        
-        return {
-            "sharpe_ratio_14d": round(sharpe_14d, 2) if sharpe_14d is not None else None,
-            "sharpe_ratio_30d": round(sharpe_30d, 2) if sharpe_30d is not None else None,
-            "sharpe_signal_14d": cls._interpret_sharpe(sharpe_14d) if sharpe_14d is not None else None,
-            "sharpe_signal_30d": cls._interpret_sharpe(sharpe_30d) if sharpe_30d is not None else None,
-            "funding_rate": round(funding_rate, 5) if funding_rate is not None else None,
-            "funding_rate_pct": round(funding_rate * 100, 3) if funding_rate is not None else None,
-            "funding_signal": funding_signal,
-            "futures_spot_ratio": round(vol_ratio, 2) if vol_ratio is not None else None,
-            "futures_spot_signal": vol_ratio_signal,
-            "overheating_assessment": overheating,
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    @classmethod
-    def _calc_sharp_ratio(cls) -> Tuple[Optional[float], Optional[float]]:
-        """
-        计算 Sharpe Ratio（7天/30天）
-        Sharpe = (平均收益 - 无风险利率) / 收益标准差
-        
-        简化版: 假设无风险利率 = 0
-        使用 Binance 日K线数据
-        
-        学术参考:
-        - Sharpe < -1: 极端负值（历史底部信号）
-        - -1 ~ 0: 负回报区（可能是底部）
-        - 0 ~ 1: 正回报区（正常）
-        - > 1: 优异回报（可能过热）
-        """
+    def _get_perp_basis(cls, currency: str = "BTC") -> Dict[str, Any]:
         try:
-            # 获取 90 天 K线（用于计算 7天 和 30天 Sharpe）
+            return PerpBasisAnalyzer.analyze(currency)
+        except Exception as e:
+            logger.warning("Perp basis failed: %s", e)
+            return {"error": str(e), "basis_annualized": 0, "perp_price": 0, "spot_price": 0}
+
+    # ============================================================
+    # 指标 2: OI-价格背离
+    # ============================================================
+
+    @classmethod
+    def _get_oi_price_divergence(cls, symbol: str = "BTCUSDT") -> Dict[str, Any]:
+        try:
+            oi_resp = request_with_retry(
+                "https://fapi.binance.com/fapi/v1/openInterest",
+                params={"symbol": symbol},
+                timeout=10, verify=False, max_retries=2
+            )
+            current_oi = float(oi_resp.json().get("openInterest", 0))
+
+            price_resp = request_with_retry(
+                "https://api.binance.com/api/v3/ticker/price",
+                params={"symbol": symbol},
+                timeout=10, verify=False, max_retries=2
+            )
+            current_price = float(price_resp.json().get("price", 0))
+
+            rows = execute_read(
+                "SELECT open_interest_usd, price FROM oi_history "
+                "WHERE currency='BTC' ORDER BY timestamp DESC LIMIT 1"
+            )
+
+            oi_24h_ago = current_oi
+            price_24h_ago = current_price
+            if rows:
+                oi_24h_ago = rows[0]["open_interest_usd"] or current_oi
+                price_24h_ago = rows[0]["price"] or current_price
+
+            oi_change_pct = ((current_oi - oi_24h_ago) / oi_24h_ago * 100) if oi_24h_ago > 0 else 0
+            price_change_pct = ((current_price - price_24h_ago) / price_24h_ago * 100) if price_24h_ago > 0 else 0
+
+            execute_write(
+                "INSERT INTO oi_history (timestamp, currency, open_interest_usd, price, oi_change_24h_pct, price_change_24h_pct) "
+                "VALUES (?, 'BTC', ?, ?, ?, ?)",
+                (datetime.now().isoformat(), current_oi, current_price,
+                 round(oi_change_pct, 2), round(price_change_pct, 2))
+            )
+
+            oi_direction = "flat"
+            price_direction = "flat"
+            if oi_change_pct > 1.5:
+                oi_direction = "up"
+            elif oi_change_pct < -1.5:
+                oi_direction = "down"
+            if price_change_pct > 0.5:
+                price_direction = "up"
+            elif price_change_pct < -0.5:
+                price_direction = "down"
+
+            divergence = "none"
+            if oi_direction == "up" and price_direction == "down":
+                divergence = "bearish"
+            elif oi_direction == "up" and price_direction == "flat":
+                divergence = "breakout_looming"
+            elif oi_direction == "down" and price_direction == "up":
+                divergence = "short_squeeze"
+            elif oi_direction == "down" and price_direction == "down":
+                divergence = "long_capitulation"
+            elif oi_direction == "up" and price_direction == "up":
+                divergence = "bullish"
+
+            labels = {
+                "bearish": "OI↑价格↓（空头加仓=看空）",
+                "short_squeeze": "OI↓价格↑（空头平仓=逼空风险）",
+                "bullish": "OI↑价格↑（多头加仓=看多）",
+                "long_capitulation": "OI↓价格↓（多头平仓=多杀多）",
+                "breakout_looming": "OI↑价格→（分歧加大=即将突破）",
+                "none": "无背离",
+            }
+
+            return {
+                "current_oi": current_oi,
+                "current_price": current_price,
+                "oi_change_24h_pct": round(oi_change_pct, 2),
+                "price_change_24h_pct": round(price_change_pct, 2),
+                "oi_direction": oi_direction,
+                "price_direction": price_direction,
+                "divergence": divergence,
+                "divergence_label": labels.get(divergence, "无背离"),
+            }
+        except Exception as e:
+            logger.warning("OI-price divergence fetch failed: %s", e)
+            return {"error": str(e), "divergence": "unknown"}
+
+    # ============================================================
+    # 指标 3: 资金费率波动率
+    # ============================================================
+
+    @classmethod
+    def _get_funding_volatility(cls, symbol: str = "BTCUSDT") -> Dict[str, Any]:
+        try:
+            rows = execute_read(
+                "SELECT funding_rate FROM perp_basis_history WHERE currency='BTC' "
+                "ORDER BY timestamp DESC LIMIT 21"
+            )
+            if not rows or len(rows) < 5:
+                resp = request_with_retry(
+                    "https://fapi.binance.com/fapi/v1/premiumIndex",
+                    params={"symbol": symbol},
+                    timeout=10, verify=False, max_retries=2
+                )
+                current_rate = float(resp.json().get("lastFundingRate", 0))
+                return {
+                    "current_funding_rate_pct": round(current_rate * 100, 4),
+                    "volatility_7d_pct": 0.0,
+                    "signal": "insufficient_data",
+                    "label": "数据不足（需>5个数据点）",
+                }
+
+            rates = [r["funding_rate"] for r in rows if r["funding_rate"] is not None]
+            if len(rates) < 5:
+                return {"error": "insufficient_data"}
+
+            mean_rate = sum(rates) / len(rates)
+            variance = sum((r - mean_rate) ** 2 for r in rates) / (len(rates) - 1)
+            std_rate = math.sqrt(variance)
+            volatility_pct = round(std_rate * 100, 4)
+
+            fixed = CryptoThresholds.get_fixed_threshold("funding_volatility", volatility_pct)
+
+            return {
+                "current_funding_rate_pct": round(rates[0] * 100, 4),
+                "volatility_7d_pct": volatility_pct,
+                "mean_funding_rate_7d_pct": round(mean_rate * 100, 4),
+                "data_points": len(rates),
+                "signal": fixed.get("signal", "normal"),
+                "label": fixed.get("label", ""),
+            }
+        except Exception as e:
+            logger.warning("Funding volatility calc failed: %s", e)
+            return {"error": str(e)}
+
+    # ============================================================
+    # 指标 4: 清算热力等级
+    # ============================================================
+
+    @classmethod
+    def _get_liquidation_heat(cls, symbol: str = "BTCUSDT") -> Dict[str, Any]:
+        try:
+            total_long_usd = 0.0
+            total_short_usd = 0.0
+
+            for pos_type in ("LONG", "SHORT"):
+                try:
+                    resp = request_with_retry(
+                        "https://fapi.binance.com/fapi/v1/forceOrders",
+                        params={"symbol": symbol, "autoCloseType": "LIQUIDATION",
+                                "startTime": int((datetime.now().timestamp() - 3600) * 1000),
+                                "limit": 100},
+                        timeout=10, verify=False, max_retries=1
+                    )
+                    orders = resp.json()
+                    for order in orders:
+                        vol = float(order.get("executedQty", 0))
+                        if pos_type == "LONG":
+                            total_long_usd += vol
+                        else:
+                            total_short_usd += vol
+                except Exception:
+                    pass
+
+            total_usd = total_long_usd + total_short_usd
+            fixed = CryptoThresholds.get_fixed_threshold("liquidation_heat", total_usd)
+            direction_bias = ((total_long_usd - total_short_usd) / total_usd) if total_usd > 0 else 0
+
+            return {
+                "total_liquidation_1h_usd": round(total_usd),
+                "long_liquidation_usd": round(total_long_usd),
+                "short_liquidation_usd": round(total_short_usd),
+                "direction_bias": round(direction_bias, 2),
+                "heat_level": fixed.get("signal", "L0"),
+                "label": fixed.get("label", "正常"),
+            }
+        except Exception as e:
+            logger.warning("Liquidation heat fetch failed: %s", e)
+            return {"error": str(e), "heat_level": "L0"}
+
+    # ============================================================
+    # 指标 5: 稳定币交易所储备
+    # ============================================================
+
+    @classmethod
+    def _get_stablecoin_reserve(cls) -> Dict[str, Any]:
+        try:
+            resp = request_with_retry(
+                "https://api.coingecko.com/api/v3/coins/tether",
+                params={"localization": "false", "tickers": "false", "community_data": "false",
+                        "developer_data": "false"},
+                timeout=15, verify=False, max_retries=1
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                market_cap = data.get("market_data", {}).get("market_cap", {}).get("usd", 0)
+                if market_cap > 0:
+                    estimated_reserve = market_cap * 0.175
+                    rows = execute_read(
+                        "SELECT balance FROM stablecoin_reserve_history ORDER BY timestamp DESC LIMIT 1"
+                    )
+                    prev_balance = estimated_reserve
+                    if rows:
+                        prev_balance = rows[0]["balance"] or estimated_reserve
+                    change_7d = ((estimated_reserve - prev_balance) / prev_balance * 100) if prev_balance > 0 else 0
+
+                    execute_write(
+                        "INSERT INTO stablecoin_reserve_history (timestamp, exchange, asset, balance, change_7d_pct) "
+                        "VALUES (?, 'global', 'USDT', ?, ?)",
+                        (datetime.now().isoformat(), estimated_reserve, round(change_7d, 2))
+                    )
+
+                    fixed = CryptoThresholds.get_fixed_threshold("stablecoin_flow", change_7d)
+                    return {
+                        "estimated_reserve_usdt": round(estimated_reserve),
+                        "change_7d_pct": round(change_7d, 2),
+                        "signal": fixed.get("signal", "neutral"),
+                        "label": fixed.get("label", "中性"),
+                        "source": "coingecko_estimated",
+                    }
+        except Exception as e:
+            logger.debug("Stablecoin reserve via CoinGecko failed: %s", e)
+
+        return {"estimated_reserve_usdt": 0, "change_7d_pct": 0,
+                "signal": "unknown", "label": "数据不可用", "source": "none"}
+
+    # ============================================================
+    # 指标 6: 期货/现货成交量比（加密校准阈值）
+    # ============================================================
+
+    @classmethod
+    def _get_futures_spot_volume_ratio(cls, symbol: str = "BTCUSDT") -> Dict[str, Any]:
+        try:
+            spot_resp = request_with_retry(
+                "https://api.binance.com/api/v3/ticker/24hr",
+                params={"symbol": symbol},
+                timeout=10, verify=False, max_retries=2
+            )
+            spot_volume = float(spot_resp.json().get("volume", 0))
+
+            futures_resp = request_with_retry(
+                "https://fapi.binance.com/fapi/v1/ticker/24hr",
+                params={"symbol": symbol},
+                timeout=10, verify=False, max_retries=2
+            )
+            futures_volume = float(futures_resp.json().get("volume", 0))
+
+            if spot_volume <= 0:
+                return {"error": "spot_volume_zero", "ratio": 0}
+
+            ratio = round(futures_volume / spot_volume, 2)
+            fixed = CryptoThresholds.get_fixed_threshold("futures_spot_ratio", ratio)
+
+            return {
+                "futures_volume": futures_volume,
+                "spot_volume": spot_volume,
+                "ratio": ratio,
+                "signal": fixed.get("signal", "normal"),
+                "label": fixed.get("label", "正常加密市场"),
+            }
+        except Exception as e:
+            logger.warning("Futures/spot ratio fetch failed: %s", e)
+            return {"error": str(e), "ratio": 0}
+
+    # ============================================================
+    # 指标 7: Sharpe Ratio（保留原逻辑）
+    # ============================================================
+
+    @classmethod
+    def _get_sharpe_ratio(cls) -> Tuple[Optional[float], Optional[float]]:
+        try:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1d", "limit": 90},
                 timeout=10, verify=False, max_retries=2
             )
             klines = resp.json()
-            
             if len(klines) < 30:
                 return None, None
-            
-            # 计算日收益率
+
             closes = [float(k[4]) for k in klines]
             returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
-            
-            # 7 天 Sharpe
+
             returns_14d = returns[-14:]
             sharpe_14d = cls._calc_single_sharpe(returns_14d)
-            
-            # 30 天 Sharpe
+
             returns_30d = returns[-30:]
             sharpe_30d = cls._calc_single_sharpe(returns_30d)
-            
+
             return sharpe_14d, sharpe_30d
-        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("Sharpe Ratio计算失败: %s", e)
-        
-        return None, None
-    
+        except Exception as e:
+            logger.warning("Sharpe Ratio calc failed: %s", e)
+            return None, None
+
     @classmethod
-    def _calc_single_sharpe(cls, returns: List[float]) -> Optional[float]:
-        """计算单个 Sharpe Ratio"""
+    def _calc_single_sharpe(cls, returns) -> Optional[float]:
         if not returns or len(returns) < 2:
             return None
-        
-        # 平均日收益
         avg_return = sum(returns) / len(returns)
-        
-        # 日收益标准差
         variance = sum((r - avg_return) ** 2 for r in returns) / (len(returns) - 1)
         std_dev = math.sqrt(variance)
-        
         if std_dev == 0:
             return 0.0
-        
-        # Sharpe = (avg_return / std_dev) * sqrt(365)
-        sharpe = (avg_return / std_dev) * math.sqrt(365)
-        
-        return round(sharpe, 2)
-    
+        return round((avg_return / std_dev) * math.sqrt(365), 2)
+
     @classmethod
     def _interpret_sharpe(cls, sharpe: Optional[float]) -> str:
-        """解读 Sharpe Ratio 信号"""
         if sharpe is None:
             return "--"
         if sharpe < -2:
@@ -142,217 +363,135 @@ class DerivativeMetrics:
             return "优异回报（警惕）"
         else:
             return "极度优异（可能过热）"
-    
+
+    # ============================================================
+    # 综合评估 + 公共 API（向后兼容）
+    # ============================================================
+
     @classmethod
-    def _get_funding_rate(cls) -> Tuple[Optional[float], Optional[str]]:
-        """
-        获取资金费率（Funding Rate）
-        Binance Futures 每 8 小时结算一次
-        
-        正常范围: 0.01% (0.0001)
-        过热阈值: > 0.1% (0.001) 或 < -0.05% (-0.0005)
-        """
-        try:
-            resp = request_with_retry(
-                "https://fapi.binance.com/fapi/v1/premiumIndex",
-                params={"symbol": "BTCUSDT"},
-                timeout=10, verify=False, max_retries=2
-            )
-            data = resp.json()
-            
-            funding_rate = float(data.get("lastFundingRate", 0))
-            
-            # 信号判定
-            if funding_rate > 0.002:
-                signal = "极度多头过热（警惕回调）"
-            elif funding_rate > 0.001:
-                signal = "多头过热（杠杆过高）"
-            elif funding_rate > 0.0005:
-                signal = "多头偏多（正常偏高）"
-            elif funding_rate > 0.0001:
-                signal = "轻微多头（正常）"
-            elif funding_rate > -0.0001:
-                signal = "中性（正常范围）"
-            elif funding_rate > -0.0005:
-                signal = "轻微空头（正常偏低）"
-            elif funding_rate > -0.001:
-                signal = "空头偏多（关注反弹）"
-            else:
-                signal = "极度空头（可能底部）"
-            
-            return funding_rate, signal
-        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("资金费率获取失败: %s", e)
-        
-        return None, None
-    
+    def get_all_metrics(cls, currency: str = "BTC") -> Dict[str, Any]:
+        """获取所有衍生品指标（向后兼容旧API）"""
+        perp_basis = cls._get_perp_basis(currency)
+        oi_div = cls._get_oi_price_divergence()
+        fund_vol = cls._get_funding_volatility()
+        liq_heat = cls._get_liquidation_heat()
+        stablecoin = cls._get_stablecoin_reserve()
+        vol_ratio = cls._get_futures_spot_volume_ratio()
+        sharpe_14d, sharpe_30d = cls._get_sharpe_ratio()
+
+        assessment = cls._assess_crypto_overheating(
+            perp_basis=perp_basis,
+            oi_div=oi_div,
+            fund_vol=fund_vol,
+            liq_heat=liq_heat,
+            stablecoin=stablecoin,
+            vol_ratio=vol_ratio,
+            sharpe_14d=sharpe_14d,
+        )
+
+        return {
+            # 新指标
+            "perp_basis": perp_basis,
+            "oi_price_divergence": oi_div,
+            "funding_volatility": fund_vol,
+            "liquidation_heat": liq_heat,
+            "stablecoin_reserve": stablecoin,
+            "futures_spot_ratio": vol_ratio,
+            # 旧指标（向后兼容）
+            "sharpe_ratio_14d": sharpe_14d,
+            "sharpe_ratio_30d": sharpe_30d,
+            "sharpe_signal_14d": cls._interpret_sharpe(sharpe_14d),
+            "sharpe_signal_30d": cls._interpret_sharpe(sharpe_30d),
+            "funding_rate": perp_basis.get("funding_rate"),
+            "funding_rate_pct": perp_basis.get("funding_rate_pct"),
+            "funding_signal": _legacy_funding_signal(perp_basis.get("funding_rate", 0)),
+            "futures_spot_signal": vol_ratio.get("label", ""),
+            "overheating_assessment": assessment,
+            "timestamp": datetime.now().isoformat(),
+        }
+
     @classmethod
-    def _calc_futures_spot_volume_ratio(cls) -> Tuple[Optional[float], Optional[str]]:
-        """
-        计算期货/现货成交量比率
-        用于衡量市场杠杆热度
-        
-        数据来源:
-        - 期货 24h 成交量: Binance Futures
-        - 现货 24h 成交量: Binance Spot
-        
-        阈值:
-        - > 5: 极度杠杆化
-        - 3 ~ 5: 杠杆偏高
-        - 1.5 ~ 3: 正常
-        - < 1.5: 杠杆较低（现货主导）
-        """
-        try:
-            # 现货 24h 成交量
-            spot_resp = request_with_retry(
-                "https://api.binance.com/api/v3/ticker/24hr",
-                params={"symbol": "BTCUSDT"},
-                timeout=10, verify=False, max_retries=2
-            )
-            spot_data = spot_resp.json()
-            spot_volume = float(spot_data.get("volume", 0))  # BTC 数量
-            
-            # 期货 24h 成交量
-            futures_resp = request_with_retry(
-                "https://fapi.binance.com/fapi/v1/ticker/24hr",
-                params={"symbol": "BTCUSDT"},
-                timeout=10, verify=False, max_retries=2
-            )
-            futures_data = futures_resp.json()
-            futures_volume = float(futures_data.get("volume", 0))  # BTC 数量
-            
-            if spot_volume <= 0:
-                return None, None
-            
-            ratio = futures_volume / spot_volume
-            
-            # 信号判定
-            if ratio > 5:
-                signal = "极度杠杆化（过热风险）"
-            elif ratio > 3:
-                signal = "杠杆偏高（警惕）"
-            elif ratio > 1.5:
-                signal = "正常范围"
-            else:
-                signal = "现货主导（健康）"
-            
-            return round(ratio, 2), signal
-        except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-            logger.warning("期货/现货比率获取失败: %s", e)
-        
-        return None, None
-    
-    @classmethod
-    def _assess_derivatives_overheating(cls, sharpe_14d=None, sharpe_30d=None,
-                                          funding_rate=None, vol_ratio=None) -> Dict[str, Any]:
-        """
-        衍生品市场过热综合评估
-        
-        评分规则:
-        - Sharpe < -1: +10（底部信号）
-        - Sharpe > 2: -10（过热信号）
-        - Funding Rate > 0.001: -10（多头过热）
-        - Funding Rate < -0.001: +10（空头过度，可能底部）
-        - Vol Ratio > 3: -5（杠杆偏高）
-        """
+    def _assess_crypto_overheating(cls, perp_basis, oi_div, fund_vol,
+                                    liq_heat, stablecoin, vol_ratio, sharpe_14d) -> Dict[str, Any]:
+        """加密原生过热综合评估"""
         score = 0
         signals = []
-        
-        # 1. Sharpe 14d 评分
-        if sharpe_14d is not None:
-            if sharpe_14d < -1:
-                score += 10
-                signals.append(("🔴", f"Sharpe 14d={sharpe_14d}（底部）", "bottom"))
-            elif sharpe_14d < 0:
-                score += 3
-                signals.append(("🟡", f"Sharpe 14d={sharpe_14d}（负值）", "neutral"))
-            elif sharpe_14d < 2:
-                score -= 2
-                signals.append(("🟢", f"Sharpe 14d={sharpe_14d}（正常）", "neutral"))
-            else:
-                score -= 10
-                signals.append(("⚠️", f"Sharpe 14d={sharpe_14d}（过热）", "top"))
-        
-        # 2. Sharpe 30d 评分
-        if sharpe_30d is not None:
-            if sharpe_30d < -1:
-                score += 10
-                signals.append(("🔴", f"Sharpe 30d={sharpe_30d}（底部）", "bottom"))
-            elif sharpe_30d < 0:
-                score += 3
-                signals.append(("🟡", f"Sharpe 30d={sharpe_30d}（负值）", "neutral"))
-            elif sharpe_30d < 2:
-                score -= 2
-                signals.append(("🟢", f"Sharpe 30d={sharpe_30d}（正常）", "neutral"))
-            else:
-                score -= 10
-                signals.append(("⚠️", f"Sharpe 30d={sharpe_30d}（过热）", "top"))
-        
-        # 3. 资金费率评分
-        if funding_rate is not None:
-            if funding_rate > 0.002:
-                score -= 10
-                signals.append(("⚠️", "资金费率极度多头", "top"))
-            elif funding_rate > 0.001:
-                score -= 7
-                signals.append(("⚠️", "资金费率过热", "top"))
-            elif funding_rate < -0.001:
-                score += 8
-                signals.append(("🔴", "资金费率极度空头（底部）", "bottom"))
-            elif funding_rate < -0.0005:
-                score += 5
-                signals.append(("🟡", "资金费率偏空", "bottom"))
-            else:
-                score -= 1
-                signals.append(("🟢", "资金费率正常", "neutral"))
-        
-        # 4. 期货/现货比率评分
-        if vol_ratio is not None:
-            if vol_ratio > 5:
-                score -= 5
-                signals.append(("⚠️", "杠杆极度偏高", "top"))
-            elif vol_ratio > 3:
-                score -= 3
-                signals.append(("⚠️", "杠杆偏高", "top"))
-            elif vol_ratio > 1.5:
-                score -= 1
-                signals.append(("🟢", "杠杆正常", "neutral"))
-            else:
-                score += 3
-                signals.append(("🟢", "现货主导（健康）", "neutral"))
-        
-        # 综合判定
-        if score >= 15:
-            level = "STRONG_BOTTOM"
-            name = "衍生品底部信号"
-            icon = "🔴"
-            color = "text-red-400"
-            advice = "衍生品市场显示底部特征，关注做多机会"
-        elif score >= 5:
-            level = "BOTTOM"
-            name = "潜在底部"
-            icon = "🟡"
-            color = "text-yellow-400"
-            advice = "衍生品指标偏负面，可能接近底部"
-        elif score >= -5:
-            level = "NEUTRAL"
-            name = "中性"
-            icon = "⚪"
-            color = "text-gray-400"
-            advice = "衍生品市场处于正常状态"
-        elif score >= -15:
-            level = "OVERHEATED"
-            name = "过热警告"
-            icon = "⚠️"
-            color = "text-orange-400"
-            advice = "衍生品过热，注意风险，降低杠杆"
+
+        # 1. 永续基差
+        basis = perp_basis.get("basis_annualized", 0) if isinstance(perp_basis, dict) else 0
+        if basis > config.PERP_BASIS_THRESHOLD_EXTREME:
+            score -= 10
+            signals.append({"emoji": "⚠️", "text": f"永续基差{basis}%极度投机", "type": "overheat"})
+        elif basis > config.PERP_BASIS_THRESHOLD_HIGH:
+            score -= 5
+            signals.append({"emoji": "⚠️", "text": f"永续基差{basis}%偏高", "type": "overheat"})
+        elif basis < -2:
+            score += 5
+            signals.append({"emoji": "🔴", "text": f"永续基差{basis}%（现货溢价=看空）", "type": "bearish"})
         else:
-            level = "EXTREME_OVERHEAT"
-            name = "极度过热"
-            icon = "🔴"
-            color = "text-red-400"
-            advice = "衍生品极度过热，立即降低仓位暴露"
-        
+            signals.append({"emoji": "🟢", "text": f"永续基差{basis}%正常", "type": "neutral"})
+
+        # 2. OI-价格背离
+        div = oi_div.get("divergence", "none") if isinstance(oi_div, dict) else "none"
+        if div == "bearish":
+            score -= 7
+            signals.append({"emoji": "🔴", "text": "OI↑价格↓空头加仓", "type": "bearish"})
+        elif div == "long_capitulation":
+            score -= 5
+            signals.append({"emoji": "⚠️", "text": "OI↓价格↓多杀多", "type": "bearish"})
+        elif div == "short_squeeze":
+            score += 5
+            signals.append({"emoji": "🟢", "text": "OI↓价格↑逼空进行中", "type": "bullish"})
+        elif div == "bullish":
+            score += 3
+            signals.append({"emoji": "🟢", "text": "OI↑价格↑多头加仓", "type": "bullish"})
+
+        # 3. 资金费率波动率
+        fv_signal = fund_vol.get("signal", "normal") if isinstance(fund_vol, dict) else "normal"
+        if fv_signal == "extreme":
+            score -= 5
+            signals.append({"emoji": "⚠️", "text": "费率波动剧烈（拐点预警）", "type": "overheat"})
+
+        # 4. 清算热力
+        liq_level = liq_heat.get("heat_level", "L0") if isinstance(liq_heat, dict) else "L0"
+        liq_bias = liq_heat.get("direction_bias", 0) if isinstance(liq_heat, dict) else 0
+        if liq_level == "L3":
+            score -= 8
+            signals.append({"emoji": "🔴", "text": "L3清算高压", "type": "risk"})
+        elif liq_level == "L2":
+            score -= 4
+            signals.append({"emoji": "⚠️", "text": "L2中度清算压力", "type": "risk"})
+        if liq_bias > 0.3:
+            score += 3
+            signals.append({"emoji": "🟢", "text": "多头痛苦（潜在底部）", "type": "bottom"})
+
+        # 5. 稳定币储备
+        sc_signal = stablecoin.get("signal", "neutral") if isinstance(stablecoin, dict) else "neutral"
+        if sc_signal == "strong_inflow":
+            score += 4
+            signals.append({"emoji": "🟢", "text": "稳定币大量流入", "type": "bullish"})
+        elif sc_signal in ("outflow", "strong_outflow"):
+            score -= 3
+            signals.append({"emoji": "⚠️", "text": "稳定币流出", "type": "bearish"})
+
+        # 6. 期货/现货比（降权）
+        ratio = vol_ratio.get("ratio", 0) if isinstance(vol_ratio, dict) else 0
+        if ratio > config.FUTURES_SPOT_RATIO_EXTREME:
+            score -= 3
+            signals.append({"emoji": "⚠️", "text": f"比值{ratio}x偏高", "type": "overheat"})
+
+        # 综合判定
+        if score >= 8:
+            level, name, icon, color, advice = "STRONG_BOTTOM", "衍生品底部信号强", "🟢", "text-green-400", "衍生品信号偏多"
+        elif score >= 3:
+            level, name, icon, color, advice = "BOTTOM", "潜在底部", "🟢", "text-green-400", "衍生品指标偏正面"
+        elif score >= -3:
+            level, name, icon, color, advice = "NEUTRAL", "中性", "⚪", "text-gray-400", "衍生品市场处于正常状态"
+        elif score >= -8:
+            level, name, icon, color, advice = "OVERHEATED", "过热警告", "⚠️", "text-orange-400", "衍生品过热，注意风险"
+        else:
+            level, name, icon, color, advice = "EXTREME_OVERHEAT", "极度过热", "🔴", "text-red-400", "衍生品极度过热"
+
         return {
             "score": score,
             "level": level,
@@ -360,5 +499,26 @@ class DerivativeMetrics:
             "icon": icon,
             "color": color,
             "advice": advice,
-            "signals": signals
+            "signals": signals,
+            "note": "基于加密原生指标体系（永续基差+OI背离+清算数据+稳定币流动+费率波动率）",
         }
+
+
+def _legacy_funding_signal(funding_rate: float) -> str:
+    """向后兼容的资金费率信号（旧 API 调用者依赖此字段）"""
+    if funding_rate > 0.002:
+        return "极度多头过热（警惕回调）"
+    elif funding_rate > 0.001:
+        return "多头过热（杠杆过高）"
+    elif funding_rate > 0.0005:
+        return "多头偏多（正常偏高）"
+    elif funding_rate > 0.0001:
+        return "轻微多头（正常）"
+    elif funding_rate > -0.0001:
+        return "中性（正常范围）"
+    elif funding_rate > -0.0005:
+        return "轻微空头（正常偏低）"
+    elif funding_rate > -0.001:
+        return "空头偏多（关注反弹）"
+    else:
+        return "极度空头（可能底部）"
