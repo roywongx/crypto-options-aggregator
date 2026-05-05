@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Python-3.13+-blue?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Binance+Deribit-orange?logo=bitcoin" alt="Platform">
-  <img src="https://img.shields.io/badge/Tests-141_passing-149e61" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-163_passing-149e61" alt="Tests">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
 </p>
 
@@ -21,8 +21,8 @@ A high-performance options trading terminal purpose-built for **Sell Put / Cover
 
 为 Sell Put / Covered Call / Wheel 策略交易者打造的高性能期权交易终端。实时聚合币安和 Deribit 期权链，按风险调整收益率（保证金 APR）评分，提供从规则引擎到 LLM 深度分析的多层决策支持。
 
-- **141 tests passing** · **44 services** · **14 API modules** · **16 analysis panels**
-- **141 个测试通过** · **44 个服务模块** · **14 个 API 模块** · **16 个分析面板**
+- **163 tests passing** · **47 services** · **14 API modules** · **17 analysis panels**
+- **163 个测试通过** · **47 个服务模块** · **14 个 API 模块** · **17 个分析面板**
 
 ---
 
@@ -62,7 +62,7 @@ Deribit WebSocket  ─┘        │
                ┌──────────────────────────────┐
                │      Decision Layer           │
                │                               │
-               │  16-Panel Rule Engine         │
+               │  17-Panel Rule Engine         │
                │  Unified Recommendation       │
                │  LLM Deep Analysis (SSE)      │
                │  Multi-Agent Debate           │
@@ -100,18 +100,19 @@ Deribit WebSocket  ─┘        │
 | **IV Term Structure** | Hull-White calibration, variance risk premium, contango/backwardation detection |
 | **PCR Chart** | Put/Call ratio tracking with extreme zone detection |
 | **On-Chain Metrics** | MVRV-Z, NUPL, Mayer Multiple, Puell Multiple, 200WMA, Balanced Price |
-| **Derivative Metrics** | Sharpe ratio, funding rate, futures/spot basis, open interest trends |
+| **Derivative Metrics** | Perp basis, OI-price divergence, funding volatility, liquidation heat, stablecoin reserves, futures/spot ratio, Sharpe |
 
 ### AI & Intelligence / AI 与智能
 
 | Feature | Description |
 |---|---|
-| **Unified Recommendation Engine** | 16-panel signal lights with 3-tier progressive disclosure (badge → report → LLM drawer) |
+| **Unified Recommendation Engine** | 17-panel signal lights with 3-tier progressive disclosure (badge → report → LLM drawer) |
 | **LLM Deep Analysis** | Per-panel SSE streaming analysis with synthesis / bull debate / bear debate / judge audit |
 | **AI Co-Pilot** | Built-in trading assistant with full market context injection |
 | **LLM Analyst Center** | Comprehensive full-pipeline analysis (rules → synthesis → debate → audit) |
 | **Multi-Model** | OpenAI-compatible API routing — DeepSeek, Claude, GPT, Gemini, or any proxy |
 | **LLM Result Caching** | Input-hash indexed cache with force-refresh support |
+| **Crypto-Native AI Framework** | 8 crypto-native metrics, hybrid thresholds (percentile + fixed), structural market context injection into LLM prompts |
 
 ### Infrastructure / 基础设施
 
@@ -128,7 +129,7 @@ Deribit WebSocket  ─┘        │
 
 ## Dashboard Panels / 仪表盘面板
 
-All 16 panels feature the unified recommendation signal light + rule report + LLM deep analysis.
+All 17 panels feature the unified recommendation signal light + rule report + LLM deep analysis.
 
 | Panel | Signal Formula | Key Metrics |
 |---|---|---|
@@ -148,6 +149,7 @@ All 16 panels feature the unified recommendation signal light + rule report + LL
 | **GEX Chart** | weighted_score | Gamma structure, dealer positioning |
 | **Money Flow** | weighted_score | Active buy/sell, Flow direction |
 | **On-Chain Metrics** | weighted_score | MVRV-Z valuation, Holder behavior |
+| **Derivative Metrics** | weighted_score | Perp basis, OI divergence, funding vol, liquidation heat, stablecoin flow |
 
 ---
 
@@ -305,7 +307,7 @@ crypto-options-aggregator/
 ```bash
 cd dashboard
 python -m pytest tests/ -v
-# 141 passed
+# 163 passed
 ```
 
 ---
