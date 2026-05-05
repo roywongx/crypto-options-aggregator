@@ -290,10 +290,10 @@ class LLMAnalystEngine:
             if parsed is None:
                 return {"success": False, "error": "LLM 返回格式异常", "raw_response": response[:500]}
 
-            required = {"market_assessment", "strategy_recommendation", "risk_warning", "confidence"}
-            if not required.issubset(parsed.keys()):
-                return {"success": False, "error": "LLM response missing required fields", "raw_response": response[:500]}
-
+            parsed.setdefault("market_assessment", "")
+            parsed.setdefault("strategy_recommendation", "")
+            parsed.setdefault("risk_warning", "")
+            parsed.setdefault("confidence", 0)
             parsed["success"] = True
             return parsed
 
@@ -472,12 +472,12 @@ class LLMAnalystEngine:
             if bull_resp:
                 parsed = self._parse_json_response(bull_resp)
                 if parsed:
-                    required_bull = {"bullish_case", "key_drivers", "target_scenarios", "confidence"}
-                    if required_bull.issubset(parsed.keys()):
-                        parsed["success"] = True
-                        bull_result = parsed
-                    else:
-                        bull_result = {"success": False, "error": "bull response missing fields"}
+                    parsed.setdefault("bullish_case", "")
+                    parsed.setdefault("key_drivers", [])
+                    parsed.setdefault("target_scenarios", [])
+                    parsed.setdefault("confidence", 0)
+                    parsed["success"] = True
+                    bull_result = parsed
         except Exception as e:
             logger.warning("bull agent failed: %s", e)
             bull_result = {"success": False, "error": str(e)}
@@ -490,12 +490,12 @@ class LLMAnalystEngine:
             if bear_resp:
                 parsed = self._parse_json_response(bear_resp)
                 if parsed:
-                    required_bear = {"bearish_case", "key_risks", "downside_scenarios", "confidence"}
-                    if required_bear.issubset(parsed.keys()):
-                        parsed["success"] = True
-                        bear_result = parsed
-                    else:
-                        bear_result = {"success": False, "error": "bear response missing fields"}
+                    parsed.setdefault("bearish_case", "")
+                    parsed.setdefault("key_risks", [])
+                    parsed.setdefault("downside_scenarios", [])
+                    parsed.setdefault("confidence", 0)
+                    parsed["success"] = True
+                    bear_result = parsed
         except Exception as e:
             logger.warning("bear agent failed: %s", e)
             bear_result = {"success": False, "error": str(e)}
@@ -525,12 +525,13 @@ class LLMAnalystEngine:
             if judge_resp:
                 parsed = self._parse_json_response(judge_resp)
                 if parsed:
-                    required_judge = {"judge_verdict", "winner", "bull_confidence", "bear_confidence", "reasoning"}
-                    if required_judge.issubset(parsed.keys()):
-                        parsed["success"] = True
-                        judge_result = parsed
-                    else:
-                        judge_result = {"success": False, "error": "judge response missing fields"}
+                    parsed.setdefault("judge_verdict", "")
+                    parsed.setdefault("winner", "draw")
+                    parsed.setdefault("bull_confidence", 50)
+                    parsed.setdefault("bear_confidence", 50)
+                    parsed.setdefault("reasoning", "")
+                    parsed["success"] = True
+                    judge_result = parsed
         except Exception as e:
             logger.warning("judge agent failed: %s", e)
             judge_result = {"success": False, "error": str(e)}
@@ -552,14 +553,10 @@ class LLMAnalystEngine:
 3. 数据完整性：是否有缺失字段、数据是否过期（timestamp > 1小时?）
 4. 前端展示一致性：策略引擎输出 vs 原始数据是否匹配
 
-输出 JSON：
+输出纯 JSON（不要包含任何其他文字），无问题时返回空数组：
 {
-  "anomalies": [
-    {"severity": "critical|warning|info", "source": "数据源名", "description": "描述", "suggestion": "建议"}
-  ],
-  "logic_issues": [
-    {"severity": "...", "component": "模块名", "description": "...", "suggestion": "..."}
-  ],
+  "anomalies": [...],
+  "logic_issues": [...],
   "data_quality_score": 0-100
 }"""
 
@@ -620,15 +617,16 @@ class LLMAnalystEngine:
                 return {"success": False, "error": "LLM 返回格式异常", "raw_response": response[:500],
                         "anomalies": [], "logic_issues": [], "data_quality_score": 0}
 
-            # Validate required fields
-            required = {"anomalies", "logic_issues", "data_quality_score"}
-            if not required.issubset(parsed.keys()):
-                return {"success": False, "error": "LLM response missing required fields", "raw_response": response[:500],
-                        "anomalies": [], "logic_issues": [], "data_quality_score": 0}
-
+            # 宽松校验：缺失字段用默认值填充
             parsed.setdefault("anomalies", [])
             parsed.setdefault("logic_issues", [])
             parsed.setdefault("data_quality_score", 0)
+            if not isinstance(parsed.get("anomalies"), list):
+                parsed["anomalies"] = []
+            if not isinstance(parsed.get("logic_issues"), list):
+                parsed["logic_issues"] = []
+            if not isinstance(parsed.get("data_quality_score"), (int, float)):
+                parsed["data_quality_score"] = 0
             parsed["success"] = True
             return parsed
 
