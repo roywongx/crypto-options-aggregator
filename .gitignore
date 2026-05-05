@@ -39,6 +39,18 @@ test_*.py
 venv/
 env/
 
+# Node
+node_modules/
+package-lock.json
+
+# 项目配置（可能含敏感信息）
+.claude/
+.superpowers/
+_bmad/
+
+# 临时输出
+pytest_output.txt
+
 # Worktrees
 .worktrees/
 
