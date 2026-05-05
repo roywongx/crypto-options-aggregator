@@ -2764,116 +2764,248 @@ async function showDvolAdvice(currency) {
     } catch(e) {}
 }
 
+// ============================================================
+// 大单风向标 v3 — 净流向 + 水平柱状 + 风标指示
+// ============================================================
+
+function _formatNotional(n) { return n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(0)}K` : `$${n.toFixed(0)}`; }
+
+function _getWindVaneIcon(bullishRatio) {
+    // bullish_ratio = (buy_call + sell_put) / total — 方向性看多比例
+    if (bullishRatio >= 0.70) return { icon: 'fa-arrow-up', color: 'text-[#149e61]', label: '强烈看多', bg: 'bg-[#149e61]/15' };
+    if (bullishRatio >= 0.55) return { icon: 'fa-arrow-up', color: 'text-[#22c55e]', label: '偏多', bg: 'bg-[#149e61]/10' };
+    if (bullishRatio >= 0.45) return { icon: 'fa-minus', color: 'text-[#9497a9]', label: '中性', bg: 'bg-gray-700/50' };
+    if (bullishRatio >= 0.30) return { icon: 'fa-arrow-down', color: 'text-[#f87171]', label: '偏空', bg: 'bg-[#ef4444]/10' };
+    return { icon: 'fa-arrow-down', color: 'text-[#ef4444]', label: '强烈看空', bg: 'bg-[#ef4444]/15' };
+}
+
+function _getFlowInterpretation(dominant, buyRatio, pcr) {
+    const interpretations = {
+        '看跌保护': '大单以买入 Put 对冲为主，市场防御情绪浓厚。适合卖出 Put 收权利金或观望。',
+        'Covered Call偏好': '大单以卖出 Call 为主，持有现货者积极收租。现货持有者可考虑备兑策略。',
+        '追涨建仓': '大单以买入 Call 为主，资金积极追涨。短线可跟多，但注意追高风险。',
+        '中性': '买卖力量均衡，无明确方向。适合做 Theta 策略 (卖宽跨/铁鹰)。',
+        '卖出Put为主': '大单以卖出 Put 为主，卖方看好下方支撑。可跟随卖出虚值 Put 收租。',
+    };
+    // Auto-detect from buy_ratio and flow
+    if (buyRatio > 0.65) return '买入力量显著占优，市场情绪偏多。适合顺势做多或卖出虚值 Put。';
+    if (buyRatio < 0.35) return '卖出力量显著占优，市场情绪偏空。注意下行风险，适合观望或买入 Put 对冲。';
+    return interpretations[dominant] || interpretations['中性'];
+}
+
 async function loadWindAnalysis() {
+    const container = document.getElementById('moneyFlowSection');
+    if (!container) return;
+
+    const summaryCard = document.getElementById('windSummaryCard');
+    const netFlowSection = document.getElementById('windNetFlowSection');
+    const flowBreakdownSection = document.getElementById('windFlowBreakdownSection');
+    const emptyState = document.getElementById('windEmptyState');
+    const errorState = document.getElementById('windErrorState');
+    const statsRow = document.getElementById('windStatsRow');
+    const retryBtn = document.getElementById('windRetryBtn');
+
+    // Reset to loading state
+    [emptyState, errorState].forEach(el => el?.classList.add('hidden'));
+    [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.remove('hidden'));
+    if (statsRow) statsRow.classList.add('hidden');
+    if (retryBtn) retryBtn.classList.add('hidden');
+    document.getElementById('strikeFlowsChart').innerHTML = '<div class="text-[#686b82] text-center py-4"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>';
+    document.getElementById('flowBreakdown').innerHTML = '<div class="text-[#686b82] text-center py-2 text-xs">加载中...</div>';
+    document.getElementById('windSentimentIcon').innerHTML = '<i class="fas fa-spinner fa-spin text-[#9497a9]"></i>';
+    document.getElementById('windSentimentScore').textContent = '加载中...';
+    document.getElementById('windSentimentText').textContent = '正在获取大单交易数据';
+    document.getElementById('tradesStatsCount').classList.add('hidden');
+
+    if (retryBtn) {
+        retryBtn.onclick = () => loadWindAnalysis();
+    }
+
     try {
         const currency = document.getElementById('tradesCurrency')?.value || 'BTC';
         const days = document.getElementById('tradesDays')?.value || 7;
 
         const response = await safeFetch(`${API_BASE}/api/trades/wind-analysis?currency=${currency}&days=${days}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const data = await response.json();
         const summary = data.summary || {};
+        const totalTrades = summary.total_trades || 0;
 
+        // === Empty state ===
+        if (totalTrades === 0) {
+            [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.add('hidden'));
+            emptyState?.classList.remove('hidden');
+            return;
+        }
+
+        // === Has data — render ===
+        [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.remove('hidden'));
+        emptyState?.classList.add('hidden');
+        errorState?.classList.add('hidden');
+
+        // Trade count badge
         const countEl = document.getElementById('tradesStatsCount');
         if (countEl) {
-            countEl.textContent = `${summary.total_trades || 0} 笔`;
+            countEl.textContent = `${totalTrades} 笔`;
             countEl.classList.remove('hidden');
         }
 
-        const summaryCard = document.getElementById('windSummaryCard');
-        if (summary.total_trades > 0) {
-            summaryCard?.classList.remove('hidden');
-            const score = data.sentiment_score || 0;
-            let icon, scoreLabel, scoreClass;
-            if (score >= 2) { icon = '🐂'; scoreLabel = '偏多'; scoreClass = 'bg-[#149e61]/20 text-[#149e61]'; }
-            else if (score >= 1) { icon = '📈'; scoreLabel = '温和看多'; scoreClass = 'bg-[#149e61]/10 text-[#149e61]'; }
-            else if (score > -1) { icon = '➡️'; scoreLabel = '中性'; scoreClass = 'bg-gray-700 text-gray-300'; }
-            else if (score > -2) { icon = '📉'; scoreLabel = '温和看空'; scoreClass = 'bg-[#ef4444]/10 text-[#ef4444]'; }
-            else { icon = '🐻'; scoreLabel = '偏空'; scoreClass = 'bg-[#ef4444]/20 text-[#ef4444]'; }
+        // === Sentiment Card ===
+        const bullishRatio = data.bullish_ratio ?? data.buy_ratio ?? 0.5;
+        const vane = _getWindVaneIcon(bullishRatio);
 
-            const iconEl = document.getElementById('windSentimentIcon');
-            if (iconEl) iconEl.textContent = icon;
+        const iconEl = document.getElementById('windSentimentIcon');
+        if (iconEl) iconEl.innerHTML = `<i class="fas ${vane.icon} text-3xl ${vane.color}"></i>`;
 
-            const scEl = document.getElementById('windSentimentScore');
-            if (scEl) { scEl.textContent = scoreLabel; scEl.className = `text-xs font-mono px-2 py-0.5 rounded ${scoreClass}`; }
+        const scEl = document.getElementById('windSentimentScore');
+        if (scEl) { scEl.textContent = vane.label; scEl.className = `text-sm font-semibold ${vane.color}`; }
 
-            const sentimentTextEl = document.getElementById('windSentimentText');
-            if (sentimentTextEl) sentimentTextEl.textContent = data.sentiment_text || data.dominant_flow || '';
-
-            const buySellRatioEl = document.getElementById('windBuySellRatio');
-            if (buySellRatioEl) buySellRatioEl.textContent = `${(data.buy_ratio * 100 || 0).toFixed(0)}% / ${((1 - data.buy_ratio) * 100 || 0).toFixed(0)}%`;
-
-            const totalNotionalEl = document.getElementById('windTotalNotional');
-            if (totalNotionalEl) {
-                const totalNotional = data.total_notional || 0;
-                totalNotionalEl.textContent = totalNotional > 0 ? `$${(totalNotional / 1000000).toFixed(1)}M` : '-';
-            }
-
-            const dominantFlowEl = document.getElementById('windDominantFlow');
-            if (dominantFlowEl) dominantFlowEl.textContent = data.dominant_flow || '-';
-
-            // Update flow breakdown display
-            const flowBreakdownEl = document.getElementById('flowBreakdown');
-            if (flowBreakdownEl && data.flow_breakdown) {
-                flowBreakdownEl.innerHTML = data.flow_breakdown.map(f => {
-                    const pct = f.count > 0 ? Math.round(f.count / (summary.total_trades || 1) * 100) : 0;
-                    const colorClass = f.type === 'sell_put' ? 'text-[#149e61]' :
-                                      f.type === 'buy_call' ? 'text-[#7132f5]' :
-                                      f.type === 'buy_put' ? 'text-[#ef4444]' :
-                                      f.type === 'sell_call' ? 'text-[#f59e0b]' : 'text-gray-400';
-                    return `<div class="flex justify-between items-center text-xs">
-                        <span class="${colorClass}">${safeHTML(f.label)}</span>
-                        <span class="text-gray-300 font-mono">${f.count} <span class="text-gray-500">(${pct}%)</span></span>
-                    </div>`;
-                }).join('');
-            }
-        } else {
-            summaryCard?.classList.add('hidden');
+        const sentimentTextEl = document.getElementById('windSentimentText');
+        const pcr = data.pcr ?? (summary.buy_puts > 0 ? (summary.buy_puts / (summary.buy_calls || 1)).toFixed(2) : '-');
+        if (sentimentTextEl) {
+            sentimentTextEl.textContent = _getFlowInterpretation(data.dominant_flow || '', bullishRatio, pcr);
         }
 
+        // Stats row
+        if (statsRow) statsRow.classList.remove('hidden');
+        const buySellEl = document.getElementById('windBuySellRatio');
+        if (buySellEl) {
+            buySellEl.textContent = `${(bullishRatio * 100).toFixed(0)}% / ${((1 - bullishRatio) * 100).toFixed(0)}%`;
+            buySellEl.className = bullishRatio >= 0.55 ? 'text-[#149e61]' : bullishRatio <= 0.45 ? 'text-[#ef4444]' : 'text-[#e4e4e7]';
+        }
+
+        const totalNotionalEl = document.getElementById('windTotalNotional');
+        if (totalNotionalEl) totalNotionalEl.textContent = _formatNotional(data.total_notional || 0);
+
+        const dominantFlowEl = document.getElementById('windDominantFlow');
+        if (dominantFlowEl) dominantFlowEl.textContent = data.dominant_flow || '-';
+
+        const pcrEl = document.getElementById('windPCR');
+        if (pcrEl) pcrEl.textContent = typeof pcr === 'number' ? pcr.toFixed(2) : pcr;
+
+        // === Spot price marker ===
         const spotEl = document.getElementById('windSpotMarker');
         if (spotEl && data.spot > 0) {
-            spotEl.textContent = `● 现价 $${data.spot.toLocaleString()}`;
+            spotEl.innerHTML = `● 现价 $${data.spot.toLocaleString()}`;
             spotEl.classList.remove('hidden');
         } else if (spotEl) {
             spotEl.classList.add('hidden');
         }
 
-        const chartEl = document.getElementById('strikeFlowsChart');
-        const dist = data.distribution || [];
-        if (chartEl) {
-            // 销毁旧 Chart 实例防止内存泄漏
-            if (window._strikeChart) {
-                window._strikeChart.destroy();
-                window._strikeChart = null;
-            }
-            chartEl.innerHTML = '';
-            const canvas = document.createElement('canvas');
-            canvas.id = 'strikeChartCanvas';
-            chartEl.appendChild(canvas);
-            const filteredDist = dist.filter(d => d.strike > 0 && (d.put > 0 || d.call > 0)).slice(0, 20);
-            if (filteredDist.length === 0) {
-                chartEl.innerHTML = '<div class="text-gray-500 text-center py-4">暂无OI数据</div>';
-            } else {
-                window._strikeChart = new Chart(canvas, {
-                    type: 'bar',
-                    data: {
-                        labels: filteredDist.map(d => d.strike?.toString() || ''),
-                        datasets: [
-                            { label: 'Put OI', data: filteredDist.map(d => d.put || 0), backgroundColor: 'rgba(239, 68, 68, 0.6)' },
-                            { label: 'Call OI', data: filteredDist.map(d => d.call || 0), backgroundColor: 'rgba(34, 197, 94, 0.6)' }
-                        ]
-                    },
-                    options: {
-                        responsive: true,
-                        scales: { y: { beginAtZero: true } },
-                        plugins: { legend: { display: true, position: 'top' } }
-                    }
-                });
-            }
-        }
+        // === Net Flow Horizontal Bar Chart ===
+        renderNetFlowChart(data);
+
+        // === Flow Breakdown ===
+        renderFlowBreakdown(data, totalTrades);
+
     } catch (error) {
         console.error('加载风向分析失败:', error);
+        [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.add('hidden'));
+        [emptyState].forEach(el => el?.classList.add('hidden'));
+        errorState?.classList.remove('hidden');
+        document.getElementById('windErrorMsg').textContent = error.message || '网络错误';
+        if (retryBtn) retryBtn.classList.remove('hidden');
     }
+}
+
+function renderNetFlowChart(data) {
+    const chartEl = document.getElementById('strikeFlowsChart');
+    if (!chartEl) return;
+
+    const dist = data.distribution || [];
+    const spot = data.spot || 0;
+    const maxNotional = Math.max(...dist.map(d => Math.abs((d.put || 0) - (d.call || 0))), 1);
+
+    // Sort by strike and take top 20
+    const filteredDist = dist
+        .filter(d => d.strike > 0 && (d.put > 0 || d.call > 0))
+        .sort((a, b) => a.strike - b.strike)
+        .slice(0, 20);
+
+    if (filteredDist.length === 0) {
+        chartEl.innerHTML = '<div class="text-gray-500 text-center py-4">暂无行权价分布数据</div>';
+        return;
+    }
+
+    chartEl.innerHTML = filteredDist.map(d => {
+        const putVol = d.put || 0;
+        const callVol = d.call || 0;
+        const net = putVol - callVol;
+        const total = putVol + callVol;
+        const putPct = total > 0 ? (putVol / total * 100) : 50;
+        const callPct = total > 0 ? (callVol / total * 100) : 50;
+
+        // Bar strength: scale to 0-100% of max for width
+        const barStrength = Math.min(Math.abs(net) / maxNotional * 100, 100);
+
+        // Direction and colors
+        const isPutHeavy = net > 0;  // more put volume = selling pressure visible
+        const netColor = isPutHeavy ? 'bg-[#ef4444]' : 'bg-[#149e61]';
+        const netLabel = net > 0 ? `+${_formatNotional(net)}` : net < 0 ? _formatNotional(Math.abs(net)) : '0';
+        const barLabel = isPutHeavy ? `${netLabel} PUT侧重` : `${netLabel} CALL侧重`;
+
+        // Is this strike near spot?
+        const distFromSpotPct = d.dist_from_spot_pct || (spot > 0 ? ((d.strike - spot) / spot * 100) : 0);
+        const isNearSpot = Math.abs(distFromSpotPct) < 5;
+        const strikeClass = isNearSpot ? 'text-[#7132f5] font-bold' : 'text-[#e4e4e7]';
+
+        return `<div class="flex items-center gap-2 text-xs group hover:bg-gray-800/50 rounded px-2 py-0.5 transition-colors">
+            <span class="w-14 text-right font-mono ${strikeClass}">${d.strike.toLocaleString()}</span>
+            <span class="w-12 text-right text-[10px] text-[#686b82]">${distFromSpotPct > 0 ? '+' : ''}${distFromSpotPct.toFixed(1)}%</span>
+            <div class="flex-1 h-5 flex rounded overflow-hidden bg-gray-800/50">
+                <div class="h-full bg-[#ef4444]/60 transition-all" style="width:${putPct}%"></div>
+                <div class="h-full bg-[#149e61]/60 transition-all" style="width:${callPct}%"></div>
+            </div>
+            <span class="w-28 text-left text-[10px] text-[#9497a9]">${barLabel}</span>
+            ${isNearSpot ? '<span class="text-[10px] text-[#7132f5] font-bold">◀ 现价</span>' : ''}
+        </div>`;
+    }).join('');
+
+    // Legend
+    const legendHtml = `<div class="flex items-center gap-4 mt-2 text-[10px] text-[#686b82] px-2">
+        <span><span class="inline-block w-3 h-3 bg-[#ef4444]/60 rounded mr-1"></span>Put成交量</span>
+        <span><span class="inline-block w-3 h-3 bg-[#149e61]/60 rounded mr-1"></span>Call成交量</span>
+        <span class="ml-auto">柱宽 = 净流向强度</span>
+    </div>`;
+    chartEl.innerHTML += legendHtml;
+}
+
+function renderFlowBreakdown(data, totalTrades) {
+    const flowBreakdownEl = document.getElementById('flowBreakdown');
+    if (!flowBreakdownEl || !data.flow_breakdown) return;
+
+    const maxCount = Math.max(...data.flow_breakdown.map(f => f.count || 0), 1);
+
+    flowBreakdownEl.innerHTML = data.flow_breakdown.map(f => {
+        const pct = f.count > 0 ? Math.round(f.count / totalTrades * 100) : 0;
+        const barWidth = Math.round(f.count / maxCount * 100);
+        const colorMap = {
+            'sell_put': { bar: 'bg-[#149e61]', text: 'text-[#149e61]', icon: 'fa-arrow-down' },
+            'buy_call': { bar: 'bg-[#7132f5]', text: 'text-[#7132f5]', icon: 'fa-arrow-up' },
+            'buy_put': { bar: 'bg-[#ef4444]', text: 'text-[#ef4444]', icon: 'fa-shield-alt' },
+            'sell_call': { bar: 'bg-[#f59e0b]', text: 'text-[#f59e0b]', icon: 'fa-arrow-up' }
+        };
+        const style = colorMap[f.type] || { bar: 'bg-gray-600', text: 'text-gray-400', icon: 'fa-circle' };
+
+        let interpretation = '';
+        if (f.type === 'sell_put') interpretation = pct > 30 ? '← 市场主导：卖方看涨，愿意接货' : '';
+        else if (f.type === 'buy_call') interpretation = pct > 30 ? '← 市场主导：主动追涨，看多情绪' : '';
+        else if (f.type === 'buy_put') interpretation = pct > 25 ? '← 对冲需求高，防御意识强' : '';
+        else if (f.type === 'sell_call') interpretation = pct > 30 ? '← 市场主导：持有者积极备兑收租' : '';
+
+        return `<div>
+            <div class="flex items-center justify-between text-xs mb-0.5">
+                <span class="${style.text}"><i class="fas ${style.icon} mr-1 text-[10px]"></i>${safeHTML(f.label)}</span>
+                <span class="text-gray-300 font-mono">${f.count} <span class="text-gray-500 text-[10px]">${pct}%</span></span>
+            </div>
+            <div class="w-full h-1.5 rounded-full bg-gray-800/50 overflow-hidden">
+                <div class="h-full rounded-full ${style.bar} transition-all" style="width:${barWidth}%"></div>
+            </div>
+            ${interpretation ? `<div class="text-[10px] text-[#9497a9] mt-0.5">${interpretation}</div>` : ''}
+        </div>`;
+    }).join('');
 }
 // Module 1: IV Term Structure (已迁移到 term-structure.js)
 // ============================================================

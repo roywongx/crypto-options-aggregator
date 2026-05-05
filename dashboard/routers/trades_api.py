@@ -130,6 +130,12 @@ async def get_wind_analysis(
     total_sell_notional = summary_data['sell_put_notional'] + summary_data['sell_call_notional']
     total_notional = total_buy_notional + total_sell_notional
 
+    # 方向性分类：bullish flow = buy_call + sell_put（都预期上涨）
+    #              bearish flow = buy_put + sell_call（都预期下跌/对冲）
+    bullish_notional = summary_data['buy_call_notional'] + summary_data['sell_put_notional']
+    bearish_notional = summary_data['buy_put_notional'] + summary_data['sell_call_notional']
+    bullish_ratio = bullish_notional / total_notional if total_notional > 0 else 0.5
+
     bp = summary_data['buy_put']
     sc = summary_data['sell_call']
     bc = summary_data['buy_call']
@@ -139,6 +145,11 @@ async def get_wind_analysis(
     sc_ratio = summary_data['sell_call_notional'] / total_notional if total_notional > 0 else 0
     buy_ratio = total_buy_notional / total_notional if total_notional > 0 else 0.5
     dominant = "看跌保护" if bp_ratio > 0.3 else ("Covered Call偏好" if sc_ratio > 0.3 else "中性")
+
+    # PCR = Put成交量 / Call成交量
+    put_vol = summary_data['buy_put_notional'] + summary_data['sell_put_notional']
+    call_vol = summary_data['buy_call_notional'] + summary_data['sell_call_notional']
+    pcr = put_vol / call_vol if call_vol > 0 else 1.0
 
     # 互斥的流向分类（每笔交易只归一类）
     # 基于 direction + option_type 的真实分类
@@ -189,11 +200,9 @@ async def get_wind_analysis(
             "dist_from_spot_pct": round(dist_pct, 2)
         })
 
-    # 修正 sentiment_score 计算（使用名义价值权重）
+    # 修正 sentiment_score 计算（使用方向性 bullish_ratio）
     total_count = summary_data['total_count']
-    sentiment_score = round((bp_ratio * 2 + sc_ratio * 1.5 +
-                              (summary_data['buy_call_notional'] / total_notional if total_notional > 0 else 0) * 1 -
-                              (summary_data['sell_put_notional'] / total_notional if total_notional > 0 else 0) * 1), 2) if total_count > 10 else 0
+    sentiment_score = round((bullish_ratio - 0.5) * 200) if total_count > 10 else 0  # -100 to +100
 
     risk = RiskFramework.get_status(spot)
     support = RiskFramework.REGULAR_FLOOR
@@ -204,10 +213,13 @@ async def get_wind_analysis(
         "distribution": distribution[:20],
         "strike_flows": strike_flows,
         "flow_breakdown": flow_breakdown,
-        "buy_ratio": round(buy_ratio, 3), "dominant_flow": dominant,
+        "buy_ratio": round(buy_ratio, 3),
+        "bullish_ratio": round(bullish_ratio, 3),
+        "dominant_flow": dominant,
         "risk_level": risk, "support": support, "resistance": resistance,
         "sentiment_score": sentiment_score,
         "sentiment_text": dominant,
+        "pcr": round(pcr, 2),
         "total_notional": round(total_notional, 0),
         "summary": {"total_trades": total_count, "buy_puts": bp,
                     "sell_calls": sc, "buy_calls": bc, "sell_puts": sp,

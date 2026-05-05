@@ -634,44 +634,50 @@ def _fetch_wind_analysis(currency: str, days: int = 30):
                 sell_call_notional += notional
 
     if total_count <= 0:
-        return {"error": "No valid trade data", "buy_ratio": 0.5, "dominant_flow": "unknown"}
+        return {"error": "No valid trade data", "buy_ratio": 0.5, "bullish_ratio": 0.5, "dominant_flow": "unknown"}
 
-    # 使用名义价值计算买入比率（与 _flow_analyst 保持一致）
+    # 使用名义价值计算方向性比率
+    # bullish = buy_call + sell_put (都预期上涨)
+    # bearish = buy_put + sell_call (都预期下跌/对冲)
     total_buy_notional = buy_put_notional + buy_call_notional
     total_sell_notional = sell_put_notional + sell_call_notional
     total_notional = total_buy_notional + total_sell_notional
 
+    bullish_notional = buy_call_notional + sell_put_notional
+    bearish_notional = buy_put_notional + sell_call_notional
+    bullish_ratio = bullish_notional / total_notional if total_notional > 0 else 0.5
     buy_ratio = total_buy_notional / total_notional if total_notional > 0 else 0.5
 
-    # PCR = 买入 Put 名义价值 / 买入 Call 名义价值
-    put_call_ratio = buy_put_notional / buy_call_notional if buy_call_notional > 0 else 1.0
+    # PCR = Put成交量 / Call成交量
+    put_vol = buy_put_notional + sell_put_notional
+    call_vol = buy_call_notional + sell_call_notional
+    pcr = put_vol / call_vol if call_vol > 0 else 1.0
 
-    sentiment_score = 50
-    if buy_ratio > 0.6:
-        sentiment_score = 30
-    elif buy_ratio < 0.4:
-        sentiment_score = 70
+    sentiment_score = round((bullish_ratio - 0.5) * 200)  # -100 to +100
 
     dominant = "neutral"
-    if put_call_ratio > 1.2 and buy_put_notional > sell_put_notional * 1.5:
-        dominant = "panic_buy_puts"
-    elif put_call_ratio > 1.2 and sell_put_notional > buy_put_notional * 1.5:
-        dominant = "aggressive_sell_puts"
-    elif put_call_ratio < 0.8 and buy_call_notional > sell_call_notional * 1.5:
-        dominant = "fomo_buy_calls"
-    elif put_call_ratio < 0.8 and sell_call_notional > buy_call_notional * 1.5:
-        dominant = "covered_call_selling"
-    elif buy_ratio > 0.55:
-        dominant = "bullish"
-    elif buy_ratio < 0.45:
-        dominant = "bearish"
+    if pcr > 1.5 and bearish_notional > bullish_notional * 1.5:
+        dominant = "看跌保护"
+    elif pcr > 1.2 and bullish_notional > bearish_notional * 1.2:
+        dominant = "卖出Put为主"
+    elif pcr < 0.7 and bullish_notional > bearish_notional * 1.5:
+        dominant = "追涨建仓"
+    elif pcr < 0.8 and bearish_notional > bullish_notional * 1.2:
+        dominant = "Covered Call偏好"
+    elif bullish_ratio > 0.55:
+        dominant = "偏多"
+    elif bullish_ratio < 0.45:
+        dominant = "偏空"
 
     return {
         "currency": currency, "spot": spot, "days": days,
-        "buy_ratio": round(buy_ratio, 3), "dominant_flow": dominant,
+        "buy_ratio": round(buy_ratio, 3),
+        "bullish_ratio": round(bullish_ratio, 3),
+        "dominant_flow": dominant,
         "risk_level": RiskFramework.get_status(spot),
         "sentiment_score": sentiment_score,
         "sentiment_text": dominant,
+        "pcr": round(pcr, 2),
         "summary": {"total_trades": total_count,
                     "buy_puts": buy_puts, "sell_puts": sell_puts,
                     "buy_calls": buy_calls, "sell_calls": sell_calls,

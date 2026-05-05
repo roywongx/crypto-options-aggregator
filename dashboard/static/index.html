@@ -809,57 +809,88 @@
                     </div>
                 </div>
 
-                <!-- 大单风向标 v2 -->
+                <!-- 大单风向标 v3 -->
                 <div id="moneyFlowSection" class="card-glass rounded-xl p-5 border-l-4 border-[#7132f5]">
-                    <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                        <i class="fas fa-wind text-[#7132f5]"></i>
-                        大单风向标
-                        <span id="tradesStatsCount" class="text-xs bg-[#7132f5]/20 text-[#8b5cf6] px-2 py-0.5 rounded-full hidden"></span>
-                    </h2>
-                    <div class="mb-3 flex flex-wrap gap-2">
-                        <select id="tradesCurrency" class="input-dark rounded px-2 py-1 text-xs">
-                            <option value="BTC">BTC</option>
-                            <option value="ETH">ETH</option>
-                            <option value="SOL">SOL</option>
-                        </select>
-                        <select id="tradesDays" class="input-dark rounded px-2 py-1 text-xs">
-                            <option value="7">近7天</option>
-                            <option value="30" selected>近30天</option>
-                            <option value="90">近90天</option>
-                        </select>
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold flex items-center gap-2">
+                            <i class="fas fa-wind text-[#7132f5]"></i>
+                            大单风向标
+                            <span id="tradesStatsCount" class="text-xs bg-[#7132f5]/20 text-[#8b5cf6] px-2 py-0.5 rounded-full hidden"></span>
+                        </h2>
+                        <div class="flex gap-2">
+                            <select id="tradesCurrency" class="input-dark rounded px-2 py-1 text-xs">
+                                <option value="BTC">BTC</option>
+                                <option value="ETH">ETH</option>
+                                <option value="SOL">SOL</option>
+                            </select>
+                            <select id="tradesDays" class="input-dark rounded px-2 py-1 text-xs">
+                                <option value="1">近1天</option>
+                                <option value="3">近3天</option>
+                                <option value="7" selected>近7天</option>
+                                <option value="30">近30天</option>
+                                <option value="90">近90天</option>
+                            </select>
+                        </div>
                     </div>
 
                     <!-- 情绪总览卡 -->
-                    <div id="windSummaryCard" class="hidden mb-4 rounded-lg bg-gradient-to-r from-gray-800/80 to-gray-900/80 border border-[rgba(71,73,85,0.3)] p-3">
+                    <div id="windSummaryCard" class="mb-4 rounded-lg bg-gradient-to-r from-gray-800/80 to-gray-900/80 border border-[rgba(71,73,85,0.3)] p-3">
                         <div class="flex items-center justify-between mb-2">
-                            <span id="windSentimentIcon" class="text-xl"></span>
-                            <span id="windSentimentScore" class="text-xs font-mono px-2 py-0.5 rounded bg-[#22232e]"></span>
+                            <div class="flex items-center gap-3">
+                                <span id="windSentimentIcon" class="text-2xl">--</span>
+                                <div>
+                                    <span id="windSentimentScore" class="text-sm font-semibold text-[#e4e4e7]">暂无数据</span>
+                                    <p id="windSentimentText" class="text-xs text-[#9497a9]">等待大单交易数据</p>
+                                </div>
+                            </div>
+                            <button id="windRetryBtn" class="hidden text-xs text-[#7132f5] hover:text-[#8b5cf6] px-2 py-1 rounded border border-[rgba(113,50,245,0.3)] hover:bg-[#7132f5]/10 transition-colors">
+                                <i class="fas fa-redo mr-1"></i>重试
+                            </button>
                         </div>
-                        <p id="windSentimentText" class="text-sm text-[#e4e4e7] leading-relaxed"></p>
-                        <div class="mt-2 flex gap-4 text-xs text-[#9497a9]">
-                            <span>买/卖: <b id="windBuySellRatio" class="text-[#149e61]"></b></span>
-                            <span>总名义: <b id="windTotalNotional" class="text-[#8b5cf6]"></b></span>
-                            <span>主流行为: <b id="windDominantFlow" class="text-[#f59e0b]"></b></span>
+                        <div id="windStatsRow" class="mt-2 flex gap-4 text-xs text-[#9497a9] hidden">
+                            <span>买/卖比: <b id="windBuySellRatio" class="text-[#e4e4e7]">--</b></span>
+                            <span>总名义: <b id="windTotalNotional" class="text-[#8b5cf6]">--</b></span>
+                            <span>主导流向: <b id="windDominantFlow" class="text-[#f59e0b]">--</b></span>
+                            <span>PCR: <b id="windPCR" class="text-[#e4e4e7]">--</b></span>
                         </div>
                     </div>
 
-                    <!-- 净头寸 Strike 图 -->
-                    <div class="mb-4">
-                        <div class="flex items-center justify-between mb-1 text-xs text-[#9497a9]">
-                            <span>净头寸分布 (买-卖)</span>
-                            <span id="windSpotMarker" class="font-mono text-[#7132f5] hidden">● 现价</span>
+                    <!-- 净流向图 (水平柱状) -->
+                    <div id="windNetFlowSection" class="mb-4">
+                        <div class="flex items-center justify-between mb-2 text-xs text-[#9497a9]">
+                            <span>行权价净流向 · 名义价值</span>
+                            <span id="windSpotMarker" class="font-mono text-[#7132f5] hidden">● 现价 $--</span>
                         </div>
-                        <div id="strikeFlowsChart" class="space-y-1 overflow-y-auto custom-scrollbar pr-1" style="max-height: 45vh;">
+                        <div class="flex items-center gap-1 mb-2 text-[10px] text-[#686b82]">
+                            <span class="text-[#ef4444]">← 卖出压力 (Put成交量 > Call)</span>
+                            <span class="flex-1 text-center">|</span>
+                            <span class="text-[#149e61]">买入压力 (Call成交量 > Put) →</span>
+                        </div>
+                        <div id="strikeFlowsChart" class="space-y-1 overflow-y-auto custom-scrollbar pr-1" style="max-height: 40vh;">
                             <div class="text-[#686b82] text-center py-4">加载中...</div>
                         </div>
                     </div>
 
-                    <!-- 流向分类 -->
-                    <div>
-                        <div class="text-xs text-[#9497a9] mb-2">流向分类</div>
-                        <div id="flowBreakdown" class="grid grid-cols-2 gap-1">
+                    <!-- 流向构成 -->
+                    <div id="windFlowBreakdownSection">
+                        <div class="text-xs text-[#9497a9] mb-2">流向构成</div>
+                        <div id="flowBreakdown" class="space-y-1">
                             <div class="text-[#686b82] text-center py-2 text-xs">加载中...</div>
                         </div>
+                    </div>
+
+                    <!-- 空状态 -->
+                    <div id="windEmptyState" class="hidden text-center py-6">
+                        <i class="fas fa-inbox text-3xl text-[#3a3c4a] mb-2 block"></i>
+                        <p class="text-sm text-[#686b82]">暂无大单交易数据</p>
+                        <p class="text-xs text-[#575a6b] mt-1">执行期权扫描后数据将自动填充</p>
+                    </div>
+
+                    <!-- 错误状态 -->
+                    <div id="windErrorState" class="hidden text-center py-6">
+                        <i class="fas fa-exclamation-triangle text-3xl text-[#f59e0b] mb-2 block"></i>
+                        <p class="text-sm text-[#f59e0b]">数据加载失败</p>
+                        <p id="windErrorMsg" class="text-xs text-[#9497a9] mt-1"></p>
                     </div>
                 </div>
 
