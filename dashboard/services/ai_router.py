@@ -203,7 +203,16 @@ def ai_chat_with_config(
     reasoning_effort = "high"
 
     # 根据 preset 调整推理强度
-    if preset == "fast":
+    if preset == "crypto_analyst":
+        thinking = True
+        reasoning_effort = "high"
+        from services.crypto_market_context import CryptoMarketContext
+        ctx = CryptoMarketContext.build({}, "BTC")
+        system_override = CryptoMarketContext.to_prompt_text(ctx)
+        # 注入市场上下文到 messages 前端
+        if not any(m.get("role") == "system" and "加密市场" in m.get("content", "") for m in messages):
+            messages = [{"role": "system", "content": system_override[:3000]}] + messages
+    elif preset == "fast":
         thinking = True
         reasoning_effort = "medium"
     elif preset in ("analysis", "debate", "audit"):
