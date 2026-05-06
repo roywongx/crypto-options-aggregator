@@ -15,6 +15,9 @@ data/*.db
 *.db-wal
 *.db-shm
 
+# 加密密钥（自动生成，不可提交）
+data/.llm_key
+
 # 日志文件
 *.log
 

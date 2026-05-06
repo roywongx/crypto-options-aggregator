@@ -99,6 +99,7 @@ Deribit WebSocket  ─┘        │
 | **GEX Analysis** | Gamma Exposure curve, flip point detection, dealer positioning |
 | **BS Stress Testing** | Multi-scenario joint stress of Delta, Gamma, Vanna, Volga |
 | **DVOL Analyzer** | Deribit Volatility Index with Z-Score, percentile ranking, regime detection |
+| **Macro Data** | Fear & Greed Index, yfinance QQQ/SPY risk-off signals, Binance funding rate sentiment |
 | **Max Pain** | Max pain price calculation with gamma exposure overlay |
 | **IV Smile** | Skew metrics (25-delta), form classification (smile/skew/flat), curvature analysis |
 | **IV Term Structure** | Hull-White calibration, variance risk premium, contango/backwardation detection |
@@ -126,12 +127,14 @@ Deribit WebSocket  ─┘        │
 |---|---|
 | **DataHub** | High-performance Pub/Sub with persistent WebSocket connections to both exchanges |
 | **Multi-Exchange Abstraction** | Unified interface for Binance + Deribit, extensible to Bybit/OKX |
+| **Binance Options** | Native Binance options chain via /eapi/v1/ticker with 30s cache |
 | **Background Task Manager** | Scheduled scanning, DVOL polling, on-chain updates, maintenance jobs |
+| **Log Viewer** | In-memory ring buffer with `/logs` browser viewer (auto-refresh, level filter) |
 | **SQLite WAL** | Async read + concurrent write, zero-config, auto-vacuum maintenance |
 | **API Key Auth** | HMAC constant-time comparison, localhost bypass for development |
 | **CORS Middleware** | Environment-aware CORS with production whitelist |
 | **Encryption at Rest** | Fernet symmetric encryption for LLM API keys, DPAPI for .env secrets |
-| **Data Integrity** | Pydantic validation on DB writes, copy-on-write snapshot reads |
+| **Data Integrity** | Pydantic validation on DB writes, copy-on-write snapshot reads, market data caching |
 | **Concurrency Safety** | asyncio.Lock / threading.Lock serialization, reconnect jitter, GC-safe task refs |
 
 ---
@@ -230,7 +233,14 @@ Interactive docs: **http://localhost:8000/docs**
 | `/api/paper/positions` | GET | Open paper positions |
 | `/api/paper/history` | GET | Paper trading history |
 
-> All endpoints except `/api/health` require `X-API-Key` header in production mode.
+### Monitoring / 监控
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/logs` | GET | Recent 500 log lines (JSON, optional `?level=ERROR`) |
+| `/logs` | GET | Live log viewer page (auto-refresh, level filter) |
+
+> All endpoints except `/api/health` and `/api/logs` require `X-API-Key` header in production mode.
 >
 > 生产模式下所有端点（除 `/api/health`）需要 `X-API-Key` 请求头。
 
