@@ -9,6 +9,7 @@ DataHub - 高性能 Pub/Sub 数据中心
 import asyncio
 import json
 import logging
+import random
 import time
 import websockets
 from typing import Dict, Any, Optional, List, Set
@@ -123,10 +124,13 @@ class DataHub:
                 logger.error("Cleanup task error: %s", e)
     
     def get_snapshot(self, topic: str, symbol: str = None) -> Optional[Dict]:
+        """返回快照副本，避免 publish() 修改时读到不一致状态"""
+        topic_data = self._topic_data.get(topic, {})
         if symbol:
-            return self._topic_data.get(topic, {}).get(symbol)
-        return self._topic_data.get(topic)
-    
+            data = topic_data.get(symbol)
+            return dict(data) if data else None
+        return dict(topic_data)
+
     def get_options_chain_snapshot(self, currency: str) -> Dict[str, Dict]:
         return dict(self._options_chain_cache.get(currency, {}))
     
@@ -144,12 +148,17 @@ class DataHub:
     
     async def start(self):
         self._running = True
-        # 启动后台清理任务
-        asyncio.create_task(self._cleanup_task())
+        self._cleanup_task_handle = asyncio.create_task(self._cleanup_task())
         logger.info("DataHub started (with cleanup task)")
 
-    def stop(self):
+    async def stop(self):
         self._running = False
+        if hasattr(self, '_cleanup_task_handle'):
+            self._cleanup_task_handle.cancel()
+            try:
+                await self._cleanup_task_handle
+            except asyncio.CancelledError:
+                pass
         logger.info("DataHub stopped")
 
 
@@ -180,8 +189,11 @@ class DeribitWSConnector:
             try:
                 await self._connect()
             except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-                logger.error("Deribit WS error: %s, reconnecting in %ds", str(e), self._reconnect_delay)
-                await asyncio.sleep(self._reconnect_delay)
+                # 指数退避 + 随机 jitter 避免惊群效应
+                jitter = random.uniform(0, self._reconnect_delay * 0.5)
+                delay = self._reconnect_delay + jitter
+                logger.error("Deribit WS error: %s, reconnecting in %.1fs", str(e), delay)
+                await asyncio.sleep(delay)
                 self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
     
     async def _connect(self):
@@ -291,13 +303,15 @@ class BinanceWSConnector:
         self._hub = hub
         self._currencies = currencies or ["BTC", "ETH"]
         self._poll_interval = 30
+        self._client = None
 
     async def run(self):
         import httpx
-        while self._hub._running:
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.get(self._EAPI_MARK)
+        self._client = httpx.AsyncClient(timeout=30.0)
+        try:
+            while self._hub._running:
+                try:
+                    resp = await self._client.get(self._EAPI_MARK)
                     resp.raise_for_status()
                     marks = resp.json()
                     if isinstance(marks, list):
@@ -306,11 +320,14 @@ class BinanceWSConnector:
                             if await self._handle_mark(m):
                                 count += 1
                         logger.debug("Binance poll: %d/%d marks published", count, len(marks))
-            except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
-                logger.warning("Binance REST poll failed: %s", str(e))
-            except Exception as e:
-                logger.error("Binance REST poll unexpected: %s", str(e))
-            await asyncio.sleep(self._poll_interval)
+                except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
+                    logger.warning("Binance REST poll failed: %s", str(e))
+                except Exception as e:
+                    logger.error("Binance REST poll unexpected: %s", str(e))
+                await asyncio.sleep(self._poll_interval)
+        finally:
+            if self._client:
+                await self._client.aclose()
 
     async def _handle_mark(self, m: Dict) -> bool:
         symbol = m.get("symbol", "")
@@ -345,7 +362,6 @@ class DvolCalculator:
     
     def __init__(self, hub: DataHub):
         self._hub = hub
-        self._iv_samples: List[float] = []
         self._last_publish = 0
     
     async def run(self):

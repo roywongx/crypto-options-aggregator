@@ -6,7 +6,7 @@ v5.0: 渐进式重构 - API 端点已迁移到 api/ 目录模块
 """
 
 import os
-import sys
+import re
 import hmac
 import asyncio
 import logging
@@ -34,8 +34,6 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import config
 from routers.grid import router as grid_router
@@ -139,6 +137,14 @@ async def lifespan(app: FastAPI):
         except (ImportError, RuntimeError) as e:
             logger.debug("Sync HTTP client close failed: %s", e)
 
+        # 关闭扫描引擎线程池
+        try:
+            from services.scan_engine import _scan_executor
+            _scan_executor.shutdown(wait=False)
+            logger.info("扫描引擎线程池已关闭")
+        except (ImportError, RuntimeError) as e:
+            logger.debug("Scan executor shutdown failed: %s", e)
+
         # 关闭 Deribit monitor session
         try:
             from services.monitors import clear_all_monitors
@@ -160,8 +166,8 @@ def _is_local_request(request: Request) -> bool:
     client_host = request.client.host if request.client else ""
     if client_host in _LOCAL_HOSTS:
         return True
-    # TestClient 环境下 client_host 可能为空或为 testclient，允许通过
-    if not client_host or client_host == "testclient":
+    # 生产模式下空 host 视为不可信（反向代理未设 X-Forwarded-For 时可能出现）
+    if ENV == "development" and (not client_host or client_host == "testclient"):
         return True
     return False
 
@@ -235,7 +241,7 @@ class CachedStaticFiles(StaticFiles):
         if response.status_code == 200:
             ext = Path(path).suffix.lower()
             # 检查是否带 hash (如 app.abc123.js 或 app-v1.2.3.js)
-            has_hash = bool(__import__('re').search(r'[.\-][a-f0-9]{8,}[.\-]|\.v\d+\.', path))
+            has_hash = bool(re.search(r'[.\-][a-f0-9]{8,}[.\-]|\.v\d+\.', path))
             if ext == '.html' or not has_hash and ext in ('.js', '.css'):
                 response.headers["Cache-Control"] = self.CACHE_NONE
             elif has_hash and ext in ('.js', '.css', '.woff2', '.png', '.jpg', '.svg'):

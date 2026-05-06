@@ -15,12 +15,15 @@
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any
 
 
 def _dpapi_decrypt(encrypted: bytes) -> bytes:
-    """Windows DPAPI 解密 — 绑定当前用户+机器"""
+    """Windows DPAPI 解密 — 绑定当前用户+机器（仅 Windows 支持）"""
+    if sys.platform != "win32":
+        return None
     import ctypes
     from ctypes import wintypes
 
@@ -280,15 +283,24 @@ class Config:
             }
         }
     
+    # === 分散在各处的魔法数字，统一管理 ===
+    OI_MIN_THRESHOLD: float = 10.0
+    DEFAULT_MARGIN_RATIO: float = 0.2
+    TIME_DECAY_DAILY_RATE: float = 0.02
+    MIN_IV_THRESHOLD: float = 0.0
+
     def db_path(self) -> str:
         """获取数据库路径"""
         return self.DB_PATH_ENV or str(Path(__file__).parent / "data" / "monitor.db")
     
     def to_dict(self) -> Dict[str, Any]:
-        """导出配置为字典（用于调试）"""
+        """导出配置为字典（用于调试），过滤敏感字段"""
+        _SENSITIVE_KEYWORDS = ("KEY", "SECRET", "PASSWORD", "TOKEN")
         return {
             k: v for k, v in self.__dict__.items()
             if not k.startswith("_")
+            and not any(s in k.upper() for s in _SENSITIVE_KEYWORDS)
+            and not callable(v)
         }
 
 

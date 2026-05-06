@@ -48,7 +48,9 @@ class RiskFramework:
             return floors
         except (RuntimeError, ConnectionError, TimeoutError) as e:
             logger.warning("获取动态支撑位失败: %s", e)
-            # 回退到静态值
+            # 失败也更新时间戳，避免每次调用都重试
+            with cls._cache_lock:
+                cls._cache_timestamp = now
             return {
                 "regular": cls.REGULAR_FLOOR,
                 "extreme": cls.EXTREME_FLOOR,

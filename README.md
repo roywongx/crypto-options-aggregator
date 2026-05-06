@@ -83,7 +83,7 @@ Deribit WebSocket  ─┘        │
 | **Dual-Platform Scan** | Binance + Deribit options chain with unified Margin-APR ranking |
 | **Two-Layer Scanning** | Layer 1 quality filter (Delta/DTE/Volume/OI) + Layer 2 strategy scoring |
 | **Strategy Engine** | Roll / New position / Grid modes with automated P&L and breakeven calculation |
-| **Paper Trading** | 50K USDT simulation with real market data, margin freezing, position tracking |
+| **Paper Trading** | 50K USDT simulation, three-account model (cash + locked_margin + unrealized_pnl), BS pricing |
 | **Martingale Sandbox** | Interactive DCA simulation with configurable price path and strategy parameters |
 | **Portfolio AI Analysis** | Real Deribit portfolio SSE-streamed LLM deep analysis (Greeks, tail risk, scenario stress) |
 | **Freqtrade v3.0 Strategy** | Param optimizer (Bayesian + Grid Search), event-driven backtest engine, 6 protection guards |
@@ -130,6 +130,9 @@ Deribit WebSocket  ─┘        │
 | **SQLite WAL** | Async read + concurrent write, zero-config, auto-vacuum maintenance |
 | **API Key Auth** | HMAC constant-time comparison, localhost bypass for development |
 | **CORS Middleware** | Environment-aware CORS with production whitelist |
+| **Encryption at Rest** | Fernet symmetric encryption for LLM API keys, DPAPI for .env secrets |
+| **Data Integrity** | Pydantic validation on DB writes, copy-on-write snapshot reads |
+| **Concurrency Safety** | asyncio.Lock / threading.Lock serialization, reconnect jitter, GC-safe task refs |
 
 ---
 

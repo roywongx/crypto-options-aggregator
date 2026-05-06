@@ -190,17 +190,20 @@ class BaseExchange(ABC):
         """
         pass
 
-    @abstractmethod
     async def get_dvol(self, currency: str = "BTC") -> float:
-        """获取 DVOL 指数
-        
+        """获取 DVOL 指数（默认调用 Deribit，子类可覆盖）
+
         Args:
             currency: BTC/ETH
-        
+
         Returns:
             float: DVOL 指数值
         """
-        pass
+        from services.dvol_analyzer import get_dvol_from_deribit
+        try:
+            return await asyncio.to_thread(get_dvol_from_deribit, currency) or 0
+        except Exception:
+            return 0.0
 
     @abstractmethod
     async def get_spot_price(self, currency: str = "BTC") -> float:
@@ -614,18 +617,21 @@ class DeribitExchange(BaseExchange):
                 resp.raise_for_status()
                 data = resp.json().get("result", {})
                 ticks = data.get("ticks", [])
-                volume = data.get("volume", [])
+                opens = data.get("open", [])
+                highs = data.get("high", [])
+                lows = data.get("low", [])
+                closes = data.get("close", [])
+                volumes = data.get("volume", [])
                 klines = []
                 for i, t in enumerate(ticks):
                     dt = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
-                    ohlc = data.get("close", [])
                     klines.append({
                         "date": dt.strftime("%Y-%m-%d"),
-                        "open": float(ohlc[i * 4]) if i * 4 < len(ohlc) else 0,
-                        "high": float(ohlc[i * 4 + 1]) if i * 4 + 1 < len(ohlc) else 0,
-                        "low": float(ohlc[i * 4 + 2]) if i * 4 + 2 < len(ohlc) else 0,
-                        "close": float(ohlc[i * 4 + 3]) if i * 4 + 3 < len(ohlc) else 0,
-                        "volume": float(volume[i]) if i < len(volume) else 0,
+                        "open": float(opens[i]) if i < len(opens) else 0,
+                        "high": float(highs[i]) if i < len(highs) else 0,
+                        "low": float(lows[i]) if i < len(lows) else 0,
+                        "close": float(closes[i]) if i < len(closes) else 0,
+                        "volume": float(volumes[i]) if i < len(volumes) else 0,
                     })
                 return klines
         except Exception as e:
@@ -1115,4 +1121,24 @@ class ExchangeRegistry:
         return results
 
 
-registry = ExchangeRegistry()
+_registry: 'Optional[ExchangeRegistry]' = None
+
+
+def get_exchange_registry() -> 'ExchangeRegistry':
+    """惰性初始化交易所注册表，避免导入时某交易所不可用导致整个模块导入失败"""
+    global _registry
+    if _registry is None:
+        _registry = ExchangeRegistry()
+    return _registry
+
+
+# 模块级惰性代理，兼容 `from exchange_abstraction import registry` 用法
+class _RegistryProxy:
+    """代理所有属性访问到惰性初始化的 ExchangeRegistry 单例"""
+    def __getattr__(self, name):
+        return getattr(get_exchange_registry(), name)
+    def __repr__(self):
+        return repr(get_exchange_registry())
+
+
+registry = _RegistryProxy()

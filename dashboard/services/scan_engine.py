@@ -3,16 +3,13 @@
 从 main.py 提取，消除 api/scan.py 反向 import main 的循环依赖
 """
 
-import os
-import sys
 import json
 import sqlite3
 import math
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import Dict, Any
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from pydantic import BaseModel, field_validator
 
 from config import config
 from models.contracts import ScanParams, QuickScanParams
@@ -77,6 +74,41 @@ def _sanitize_raw_output(raw_data: dict) -> str:
     return output
 
 
+class TradeAlertRecord(BaseModel):
+    """Pydantic model 验证写入 large_trades_history 的字段"""
+    timestamp: str
+    currency: str
+    source: str
+    title: str = ""
+    message: str = ""
+    direction: str = ""
+    strike: float = 0
+    volume: float = 0
+    option_type: str = ""
+    flow_label: str = ""
+    notional_usd: float = 0
+    delta: float = 0
+    instrument_name: str = ""
+    premium_usd: float = 0
+    severity: str = ""
+
+    @field_validator("volume", "notional_usd", "premium_usd", "strike")
+    @classmethod
+    def must_be_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"must be non-negative, got {v}")
+        return v
+
+
+def _validate_trade(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Pydantic 校验交易记录字段，减少脏数据写入"""
+    try:
+        return TradeAlertRecord(**parsed).model_dump()
+    except Exception as e:
+        logger.warning("Trade record validation failed: %s — skipping", e)
+        return None
+
+
 def save_scan_record(data: Dict[str, Any]):
     """保存扫描记录到数据库（使用 execute_transaction 保证 _write_lock 和原子性）"""
     now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
@@ -111,21 +143,24 @@ def save_scan_record(data: Dict[str, Any]):
         raw_output
     )))
 
-    # 2. 插入 large_trades_history
+    # 2. 插入 large_trades_history（Pydantic 校验）
     if large_trades and isinstance(large_trades, list):
         for trade in large_trades:
             parsed = parse_trade_alert(trade, currency, now_str)
+            validated = _validate_trade(parsed)
+            if validated is None:
+                continue
             stmts.append(("""
                 INSERT INTO large_trades_history
                 (timestamp, currency, source, title, message, direction, strike, volume,
                  option_type, flow_label, notional_usd, delta, instrument_name, premium_usd, severity)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                parsed['timestamp'], parsed['currency'], parsed['source'],
-                parsed['title'], parsed['message'], parsed['direction'],
-                parsed['strike'], parsed['volume'], parsed['option_type'],
-                parsed['flow_label'], parsed['notional_usd'], parsed['delta'],
-                parsed['instrument_name'], parsed.get('premium_usd', 0), parsed.get('severity', '')
+                validated['timestamp'], validated['currency'], validated['source'],
+                validated['title'], validated['message'], validated['direction'],
+                validated['strike'], validated['volume'], validated['option_type'],
+                validated['flow_label'], validated['notional_usd'], validated['delta'],
+                validated['instrument_name'], validated['premium_usd'], validated['severity']
             )))
 
     # 3. 清理过期数据
@@ -197,9 +232,6 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         "/api/scan is deprecated - use /api/quick-scan for better performance",
         DeprecationWarning, stacklevel=2
     )
-
-    base_dir = Path(__file__).parent.parent
-    sys.path.insert(0, str(base_dir))
 
     spot_price = get_spot_price(params.currency)
     dvol_data = get_dvol_from_deribit(params.currency)
@@ -288,7 +320,7 @@ def _apply_quality_filter(contracts: list, spot: float) -> list:
         prem = float(s.get("mark_price") or 0)
         prem_usd = prem * underlying
         dist = abs(strike - spot) / spot * 100
-        margin_ratio = 0.2
+        margin_ratio = config.DEFAULT_MARGIN_RATIO
         cv = strike * margin_ratio
         apr = (prem_usd / cv) * (365 / meta.dte) * 100 if cv > 0 else 0
         bs_greeks = black_scholes_price(meta.option_type, strike, underlying, meta.dte, iv)

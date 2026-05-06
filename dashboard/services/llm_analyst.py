@@ -4,12 +4,53 @@ LLM 分析师引擎 — AI 研判中心核心
 """
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Any, Optional
 
+from cryptography.fernet import Fernet
+
 logger = logging.getLogger(__name__)
+
+
+def _get_or_create_fernet() -> Fernet:
+    """获取 Fernet 加密实例，密钥持久化到文件以便跨重启解密"""
+    env_key = os.environ.get("LLM_ENCRYPTION_KEY")
+    if env_key:
+        return Fernet(env_key.encode() if isinstance(env_key, str) else env_key)
+
+    key_file = Path(__file__).parent.parent / "data" / ".llm_key"
+    if key_file.exists():
+        return Fernet(key_file.read_bytes())
+
+    key = Fernet.generate_key()
+    key_file.parent.mkdir(parents=True, exist_ok=True)
+    key_file.write_bytes(key)
+    logger.info("Generated new Fernet key at %s", key_file)
+    return Fernet(key)
+
+
+_fernet = _get_or_create_fernet()
+
+
+def _encrypt_key(key: str) -> str:
+    if not key:
+        return ""
+    return _fernet.encrypt(key.encode()).decode()
+
+
+def _decrypt_key(encrypted: str) -> str:
+    if not encrypted:
+        return ""
+    try:
+        return _fernet.decrypt(encrypted.encode()).decode()
+    except Exception:
+        # 旧版明文密钥，返回原值（调用方会重新加密保存）
+        logger.info("Detected legacy plaintext API key, will migrate on next save")
+        return encrypted
 
 # Module-level imports so @patch("services.llm_analyst.X") works in tests
 from services.options_debate_engine import _gather_market_data
@@ -84,7 +125,7 @@ class LLMAnalystEngine:
         # 链上指标
         try:
             ctx["onchain"] = OnChainMetrics.get_all_metrics()
-        except (RuntimeError, ConnectionError, TimeoutError, Exception) as e:
+        except Exception as e:
             logger.warning("llm analyst onchain failed: %s", e)
             ctx["onchain"] = {}
             ctx["errors"].append(f"onchain: {e}")
@@ -92,7 +133,7 @@ class LLMAnalystEngine:
         # 衍生品指标
         try:
             ctx["derivatives"] = DerivativeMetrics.get_all_metrics()
-        except (RuntimeError, ConnectionError, TimeoutError, Exception) as e:
+        except Exception as e:
             logger.warning("llm analyst derivatives failed: %s", e)
             ctx["derivatives"] = {}
             ctx["errors"].append(f"derivatives: {e}")
@@ -100,7 +141,7 @@ class LLMAnalystEngine:
         # 宏观数据
         try:
             ctx["macro"] = get_all_macro_data()
-        except (RuntimeError, ConnectionError, TimeoutError, Exception) as e:
+        except Exception as e:
             logger.warning("llm analyst macro failed: %s", e)
             ctx["macro"] = {}
             ctx["errors"].append(f"macro: {e}")
@@ -148,7 +189,7 @@ class LLMAnalystEngine:
                     ctx["iv_term"] = {"error": "无有效 Deribit 数据", "state": "NO_DATA"}
             else:
                 ctx["iv_term"] = {"error": "Deribit summaries 为空", "state": "NO_DATA"}
-        except (RuntimeError, ConnectionError, TimeoutError, Exception) as e:
+        except Exception as e:
             logger.warning("llm analyst iv_term failed: %s", e)
             ctx["iv_term"] = {"error": str(e), "state": "NO_DATA"}
             ctx["errors"].append(f"iv_term: {e}")
@@ -261,37 +302,40 @@ class LLMAnalystEngine:
         return {"has_api_key": False, "base_url": "", "model": ""}
 
     def _get_custom_config(self) -> Optional[Dict[str, str]]:
-        """从数据库读取 LLM 配置，返回 custom_config 格式"""
+        """从数据库读取 LLM 配置，返回 custom_config 格式（解密 API Key）"""
         try:
             from db.connection import execute_read
             rows = execute_read(
                 "SELECT api_key, base_url, model FROM llm_config WHERE id=1"
             )
             if rows and rows[0]:
-                api_key = rows[0][0] or ""
+                encrypted_key = rows[0][0] or ""
                 base_url = rows[0][1] or ""
                 model = rows[0][2] or ""
-                if api_key:
-                    cfg = {"api_key": api_key}
-                    if base_url:
-                        cfg["base_url"] = base_url
-                    if model:
-                        cfg["model"] = model
-                    return cfg
+                if encrypted_key:
+                    api_key = _decrypt_key(encrypted_key)
+                    if api_key:
+                        cfg = {"api_key": api_key}
+                        if base_url:
+                            cfg["base_url"] = base_url
+                        if model:
+                            cfg["model"] = model
+                        return cfg
         except Exception as e:
             logger.warning("Failed to read LLM config: %s", e)
         return None
 
     def load_config(self) -> Dict[str, str]:
-        """从数据库加载 LLM 配置"""
+        """从数据库加载 LLM 配置（解密 API Key）"""
         try:
             from db.connection import execute_read
             rows = execute_read(
                 "SELECT api_key, base_url, model FROM llm_config WHERE id=1"
             )
             if rows and rows[0]:
+                encrypted_key = rows[0][0] or ""
                 return {
-                    "api_key": rows[0][0] or "",
+                    "api_key": _decrypt_key(encrypted_key),
                     "base_url": rows[0][1] or "",
                     "model": rows[0][2] or "",
                 }
@@ -300,13 +344,14 @@ class LLMAnalystEngine:
         return {"api_key": "", "base_url": "", "model": ""}
 
     def save_config(self, api_key: str, base_url: str = "", model: str = "") -> bool:
-        """保存 LLM 配置到数据库"""
+        """保存 LLM 配置到数据库，API Key 加密存储"""
         try:
             from db.connection import execute_write
+            encrypted_key = _encrypt_key(api_key) if api_key else ""
             execute_write(
                 """INSERT OR REPLACE INTO llm_config (id, api_key, base_url, model, updated_at)
                    VALUES (1, ?, ?, ?, datetime('now'))""",
-                (api_key, base_url, model)
+                (encrypted_key, base_url, model)
             )
             return True
         except Exception as e:

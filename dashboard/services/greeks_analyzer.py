@@ -81,7 +81,7 @@ class GreeksAnalyzer:
         total_oi = 0.0
 
         for c in contracts:
-            weight = max(1.0, c["oi"])
+            weight = c["oi"]
             total_delta += c["delta"] * weight
             total_gamma += c["gamma"] * weight
             total_theta += c["theta"] * weight
@@ -127,7 +127,7 @@ class GreeksAnalyzer:
             closest_strike_dist = float("inf")
 
             for c in data["contracts"]:
-                weight = max(1.0, c["oi"])
+                weight = c["oi"]
                 total_delta += c["delta"] * weight
                 total_gamma += c["gamma"] * weight
                 total_theta += c["theta"] * weight
@@ -223,7 +223,7 @@ class GreeksAnalyzer:
         total_vega = 0.0
 
         for c in contracts:
-            weight = max(1.0, c["oi"])
+            weight = c["oi"]
             total_delta += c["delta"] * weight
             total_vega += c["vega"] * weight
 
@@ -268,7 +268,7 @@ class GreeksAnalyzer:
             gex_regime = {"state": "NEGATIVE", "label": "负 Gamma", "icon": "zap",
                           "description": "做市商净空 gamma，趋势可能加速"}
         else:
-            gex_regime = {"state": "NEUTRAL", "label": "中性 Gamma", "icon": "⚖️",
+            gex_regime = {"state": "NEUTRAL", "label": "中性 Gamma", "icon": "balance",
                           "description": "GEX 接近零，方向不明确"}
 
         # Pin Risk
