@@ -40,10 +40,29 @@ def _get_deribit_monitor():
 
 def _parse_inst_name(inst: str) -> Optional[InstrumentInfo]:
     """
-    解析 Deribit instrument name
-    例如: BTC-25APR25-70000-P
-    返回 InstrumentInfo 或 None
+    解析期权 instrument name (支持 Deribit 和 Binance 格式)
+    Deribit: BTC-25APR25-70000-P (DDMMMYY)
+    Binance: BTC-260626-140000-C (YYMMDD)
     """
+    # 先检测 Binance 格式（6 位纯数字日期），直接用 regex 解析
+    m = re.match(r'([A-Z]+)-(\d{6})-(\d+)-([PC])', inst)
+    if m:
+        currency, expiry_str, strike_str, opt_type = m.groups()
+        try:
+            exp_date = datetime.strptime(expiry_str, '%y%m%d').replace(tzinfo=timezone.utc)
+            dte = max(1, (exp_date - datetime.now(timezone.utc)).days)
+        except (ValueError, TypeError):
+            logger.debug("Binance DTE parse fallback for %s", expiry_str)
+            dte = 30
+        return InstrumentInfo(
+            currency=currency,
+            expiry=expiry_str,
+            strike=float(strike_str),
+            option_type=opt_type,
+            dte=dte
+        )
+
+    # Deribit 格式: 先尝试 monitor，再尝试 regex
     try:
         mon = _get_deribit_monitor()
         meta = mon._parse_instrument_name(inst)
@@ -60,19 +79,20 @@ def _parse_inst_name(inst: str) -> Optional[InstrumentInfo]:
         pass
 
     m = re.match(r'([A-Z]+)-(\d+[A-Z]{3}\d+)-(\d+)-([PC])', inst)
-    if not m:
-        return None
-    currency, expiry_str, strike_str, opt_type = m.groups()
-    try:
-        exp_date = datetime.strptime(expiry_str, '%d%b%y')
-        dte = max(1, (exp_date - datetime.now(timezone.utc)).days)
-    except (ValueError, TypeError):
-        logger.debug("DTE parse fallback for %s", expiry_str)
-        dte = 30
-    return InstrumentInfo(
-        currency=currency,
-        expiry=expiry_str,
-        strike=float(strike_str),
-        option_type=opt_type,
-        dte=dte
-    )
+    if m:
+        currency, expiry_str, strike_str, opt_type = m.groups()
+        try:
+            exp_date = datetime.strptime(expiry_str, '%d%b%y').replace(tzinfo=timezone.utc)
+            dte = max(1, (exp_date - datetime.now(timezone.utc)).days)
+        except (ValueError, TypeError):
+            logger.debug("DTE parse fallback for %s", expiry_str)
+            dte = 30
+        return InstrumentInfo(
+            currency=currency,
+            expiry=expiry_str,
+            strike=float(strike_str),
+            option_type=opt_type,
+            dte=dte
+        )
+
+    return None

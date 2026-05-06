@@ -39,7 +39,6 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
     current_pcr = ne["put_oi"] / ne["call_oi"] if ne["call_oi"] > 0 else 0
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-    # OI-based PCR (实时，最近到期)：反映市场持仓结构
     oi_result = {"time": now, "pcr": round(current_pcr, 3), "pcr_type": "oi_based",
                  "puts": round(ne["put_oi"], 0), "calls": round(ne["call_oi"], 0)}
 
@@ -53,48 +52,81 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
         ORDER BY timestamp ASC
     """, (currency, since))
 
-    result = []
+    # ---- 第一遍：提取原始数据点 ----
+    raw_points = []
     for row in rows:
         ts = row[0]
         ltd = row[1]
+        spot = float(row[2] or 0)
         try:
             trades = json.loads(ltd) if ltd else []
             if not trades:
                 continue
 
-            # 过滤有效交易：volume > 0 且不超过极端值
             valid_trades = [t for t in trades if 0 < (t.get('volume') or 0) < 1000000]
             if not valid_trades:
                 continue
 
             put_count = sum(1 for t in valid_trades if (t.get('option_type') or 'P')[0].upper() == 'P')
             call_count = sum(1 for t in valid_trades if (t.get('option_type') or 'C')[0].upper() == 'C')
-            puts = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'P')[0].upper() == 'P')
-            calls = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'C')[0].upper() == 'C')
-            if puts == 0 and calls == 0:
-                continue
-            pcr_val = puts / calls if calls > 0 else 0
+            put_vol = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'P')[0].upper() == 'P')
+            call_vol = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'C')[0].upper() == 'C')
 
-            # 过滤极端异常值：样本过少或单边主导导致 PCR 无意义
-            # 正常 PCR 范围 0.3 ~ 5.0，但大单堆积时可能到 10
-            # 超过 20 或单边样本少于 2 笔的视为数据不足
-            if pcr_val > 20 or pcr_val < 0.02:
+            # 每边至少 3 笔，总成交量至少 20 张
+            if put_count < 3 or call_count < 3:
                 continue
-            if put_count < 2 or call_count < 2:
-                continue
-            if calls < 5 or puts < 5:
+            total_vol = put_vol + call_vol
+            if total_vol < 20:
                 continue
 
-            # Volume-based PCR (历史，大单交易量比)：反映实际交易流向
-            result.append({"time": ts, "pcr": round(pcr_val, 3), "pcr_type": "volume_based",
-                          "puts": puts, "calls": calls})
+            # 名义价值门槛：总名义价值至少 $50,000（避免小样本噪声）
+            notional = total_vol * spot if spot > 0 else total_vol * 80000
+            if notional < 50000:
+                continue
+
+            if call_vol <= 0:
+                continue
+
+            pcr_val = put_vol / call_vol
+
+            # PCR 合理范围 0.1 ~ 15（超过这些边界的通常是数据异常）
+            if pcr_val < 0.1 or pcr_val > 15:
+                continue
+
+            raw_points.append({"time": ts, "pcr": pcr_val, "puts": put_vol, "calls": call_vol})
         except (ValueError, TypeError, ZeroDivisionError) as e:
             logger.debug("PCR calc skip: %s", e)
 
-    if not result:
-        result.append(oi_result)
+    if not raw_points:
+        return [oi_result]
 
-    return result
+    # ---- 第二遍：IQR 统计离群值过滤 ----
+    pcr_values = [p["pcr"] for p in raw_points]
+    pcr_sorted = sorted(pcr_values)
+    n = len(pcr_sorted)
+    q1 = pcr_sorted[n // 4]
+    q3 = pcr_sorted[3 * n // 4]
+    iqr = q3 - q1
+    lower_fence = q1 - 2.5 * iqr
+    upper_fence = q3 + 2.5 * iqr
+
+    filtered = [p for p in raw_points if lower_fence <= p["pcr"] <= upper_fence]
+
+    # ---- 第三遍：滚动中位数平滑（窗口=3，消除孤立毛刺） ----
+    smoothed = []
+    for i, p in enumerate(filtered):
+        window = [filtered[j]["pcr"] for j in range(max(0, i - 1), min(len(filtered), i + 2))]
+        window.sort()
+        median = window[len(window) // 2]
+        smoothed.append({
+            "time": p["time"],
+            "pcr": round(median, 3),
+            "pcr_type": "volume_based",
+            "puts": p["puts"],
+            "calls": p["calls"],
+        })
+
+    return smoothed
 
 
 @router.get("/dvol")

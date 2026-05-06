@@ -2,10 +2,10 @@
 Binance Options API — 获取币安期权链数据
 
 Binance Options API 端点 (EAPI v1):
-  GET /eapi/v1/ticker         — 期权行情
-  GET /eapi/v1/exchangeInfo   — 期权合约规则
-  GET /eapi/v1/mark           — 标记价格
+  GET /eapi/v1/ticker         — 期权行情 (volume, bid/ask)
+  GET /eapi/v1/mark           — 标记价格 + IV + Greeks
   GET /eapi/v1/openInterest   — 未平仓合约
+  GET /eapi/v1/exchangeInfo   — 期权合约规则
 """
 import logging
 import time
@@ -16,14 +16,17 @@ import httpx
 logger = logging.getLogger(__name__)
 
 BINANCE_OPTIONS_BASE = "https://eapi.binance.com"
-CACHE_TTL = 30  # 秒
+TICKER_CACHE_TTL = 30  # 秒
+MARK_CACHE_TTL = 30
+OI_CACHE_TTL = 120
 
 
 # ---------------------------------------------------------------------------
-# 模块级缓存（避免同一次扫描中重复请求）
+# 模块级缓存
 # ---------------------------------------------------------------------------
-_ticker_cache: Dict[str, tuple] = {}  # {currency: (data, timestamp)}
-_exchange_info_cache: Dict[str, tuple] = {}
+_ticker_cache: Dict[str, tuple] = {}
+_mark_cache: Dict[str, tuple] = {}
+_oi_cache: Dict[str, tuple] = {}
 
 
 def _get_json(url: str, params: dict = None, timeout: float = 10.0) -> Optional[dict]:
@@ -37,11 +40,11 @@ def _get_json(url: str, params: dict = None, timeout: float = 10.0) -> Optional[
     return None
 
 
-def _get_ticker(currency: str) -> List[Dict]:
+def _get_tickers(currency: str) -> List[Dict]:
     now = time.time()
     if currency in _ticker_cache:
         data, ts = _ticker_cache[currency]
-        if now - ts < CACHE_TTL:
+        if now - ts < TICKER_CACHE_TTL:
             return data
 
     result = _get_json(f"{BINANCE_OPTIONS_BASE}/eapi/v1/ticker")
@@ -51,17 +54,45 @@ def _get_ticker(currency: str) -> List[Dict]:
     return []
 
 
-def _get_exchange_info(currency: str) -> Dict:
+def _get_marks(currency: str) -> Dict[str, Dict]:
+    """返回 {symbol: mark_data} 映射"""
     now = time.time()
-    if currency in _exchange_info_cache:
-        data, ts = _exchange_info_cache[currency]
-        if now - ts < 600:
+    if currency in _mark_cache:
+        data, ts = _mark_cache[currency]
+        if now - ts < MARK_CACHE_TTL:
             return data
 
-    result = _get_json(f"{BINANCE_OPTIONS_BASE}/eapi/v1/exchangeInfo")
-    if result:
-        _exchange_info_cache[currency] = (result, now)
-        return result
+    result = _get_json(f"{BINANCE_OPTIONS_BASE}/eapi/v1/mark")
+    if result and isinstance(result, list):
+        marks = {}
+        for m in result:
+            sym = m.get("symbol", "")
+            if sym:
+                marks[sym] = m
+        _mark_cache[currency] = (marks, now)
+        return marks
+    return {}
+
+
+def _get_open_interest(currency: str) -> Dict[str, float]:
+    """返回 {symbol: oi_value} 映射"""
+    now = time.time()
+    if currency in _oi_cache:
+        data, ts = _oi_cache[currency]
+        if now - ts < OI_CACHE_TTL:
+            return data
+
+    result = _get_json(f"{BINANCE_OPTIONS_BASE}/eapi/v1/openInterest")
+    if result and isinstance(result, list):
+        oi = {}
+        for item in result:
+            sym = item.get("symbol", "")
+            if sym:
+                oi[sym] = float(item.get("openInterest", 0) or 0)
+        _oi_cache[currency] = (oi, now)
+        return oi
+    # Binance EAPI 不公开 OI 端点，静默处理
+    _oi_cache[currency] = ({}, now)
     return {}
 
 
@@ -81,39 +112,43 @@ def fetch_binance_options(
     max_spread: float = 20.0,
     margin_ratio: float = 0.2,
 ) -> List[Dict[str, Any]]:
-    """
-    获取币安期权链，返回标准化合约列表。
-    """
+    """获取币安期权链，返回标准化合约列表。"""
     try:
         from services.spot_price import get_spot_price
         spot = get_spot_price(currency)
     except Exception:
         spot = 0
 
-    try:
-        from services.dvol_analyzer import calc_delta_bs
-    except Exception:
-        calc_delta_bs = None
+    from services.instrument import _parse_inst_name
 
-    tickers = _get_ticker(currency)
-    if not tickers:
+    tickers = _get_tickers(currency)
+    marks = _get_marks(currency)
+    oi_map = _get_open_interest(currency)
+
+    if not tickers or not marks:
         return []
 
-    from services.instrument import _parse_inst_name
+    # 建立 ticker 索引: symbol -> ticker
+    ticker_map = {}
+    for t in tickers:
+        sym = t.get("symbol", "")
+        if sym:
+            ticker_map[sym] = t
+
     results = []
 
-    for t in tickers:
-        symbol = t.get("symbol", "")
-        if not symbol.startswith(currency):
+    for sym, mark in marks.items():
+        if not sym.startswith(currency):
             continue
 
-        sym_opt_type = "C" if symbol.endswith("-C") else "P" if symbol.endswith("-P") else ""
+        # 期权类型过滤
+        sym_opt_type = "C" if sym.endswith("-C") else "P" if sym.endswith("-P") else ""
         if option_type.upper() == "PUT" and sym_opt_type != "P":
             continue
         if option_type.upper() == "CALL" and sym_opt_type != "C":
             continue
 
-        meta = _parse_inst_name(symbol)
+        meta = _parse_inst_name(sym)
         if not meta:
             continue
 
@@ -130,12 +165,14 @@ def fetch_binance_options(
         if strike_range and not (strike_range[0] <= strike_val <= strike_range[1]):
             continue
 
-        volume = float(t.get("volume", 0) or 0)
+        # 从 ticker 获取 volume / bid / ask
+        ticker = ticker_map.get(sym, {})
+        volume = float(ticker.get("volume", 0) or 0)
         if volume < min_vol:
             continue
 
-        bid = float(t.get("bidPrice", 0) or 0)
-        ask = float(t.get("askPrice", 0) or 0)
+        bid = float(ticker.get("bidPrice", 0) or 0)
+        ask = float(ticker.get("askPrice", 0) or 0)
         if bid > 0 and ask > 0:
             spread_pct = (ask - bid) / ((bid + ask) / 2) * 100
             if spread_pct > max_spread:
@@ -143,31 +180,30 @@ def fetch_binance_options(
         else:
             spread_pct = 0
 
-        iv = float(t.get("markIV", 0) or 0)
+        # 从 mark 获取 IV
+        iv = float(mark.get("markIV", 0) or 0)
+        # Binance markIV 以小数返回 (如 0.52 = 52%)
+        if iv < 1.0:
+            iv = iv * 100
         if iv <= 0 or iv > 200:
             continue
 
-        price = float(t.get("markPrice", 0) or 0)
-        oi = float(t.get("openInterest", 0) or 0)
-
-        # Delta 计算
-        if calc_delta_bs and spot > 0:
-            try:
-                delta_val = abs(calc_delta_bs(strike_val, spot, iv, dte, sym_opt_type))
-            except Exception:
-                delta_val = 0.5
-        else:
-            delta_val = 0.5
-
+        # 使用 Binance 官方 delta（比本地 BS 计算更准确）
+        delta_val = abs(float(mark.get("delta", 0) or 0))
         if delta_val > max_delta:
             continue
 
-        premium_usdt = price * spot if spot > 0 else price
+        # Binance markPrice 已经是 USDT 计价（每张合约=1 BTC 名义价值）
+        price = float(mark.get("markPrice", 0) or 0)
+        premium_usdt = price
+        oi = oi_map.get(sym, 0)
+
+        # 计算 APR
         cv = strike_val * margin_ratio
         apr = (premium_usdt / cv) * (365 / dte) * 100 if cv > 0 and dte > 0 else 0
 
         results.append({
-            "symbol": symbol,
+            "symbol": sym,
             "platform": "Binance",
             "strike": strike_val,
             "dte": dte,
@@ -175,6 +211,7 @@ def fetch_binance_options(
             "premium_usdt": round(premium_usdt, 2),
             "premium_usd": round(premium_usdt, 2),
             "premium": round(price, 4),
+            "premium_btc": round(price / spot, 6) if spot > 0 else 0,
             "iv": round(iv, 1),
             "delta": round(delta_val, 3),
             "open_interest": round(oi, 0),
@@ -188,6 +225,10 @@ def fetch_binance_options(
             "mark_price": round(price, 4),
             "mark_iv": round(iv, 1),
             "expiry": meta.expiry,
+            # 附加 Greeks（Binance 官方提供）
+            "gamma": round(float(mark.get("gamma", 0) or 0), 6),
+            "theta": round(float(mark.get("theta", 0) or 0), 2),
+            "vega": round(float(mark.get("vega", 0) or 0), 2),
         })
 
     logger.info("Binance Options: %d contracts for %s %s (DTE %d-%d)",
