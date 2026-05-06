@@ -53,7 +53,7 @@ class DynamicSupportCalculator:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": f"{self.currency}USDT", "interval": "1d", "limit": 200},
-                timeout=10, verify=True, max_retries=3
+                timeout=10, max_retries=3
             )
             klines = resp.json()
             closes = [float(k[4]) for k in klines]
@@ -71,7 +71,7 @@ class DynamicSupportCalculator:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": f"{self.currency}USDT", "interval": "1d", "limit": 90},
-                timeout=10, verify=True, max_retries=3
+                timeout=10, max_retries=3
             )
             klines = resp.json()
             highs = [float(k[2]) for k in klines]
@@ -111,7 +111,7 @@ class DynamicSupportCalculator:
         try:
             resp = request_with_retry(
                 "https://looknode-proxy.corms-cushier-0l.workers.dev/balancedPrice",
-                timeout=10, verify=True, max_retries=3
+                timeout=10, max_retries=3
             )
             data = resp.json()
             if "data" in data and data["data"]:
@@ -125,7 +125,7 @@ class DynamicSupportCalculator:
             if price:
                 resp2 = request_with_retry(
                     "https://looknode-proxy.corms-cushier-0l.workers.dev/mCapRealizedRatio",
-                    timeout=10, verify=True, max_retries=3
+                    timeout=10, max_retries=3
                 )
                 d = resp2.json()
                 if "data" in d and d["data"]:

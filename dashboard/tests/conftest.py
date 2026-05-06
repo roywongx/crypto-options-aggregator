@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from db.connection import get_db_connection
+from db.connection import get_db_connection, close_db_connection
 from db.schema import init_database_schema
 
 
@@ -18,3 +18,5 @@ def _init_db():
         init_database_schema(conn)
     finally:
         conn.close()
+    yield
+    close_db_connection()

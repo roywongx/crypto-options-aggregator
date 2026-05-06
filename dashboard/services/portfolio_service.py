@@ -19,9 +19,12 @@ import logging
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlencode
 
 import requests as req_lib
+
+_portfolio_executor = ThreadPoolExecutor(max_workers=7, thread_name_prefix="portfolio")
 
 from config import config
 from services.spot_price import get_spot_price
@@ -449,31 +452,28 @@ def get_portfolio() -> dict:
     t0 = time.time()
 
     # 并行获取 spot_price + 所有 Binance 数据
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     spot_price = 0
 
-    with ThreadPoolExecutor(max_workers=7) as pool:
-        future_spot = pool.submit(_safe_spot_price)
-        future_opts = pool.submit(_fetch_options_positions)
-        future_spot_bal = pool.submit(_fetch_spot_balances)
-        future_flex = pool.submit(_signed_get, "https://api.binance.com", "/sapi/v1/simple-earn/flexible/position")
-        future_locked = pool.submit(_signed_get, "https://api.binance.com", "/sapi/v1/simple-earn/locked/position")
-        future_futures = pool.submit(_fetch_futures_account)
-        future_funding = pool.submit(_fetch_funding_wallet)
+    future_spot = _portfolio_executor.submit(_safe_spot_price)
+    future_opts = _portfolio_executor.submit(_fetch_options_positions)
+    future_spot_bal = _portfolio_executor.submit(_fetch_spot_balances)
+    future_flex = _portfolio_executor.submit(_signed_get, "https://api.binance.com", "/sapi/v1/simple-earn/flexible/position")
+    future_locked = _portfolio_executor.submit(_signed_get, "https://api.binance.com", "/sapi/v1/simple-earn/locked/position")
+    future_futures = _portfolio_executor.submit(_fetch_futures_account)
+    future_funding = _portfolio_executor.submit(_fetch_funding_wallet)
 
-        spot_price = _result_or(future_spot, 0)
-        options_raw = _result_or(future_opts, [])
-        spot_balances = _result_or(future_spot_bal, [])
+    spot_price = _result_or(future_spot, 0)
+    options_raw = _result_or(future_opts, [])
+    spot_balances = _result_or(future_spot_bal, [])
 
-        flexible_data = _result_or(future_flex, None)
-        locked_data = _result_or(future_locked, None)
-        futures_account = _result_or(future_futures, {})
-        funding_wallet = _result_or(future_funding, {})
+    flexible_data = _result_or(future_flex, None)
+    locked_data = _result_or(future_locked, None)
+    futures_account = _result_or(future_futures, {})
+    funding_wallet = _result_or(future_funding, {})
 
-        for f in as_completed([future_spot, future_opts, future_spot_bal,
-                               future_flex, future_locked, future_futures, future_funding], timeout=0):
-            pass
+    for f in as_completed([future_spot, future_opts, future_spot_bal,
+                           future_flex, future_locked, future_futures, future_funding], timeout=0):
+        pass
 
     # 核心数据为空且缓存可用 → 回退缓存
     if not options_raw and not spot_balances and _portfolio_cache:

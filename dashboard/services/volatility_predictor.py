@@ -8,7 +8,6 @@ No heavy ML dependencies — pure statistical ensemble.
 import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ class VolatilityPredictor:
     def __init__(self):
         pass
 
-    def predict(self, dvol_history: List[Dict], current_spot: float = 0.0) -> VolatilitySignal:
+    def predict(self, dvol_history: List[Dict]) -> VolatilitySignal:
         """
         预测未来 7 天 DVOL 方向
 

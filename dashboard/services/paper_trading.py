@@ -420,7 +420,7 @@ def _get_account() -> Optional[Dict[str, Any]]:
             "initial_capital": r[1],
             "current_cash": r[2],
             "locked_margin": r[3] if len(r) > 3 else 0,
-            "currency": r[3] if len(r) <= 4 else (r[4] if len(r) > 4 else "BTC"),
+            "currency": r[4] if len(r) > 4 else "BTC",
         }
     return None
 

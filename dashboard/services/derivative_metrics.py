@@ -55,14 +55,14 @@ class DerivativeMetrics:
             oi_resp = request_with_retry(
                 "https://fapi.binance.com/fapi/v1/openInterest",
                 params={"symbol": symbol},
-                timeout=10, verify=False, max_retries=2
+                timeout=10, max_retries=2
             )
             current_oi = float(oi_resp.json().get("openInterest", 0))
 
             price_resp = request_with_retry(
                 "https://api.binance.com/api/v3/ticker/price",
                 params={"symbol": symbol},
-                timeout=10, verify=False, max_retries=2
+                timeout=10, max_retries=2
             )
             current_price = float(price_resp.json().get("price", 0))
 
@@ -148,7 +148,7 @@ class DerivativeMetrics:
                 resp = request_with_retry(
                     "https://fapi.binance.com/fapi/v1/premiumIndex",
                     params={"symbol": symbol},
-                    timeout=10, verify=False, max_retries=2
+                    timeout=10, max_retries=2
                 )
                 current_rate = float(resp.json().get("lastFundingRate", 0))
                 return {
@@ -317,7 +317,7 @@ class DerivativeMetrics:
                 "https://api.coingecko.com/api/v3/coins/tether",
                 params={"localization": "false", "tickers": "false", "community_data": "false",
                         "developer_data": "false"},
-                timeout=15, verify=False, max_retries=1
+                timeout=15, max_retries=1
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -362,14 +362,14 @@ class DerivativeMetrics:
             spot_resp = request_with_retry(
                 "https://api.binance.com/api/v3/ticker/24hr",
                 params={"symbol": symbol},
-                timeout=10, verify=False, max_retries=2
+                timeout=10, max_retries=2
             )
             spot_volume = float(spot_resp.json().get("volume", 0))
 
             futures_resp = request_with_retry(
                 "https://fapi.binance.com/fapi/v1/ticker/24hr",
                 params={"symbol": symbol},
-                timeout=10, verify=False, max_retries=2
+                timeout=10, max_retries=2
             )
             futures_volume = float(futures_resp.json().get("volume", 0))
 
@@ -400,7 +400,7 @@ class DerivativeMetrics:
             resp = request_with_retry(
                 "https://api.binance.com/api/v3/klines",
                 params={"symbol": "BTCUSDT", "interval": "1d", "limit": 90},
-                timeout=10, verify=False, max_retries=2
+                timeout=10, max_retries=2
             )
             klines = resp.json()
             if len(klines) < 30:

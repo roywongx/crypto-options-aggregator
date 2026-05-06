@@ -12,8 +12,9 @@ class TestPrepareContext:
     @patch("services.llm_analyst.DerivativeMetrics")
     @patch("services.llm_analyst.get_all_macro_data")
     @patch("services.llm_analyst.IVTermStructureAnalyzer")
+    @patch("services.trades.fetch_deribit_summaries", return_value=[])
     def test_prepare_context_returns_all_sections(
-        self, mock_iv, mock_macro, mock_deriv, mock_onchain, mock_gather
+        self, mock_fetch_summaries, mock_iv, mock_macro, mock_deriv, mock_onchain, mock_gather
     ):
         from services.llm_analyst import LLMAnalystEngine
 
@@ -32,7 +33,7 @@ class TestPrepareContext:
         mock_onchain.get_all_metrics.return_value = {"mvrv": 1.5, "nupl": 0.4, "convergence_score": 60}
         mock_deriv.get_all_metrics.return_value = {"sharpe_7d": 0.5, "vol_ratio": 1.2, "overheating": False}
         mock_macro.return_value = {"fear_greed": {"value": 50, "classification": "Neutral"}, "funding_rate": {"current_rate": 0.01}}
-        mock_iv.return_value.analyze.return_value = {"state": "contango", "slope": 0.02, "curvature": 0.01, "vrp": 5.0}
+        mock_iv.analyze_term_structure.return_value = {"state": "contango", "slope": 0.02, "curvature": 0.01, "vrp": 5.0}
 
         engine = LLMAnalystEngine()
         ctx = engine._prepare_context("BTC")
@@ -54,7 +55,8 @@ class TestPrepareContext:
     @patch("services.llm_analyst.DerivativeMetrics")
     @patch("services.llm_analyst.get_all_macro_data")
     @patch("services.llm_analyst.IVTermStructureAnalyzer")
-    def test_prepare_context_handles_missing_data(self, mock_iv, mock_macro, mock_deriv, mock_onchain, mock_gather):
+    @patch("services.trades.fetch_deribit_summaries", return_value=[])
+    def test_prepare_context_handles_missing_data(self, mock_fetch_summaries, mock_iv, mock_macro, mock_deriv, mock_onchain, mock_gather):
         from services.llm_analyst import LLMAnalystEngine
 
         mock_gather.return_value = {
@@ -65,7 +67,7 @@ class TestPrepareContext:
         mock_onchain.get_all_metrics.side_effect = ConnectionError("timeout")
         mock_deriv.get_all_metrics.side_effect = ConnectionError("api down")
         mock_macro.return_value = {}
-        mock_iv.return_value.analyze.return_value = {}
+        mock_iv.analyze_term_structure.return_value = {"error": "no data", "state": "NO_DATA"}
 
         engine = LLMAnalystEngine()
         ctx = engine._prepare_context("BTC")
@@ -207,29 +209,42 @@ class TestLLMConfig:
         from services.llm_analyst import LLMAnalystEngine
 
         engine = LLMAnalystEngine()
+        original = engine.load_config()
 
-        # Save
-        engine.save_config("sk-test123", "https://api.example.com/v1", "gpt-4o")
+        try:
+            engine.save_config("sk-test123", "https://api.example.com/v1", "gpt-4o")
 
-        # Load
-        config = engine.load_config()
-        assert config["api_key"] == "sk-test123"
-        assert config["base_url"] == "https://api.example.com/v1"
-        assert config["model"] == "gpt-4o"
+            config = engine.load_config()
+            assert config["api_key"] == "sk-test123"
+            assert config["base_url"] == "https://api.example.com/v1"
+            assert config["model"] == "gpt-4o"
+        finally:
+            engine.save_config(
+                original.get("api_key", ""),
+                original.get("base_url", ""),
+                original.get("model", ""),
+            )
 
     def test_load_config_empty(self):
         from services.llm_analyst import LLMAnalystEngine
-        from db.connection import execute_write
-
-        # Clear config
-        execute_write("DELETE FROM llm_config WHERE id=1")
 
         engine = LLMAnalystEngine()
-        config = engine.load_config()
+        original = engine.load_config()
 
-        assert config["api_key"] == ""
-        assert config["base_url"] == ""
-        assert config["model"] == ""
+        try:
+            from db.connection import execute_write
+            execute_write("DELETE FROM llm_config WHERE id=1")
+
+            config = engine.load_config()
+            assert config["api_key"] == ""
+            assert config["base_url"] == ""
+            assert config["model"] == ""
+        finally:
+            engine.save_config(
+                original.get("api_key", ""),
+                original.get("base_url", ""),
+                original.get("model", ""),
+            )
 
     @patch("services.llm_analyst.ai_chat_with_config")
     def test_test_connection_success(self, mock_ai):

@@ -29,14 +29,14 @@ class PerpBasisAnalyzer:
             perp_resp = request_with_retry(
                 cls.BINANCE_PERP_TICKER,
                 params={"symbol": symbol},
-                timeout=10, verify=False, max_retries=2
+                timeout=10, max_retries=2
             )
             perp_price = float(perp_resp.json().get("price", 0))
 
             spot_resp = request_with_retry(
                 cls.BINANCE_SPOT_TICKER,
                 params={"symbol": symbol},
-                timeout=10, verify=False, max_retries=2
+                timeout=10, max_retries=2
             )
             spot_price = float(spot_resp.json().get("price", 0))
 
@@ -52,7 +52,7 @@ class PerpBasisAnalyzer:
                 fr_resp = request_with_retry(
                     cls.FUNDING_RATE_URL,
                     params={"symbol": symbol},
-                    timeout=10, verify=False, max_retries=2
+                    timeout=10, max_retries=2
                 )
                 funding_rate = float(fr_resp.json().get("lastFundingRate", 0))
             except Exception as e:

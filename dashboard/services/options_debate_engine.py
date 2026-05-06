@@ -16,11 +16,16 @@ v2.0 改进:
 
 import math
 import time
+import threading
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# 模块级线程池 — 避免每次调用 _gather_market_data 重复创建
+_debate_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="debate")
 
 # ---------------------------------------------------------------------------
 # 数据收集层 — 短周期缓存，避免同一次请求中重复拉取 API
@@ -28,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 _gmd_cache: Dict[str, tuple] = {}  # {currency: (data, timestamp)}
 _GMD_CACHE_TTL = 5  # 秒，覆盖同一个 HTTP 请求的生命周期
+_gmd_lock = threading.Lock()
 
 
 def _gather_market_data(currency: str, force_refresh: bool = False) -> Dict[str, Any]:
@@ -38,11 +44,11 @@ def _gather_market_data(currency: str, force_refresh: bool = False) -> Dict[str,
     """
     if not force_refresh:
         now = time.time()
-        cached = _gmd_cache.get(currency)
-        if cached and (now - cached[1]) < _GMD_CACHE_TTL:
-            return cached[0]
+        with _gmd_lock:
+            cached = _gmd_cache.get(currency)
+            if cached and (now - cached[1]) < _GMD_CACHE_TTL:
+                return cached[0]
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
     data: Dict[str, Any] = {"currency": currency, "errors": []}
 
     results = {}
@@ -95,14 +101,13 @@ def _gather_market_data(currency: str, force_refresh: bool = False) -> Dict[str,
         except (RuntimeError, ValueError, TypeError) as e:
             return ("db_contracts_error", str(e))
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(_fetch_spot): "spot",
-            executor.submit(_fetch_dvol): "dvol",
-            executor.submit(_fetch_large_trades): "trades",
-            executor.submit(_fetch_db_contracts): "db",
-        }
-        for future in as_completed(futures, timeout=30):
+    futures = {
+        _debate_executor.submit(_fetch_spot): "spot",
+        _debate_executor.submit(_fetch_dvol): "dvol",
+        _debate_executor.submit(_fetch_large_trades): "trades",
+        _debate_executor.submit(_fetch_db_contracts): "db",
+    }
+    for future in as_completed(futures, timeout=30):
             try:
                 key, value = future.result(timeout=25)
                 results[key] = value
@@ -245,7 +250,8 @@ def _gather_market_data(currency: str, force_refresh: bool = False) -> Dict[str,
         data["max_pain"] = 0
 
     # 写入短周期缓存，同一次 HTTP 请求中的后续调用直接复用
-    _gmd_cache[currency] = (data, time.time())
+    with _gmd_lock:
+        _gmd_cache[currency] = (data, time.time())
     return data
 
 

@@ -301,10 +301,13 @@ def fetch_large_trades_sync(
 
     sql, params = _build_large_trades_query(currency, days, limit)
     conn = get_db_connection(read_only=True)
-    cursor = conn.cursor()
-    cursor.execute(sql, params)
-    rows = cursor.fetchall()
-    cursor.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        cursor.close()
+    finally:
+        conn.close()
 
     results, results_by_inst, seen = _parse_db_rows(rows, spot, classify_fn, parse_inst_fn)
 
@@ -353,10 +356,13 @@ async def fetch_large_trades_async(
 
     sql, params = _build_large_trades_query(currency, days, limit)
     conn = get_db_connection(read_only=True)
-    cursor = conn.cursor()
-    cursor.execute(sql, params)
-    rows = cursor.fetchall()
-    cursor.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        cursor.close()
+    finally:
+        conn.close()
 
     results, results_by_inst, seen = _parse_db_rows(rows, spot, classify_fn, parse_inst_fn)
 

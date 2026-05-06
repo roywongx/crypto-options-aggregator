@@ -13,6 +13,8 @@ from typing import Dict, List, Any, Optional
 from enum import Enum
 from datetime import datetime, timezone
 
+from services.http_client import get_async_client
+
 logger = logging.getLogger(__name__)
 
 
@@ -367,14 +369,14 @@ class BinanceExchange(BaseExchange):
     async def get_funding_rate(self, currency: str = "BTC") -> float:
         import httpx
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    "https://fapi.binance.com/fapi/v1/premiumIndex",
-                    params={"symbol": f"{currency}USDT"}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return float(data.get("lastFundingRate", 0))
+            client = get_async_client()
+            resp = await client.get(
+                "https://fapi.binance.com/fapi/v1/premiumIndex",
+                params={"symbol": f"{currency}USDT"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return float(data.get("lastFundingRate", 0))
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Binance get_funding_rate error: %s", str(e))
             return 0
@@ -382,17 +384,17 @@ class BinanceExchange(BaseExchange):
     async def get_open_interest(self, currency: str = "BTC") -> Dict[str, float]:
         import httpx
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    "https://eapi.binance.com/eapi/v1/openInterest",
-                    params={"underlyingAsset": currency}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return {
-                    item["symbol"]: float(item.get("sumOpenInterest", 0))
-                    for item in data
-                }
+            client = get_async_client()
+            resp = await client.get(
+                "https://eapi.binance.com/eapi/v1/openInterest",
+                params={"underlyingAsset": currency}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return {
+                item["symbol"]: float(item.get("sumOpenInterest", 0))
+                for item in data
+            }
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Binance get_open_interest error: %s", str(e))
             return {}
@@ -410,18 +412,18 @@ class BinanceExchange(BaseExchange):
             params = {"symbol": symbol, "interval": interval, "limit": min(limit, 500)}
             if start_time:
                 params["startTime"] = start_time
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get("https://api.binance.com/api/v3/klines", params=params)
-                resp.raise_for_status()
-                klines = []
-                for item in resp.json():
-                    klines.append({
-                        "date": datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
-                        "open": float(item[1]), "high": float(item[2]),
-                        "low": float(item[3]), "close": float(item[4]),
-                        "volume": float(item[5]),
-                    })
-                return sorted(klines, key=lambda k: k["date"])
+            client = get_async_client()
+            resp = await client.get("https://api.binance.com/api/v3/klines", params=params)
+            resp.raise_for_status()
+            klines = []
+            for item in resp.json():
+                klines.append({
+                    "date": datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                    "open": float(item[1]), "high": float(item[2]),
+                    "low": float(item[3]), "close": float(item[4]),
+                    "volume": float(item[5]),
+                })
+            return sorted(klines, key=lambda k: k["date"])
         except Exception as e:
             logger.warning("Binance klines fetch failed: %s", e)
             return []
@@ -562,31 +564,31 @@ class DeribitExchange(BaseExchange):
 
     async def get_funding_rate(self, currency: str = "BTC") -> float:
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{self._base_url}/public/get_funding_rate",
-                    params={"instrument_name": f"{currency}-PERPETUAL"}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return float(data.get("result", 0))
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/public/get_funding_rate",
+                params={"instrument_name": f"{currency}-PERPETUAL"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return float(data.get("result", 0))
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Deribit get_funding_rate error: %s", str(e))
             return 0
 
     async def get_open_interest(self, currency: str = "BTC") -> Dict[str, float]:
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    f"{self._base_url}/public/get_book_summary_by_currency",
-                    params={"currency": currency, "kind": "option"}
-                )
-                resp.raise_for_status()
-                data = resp.json().get("result", [])
-                return {
-                    item["instrument_name"]: item.get("open_interest", 0)
-                    for item in data
-                }
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/public/get_book_summary_by_currency",
+                params={"currency": currency, "kind": "option"}
+            )
+            resp.raise_for_status()
+            data = resp.json().get("result", [])
+            return {
+                item["instrument_name"]: item.get("open_interest", 0)
+                for item in data
+            }
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Deribit get_open_interest error: %s", str(e))
             return {}
@@ -604,31 +606,31 @@ class DeribitExchange(BaseExchange):
             params = {"resolution": interval.upper(), "limit": min(limit, 1000)}
             if start_time:
                 params["start_timestamp"] = start_time
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    f"{self._base_url}/public/get_tradingview_chart_data",
-                    params={"instrument_name": f"{currency}-PERPETUAL", **params}
-                )
-                resp.raise_for_status()
-                data = resp.json().get("result", {})
-                ticks = data.get("ticks", [])
-                opens = data.get("open", [])
-                highs = data.get("high", [])
-                lows = data.get("low", [])
-                closes = data.get("close", [])
-                volumes = data.get("volume", [])
-                klines = []
-                for i, t in enumerate(ticks):
-                    dt = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
-                    klines.append({
-                        "date": dt.strftime("%Y-%m-%d"),
-                        "open": float(opens[i]) if i < len(opens) else 0,
-                        "high": float(highs[i]) if i < len(highs) else 0,
-                        "low": float(lows[i]) if i < len(lows) else 0,
-                        "close": float(closes[i]) if i < len(closes) else 0,
-                        "volume": float(volumes[i]) if i < len(volumes) else 0,
-                    })
-                return klines
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/public/get_tradingview_chart_data",
+                params={"instrument_name": f"{currency}-PERPETUAL", **params}
+            )
+            resp.raise_for_status()
+            data = resp.json().get("result", {})
+            ticks = data.get("ticks", [])
+            opens = data.get("open", [])
+            highs = data.get("high", [])
+            lows = data.get("low", [])
+            closes = data.get("close", [])
+            volumes = data.get("volume", [])
+            klines = []
+            for i, t in enumerate(ticks):
+                dt = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
+                klines.append({
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "open": float(opens[i]) if i < len(opens) else 0,
+                    "high": float(highs[i]) if i < len(highs) else 0,
+                    "low": float(lows[i]) if i < len(lows) else 0,
+                    "close": float(closes[i]) if i < len(closes) else 0,
+                    "volume": float(volumes[i]) if i < len(volumes) else 0,
+                })
+            return klines
         except Exception as e:
             logger.warning("Deribit klines fetch failed: %s", e)
             return []
@@ -666,66 +668,66 @@ class BybitExchange(BaseExchange):
     ) -> List[OptionContract]:
         await self._rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    f"{self._base_url}/v5/market/tickers",
-                    params={"category": "option", "baseCoin": currency}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("retCode") != 0:
-                    logger.warning("Bybit options chain error: %s", data.get("retMsg"))
-                    return []
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/v5/market/tickers",
+                params={"category": "option", "baseCoin": currency}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("retCode") != 0:
+                logger.warning("Bybit options chain error: %s", data.get("retMsg"))
+                return []
 
-                contracts = []
-                now_dt = datetime.now(timezone.utc)
-                for item in data.get("result", {}).get("list", []):
-                    symbol = item.get("symbol", "")
-                    # Parse Bybit symbol: BTC-27JUN25-90000-P
-                    parts = symbol.split("-")
-                    if len(parts) < 4:
-                        continue
-                    try:
-                        exp_date = datetime.strptime(parts[1], "%d%b%y").replace(tzinfo=timezone.utc)
-                        dte = max(1, (exp_date - now_dt).days)
-                    except ValueError:
-                        continue
-                    if not (min_dte <= dte <= max_dte):
-                        continue
+            contracts = []
+            now_dt = datetime.now(timezone.utc)
+            for item in data.get("result", {}).get("list", []):
+                symbol = item.get("symbol", "")
+                # Parse Bybit symbol: BTC-27JUN25-90000-P
+                parts = symbol.split("-")
+                if len(parts) < 4:
+                    continue
+                try:
+                    exp_date = datetime.strptime(parts[1], "%d%b%y").replace(tzinfo=timezone.utc)
+                    dte = max(1, (exp_date - now_dt).days)
+                except ValueError:
+                    continue
+                if not (min_dte <= dte <= max_dte):
+                    continue
 
-                    opt_type_str = parts[-1]
-                    if option_type == OptionType.PUT and opt_type_str != "P":
-                        continue
-                    if option_type == OptionType.CALL and opt_type_str != "C":
-                        continue
+                opt_type_str = parts[-1]
+                if option_type == OptionType.PUT and opt_type_str != "P":
+                    continue
+                if option_type == OptionType.CALL and opt_type_str != "C":
+                    continue
 
-                    strike = float(parts[-2])
-                    mark_price = float(item.get("markPrice", 0))
-                    bid = float(item.get("bid1Price", 0))
-                    ask = float(item.get("ask1Price", 0))
-                    iv = float(item.get("markIv", 0)) * 100  # Bybit returns decimal
-                    delta = abs(float(item.get("delta", 0)))
-                    if delta > max_delta:
-                        continue
+                strike = float(parts[-2])
+                mark_price = float(item.get("markPrice", 0))
+                bid = float(item.get("bid1Price", 0))
+                ask = float(item.get("ask1Price", 0))
+                iv = float(item.get("markIv", 0)) * 100  # Bybit returns decimal
+                delta = abs(float(item.get("delta", 0)))
+                if delta > max_delta:
+                    continue
 
-                    contracts.append(OptionContract(
-                        symbol=symbol,
-                        exchange=ExchangeType.BYBIT,
-                        currency=currency,
-                        option_type=option_type,
-                        strike=strike,
-                        expiry=exp_date.strftime("%Y-%m-%d"),
-                        mark_price=mark_price,
-                        bid=bid, ask=ask,
-                        volume=float(item.get("volume24h", 0)),
-                        open_interest=float(item.get("openInterest", 0)),
-                        delta=delta,
-                        iv=round(iv, 1),
-                        spread_pct=((ask - bid) / mark_price * 100) if mark_price > 0 and bid > 0 else 0,
-                        raw_data=item,
-                        underlying_price=float(item.get("underlyingPrice", 0)),
-                    ))
-                return contracts
+                contracts.append(OptionContract(
+                    symbol=symbol,
+                    exchange=ExchangeType.BYBIT,
+                    currency=currency,
+                    option_type=option_type,
+                    strike=strike,
+                    expiry=exp_date.strftime("%Y-%m-%d"),
+                    mark_price=mark_price,
+                    bid=bid, ask=ask,
+                    volume=float(item.get("volume24h", 0)),
+                    open_interest=float(item.get("openInterest", 0)),
+                    delta=delta,
+                    iv=round(iv, 1),
+                    spread_pct=((ask - bid) / mark_price * 100) if mark_price > 0 and bid > 0 else 0,
+                    raw_data=item,
+                    underlying_price=float(item.get("underlyingPrice", 0)),
+                ))
+            return contracts
         except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError, KeyError) as e:
             logger.warning("Bybit options chain fetch failed: %s", e)
             return []
@@ -744,22 +746,22 @@ class BybitExchange(BaseExchange):
             if start_time:
                 params["start"] = start_time
 
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(f"{self._base_url}/v5/market/kline", params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("retCode") != 0:
-                    return []
+            client = get_async_client()
+            resp = await client.get(f"{self._base_url}/v5/market/kline", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("retCode") != 0:
+                return []
 
-                klines = []
-                for item in data.get("result", {}).get("list", []):
-                    klines.append({
-                        "date": datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
-                        "open": float(item[1]), "high": float(item[2]),
-                        "low": float(item[3]), "close": float(item[4]),
-                        "volume": float(item[5]),
-                    })
-                return sorted(klines, key=lambda k: k["date"])
+            klines = []
+            for item in data.get("result", {}).get("list", []):
+                klines.append({
+                    "date": datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                    "open": float(item[1]), "high": float(item[2]),
+                    "low": float(item[3]), "close": float(item[4]),
+                    "volume": float(item[5]),
+                })
+            return sorted(klines, key=lambda k: k["date"])
         except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError) as e:
             logger.warning("Bybit klines fetch failed: %s", e)
             return []
@@ -774,15 +776,15 @@ class BybitExchange(BaseExchange):
     async def get_spot_price(self, currency: str = "BTC") -> float:
         await self._rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{self._base_url}/v5/market/tickers",
-                    params={"category": "spot", "symbol": f"{currency}USDT"}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                items = data.get("result", {}).get("list", [])
-                return float(items[0]["lastPrice"]) if items else 0
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/v5/market/tickers",
+                params={"category": "spot", "symbol": f"{currency}USDT"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("result", {}).get("list", [])
+            return float(items[0]["lastPrice"]) if items else 0
         except Exception as e:
             logger.warning("Bybit spot price failed: %s", e)
             return 0
@@ -790,15 +792,15 @@ class BybitExchange(BaseExchange):
     async def get_funding_rate(self, currency: str = "BTC") -> float:
         await self._rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{self._base_url}/v5/market/tickers",
-                    params={"category": "linear", "symbol": f"{currency}USDT"}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                items = data.get("result", {}).get("list", [])
-                return float(items[0].get("fundingRate", 0)) if items else 0
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/v5/market/tickers",
+                params={"category": "linear", "symbol": f"{currency}USDT"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("result", {}).get("list", [])
+            return float(items[0].get("fundingRate", 0)) if items else 0
         except Exception as e:
             logger.warning("Bybit funding rate failed: %s", e)
             return 0
@@ -806,20 +808,20 @@ class BybitExchange(BaseExchange):
     async def get_open_interest(self, currency: str = "BTC") -> Dict[str, float]:
         await self._rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    f"{self._base_url}/v5/market/tickers",
-                    params={"category": "option", "baseCoin": currency}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("retCode") != 0:
-                    return {}
-                return {
-                    item["symbol"]: float(item.get("openInterest", 0))
-                    for item in data.get("result", {}).get("list", [])
-                    if item.get("symbol")
-                }
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/v5/market/tickers",
+                params={"category": "option", "baseCoin": currency}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("retCode") != 0:
+                return {}
+            return {
+                item["symbol"]: float(item.get("openInterest", 0))
+                for item in data.get("result", {}).get("list", [])
+                if item.get("symbol")
+            }
         except Exception as e:
             logger.warning("Bybit OI failed: %s", e)
             return {}
@@ -858,67 +860,67 @@ class OkxExchange(BaseExchange):
         await self._rate_limit()
         okx_uly = f"{currency}-USD"
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    f"{self._base_url}/api/v5/public/opt-summary",
-                    params={"uly": okx_uly, "expTime": ""}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("code") != "0":
-                    logger.warning("OKX options chain error: %s", data.get("msg"))
-                    return []
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/api/v5/public/opt-summary",
+                params={"uly": okx_uly, "expTime": ""}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != "0":
+                logger.warning("OKX options chain error: %s", data.get("msg"))
+                return []
 
-                contracts = []
-                now_dt = datetime.now(timezone.utc)
-                for item in data.get("data", []):
-                    inst_id = item.get("instId", "")
-                    # Parse OKX instId: BTC-USD-250627-90000-P
-                    parts = inst_id.split("-")
-                    if len(parts) < 5:
-                        continue
-                    try:
-                        exp_str = parts[2]
-                        exp_date = datetime.strptime(exp_str, "%y%m%d").replace(tzinfo=timezone.utc)
-                        dte = max(1, (exp_date - now_dt).days)
-                    except ValueError:
-                        continue
-                    if not (min_dte <= dte <= max_dte):
-                        continue
+            contracts = []
+            now_dt = datetime.now(timezone.utc)
+            for item in data.get("data", []):
+                inst_id = item.get("instId", "")
+                # Parse OKX instId: BTC-USD-250627-90000-P
+                parts = inst_id.split("-")
+                if len(parts) < 5:
+                    continue
+                try:
+                    exp_str = parts[2]
+                    exp_date = datetime.strptime(exp_str, "%y%m%d").replace(tzinfo=timezone.utc)
+                    dte = max(1, (exp_date - now_dt).days)
+                except ValueError:
+                    continue
+                if not (min_dte <= dte <= max_dte):
+                    continue
 
-                    opt_type_str = parts[-1]
-                    if option_type == OptionType.PUT and opt_type_str != "P":
-                        continue
-                    if option_type == OptionType.CALL and opt_type_str != "C":
-                        continue
+                opt_type_str = parts[-1]
+                if option_type == OptionType.PUT and opt_type_str != "P":
+                    continue
+                if option_type == OptionType.CALL and opt_type_str != "C":
+                    continue
 
-                    strike = float(parts[-2])
-                    mark_price = float(item.get("markPrice", 0))
-                    bid = float(item.get("bidPx", 0))
-                    ask = float(item.get("askPx", 0))
-                    iv = float(item.get("markVol", 0)) if item.get("markVol") else 50
-                    delta = abs(float(item.get("delta", 0)))
-                    if delta > max_delta:
-                        continue
+                strike = float(parts[-2])
+                mark_price = float(item.get("markPrice", 0))
+                bid = float(item.get("bidPx", 0))
+                ask = float(item.get("askPx", 0))
+                iv = float(item.get("markVol", 0)) if item.get("markVol") else 50
+                delta = abs(float(item.get("delta", 0)))
+                if delta > max_delta:
+                    continue
 
-                    contracts.append(OptionContract(
-                        symbol=inst_id,
-                        exchange=ExchangeType.OKX,
-                        currency=currency,
-                        option_type=option_type,
-                        strike=strike,
-                        expiry=exp_date.strftime("%Y-%m-%d"),
-                        mark_price=mark_price,
-                        bid=bid, ask=ask,
-                        volume=float(item.get("vol24h", 0)),
-                        open_interest=float(item.get("openInterest", 0)),
-                        delta=delta,
-                        iv=round(iv, 1),
-                        spread_pct=((ask - bid) / mark_price * 100) if mark_price > 0 and bid > 0 else 0,
-                        raw_data=item,
-                        underlying_price=float(item.get("ulyPrice", 0)),
-                    ))
-                return contracts
+                contracts.append(OptionContract(
+                    symbol=inst_id,
+                    exchange=ExchangeType.OKX,
+                    currency=currency,
+                    option_type=option_type,
+                    strike=strike,
+                    expiry=exp_date.strftime("%Y-%m-%d"),
+                    mark_price=mark_price,
+                    bid=bid, ask=ask,
+                    volume=float(item.get("vol24h", 0)),
+                    open_interest=float(item.get("openInterest", 0)),
+                    delta=delta,
+                    iv=round(iv, 1),
+                    spread_pct=((ask - bid) / mark_price * 100) if mark_price > 0 and bid > 0 else 0,
+                    raw_data=item,
+                    underlying_price=float(item.get("ulyPrice", 0)),
+                ))
+            return contracts
         except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError, KeyError) as e:
             logger.warning("OKX options chain fetch failed: %s", e)
             return []
@@ -937,23 +939,23 @@ class OkxExchange(BaseExchange):
             if start_time:
                 params["before"] = str(start_time)
 
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(f"{self._base_url}/api/v5/market/candles", params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("code") != "0":
-                    return []
+            client = get_async_client()
+            resp = await client.get(f"{self._base_url}/api/v5/market/candles", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != "0":
+                return []
 
-                klines = []
-                for item in data.get("data", []):
-                    # OKX format: [ts, open, high, low, close, vol, ...]
-                    klines.append({
-                        "date": datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
-                        "open": float(item[1]), "high": float(item[2]),
-                        "low": float(item[3]), "close": float(item[4]),
-                        "volume": float(item[5]),
-                    })
-                return sorted(klines, key=lambda k: k["date"])
+            klines = []
+            for item in data.get("data", []):
+                # OKX format: [ts, open, high, low, close, vol, ...]
+                klines.append({
+                    "date": datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                    "open": float(item[1]), "high": float(item[2]),
+                    "low": float(item[3]), "close": float(item[4]),
+                    "volume": float(item[5]),
+                })
+            return sorted(klines, key=lambda k: k["date"])
         except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError) as e:
             logger.warning("OKX klines fetch failed: %s", e)
             return []
@@ -968,15 +970,15 @@ class OkxExchange(BaseExchange):
     async def get_spot_price(self, currency: str = "BTC") -> float:
         await self._rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{self._base_url}/api/v5/market/ticker",
-                    params={"instId": f"{currency}-USDT"}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                items = data.get("data", [])
-                return float(items[0]["last"]) if items else 0
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/api/v5/market/ticker",
+                params={"instId": f"{currency}-USDT"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("data", [])
+            return float(items[0]["last"]) if items else 0
         except Exception as e:
             logger.warning("OKX spot price failed: %s", e)
             return 0
@@ -984,15 +986,15 @@ class OkxExchange(BaseExchange):
     async def get_funding_rate(self, currency: str = "BTC") -> float:
         await self._rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    f"{self._base_url}/api/v5/public/funding-rate",
-                    params={"instId": f"{currency}-USD-SWAP"}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                items = data.get("data", [])
-                return float(items[0].get("fundingRate", 0)) if items else 0
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/api/v5/public/funding-rate",
+                params={"instId": f"{currency}-USD-SWAP"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("data", [])
+            return float(items[0].get("fundingRate", 0)) if items else 0
         except Exception as e:
             logger.warning("OKX funding rate failed: %s", e)
             return 0
@@ -1000,20 +1002,20 @@ class OkxExchange(BaseExchange):
     async def get_open_interest(self, currency: str = "BTC") -> Dict[str, float]:
         await self._rate_limit()
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    f"{self._base_url}/api/v5/public/opt-summary",
-                    params={"uly": f"{currency}-USD", "expTime": ""}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("code") != "0":
-                    return {}
-                return {
-                    item["instId"]: float(item.get("openInterest", 0))
-                    for item in data.get("data", [])
-                    if item.get("instId")
-                }
+            client = get_async_client()
+            resp = await client.get(
+                f"{self._base_url}/api/v5/public/opt-summary",
+                params={"uly": f"{currency}-USD", "expTime": ""}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != "0":
+                return {}
+            return {
+                item["instId"]: float(item.get("openInterest", 0))
+                for item in data.get("data", [])
+                if item.get("instId")
+            }
         except Exception as e:
             logger.warning("OKX OI failed: %s", e)
             return {}

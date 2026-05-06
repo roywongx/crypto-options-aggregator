@@ -45,20 +45,19 @@ def retry_api(max_retries: int = 3, backoff_base: float = 1.0, exceptions: tuple
     return decorator
 
 def request_with_retry(url: str, params: dict = None, timeout: int = 10,
-                       max_retries: int = 3, verify: bool = True) -> httpx.Response:
+                       max_retries: int = 3) -> httpx.Response:
     """
     带重试的HTTP GET封装（使用httpx）
-    
+
     Args:
         url: 请求URL
         params: 请求参数
         timeout: 超时时间
         max_retries: 最大重试次数
-        verify: 是否验证SSL
-    
+
     Returns:
         httpx.Response
-    
+
     Raises:
         httpx.HTTPError: 所有重试失败后抛出
     """

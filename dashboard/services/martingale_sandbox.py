@@ -112,9 +112,9 @@ class MartingaleSandboxEngine:
         return candidates[:50]
     
     @classmethod
-    def calculate_recovery_plan(cls, candidate: Dict, total_loss: float, 
+    def calculate_recovery_plan(cls, candidate: Dict, total_loss: float,
                                  reserve_capital: float, old_margin: float,
-                                 max_contracts: int = 20) -> Dict:
+                                 max_contracts: int = 20) -> Optional[Dict]:
         """计算单个候选合约的恢复方案
         
         计算需要多少张合约才能覆盖损失，并检查资金是否足够
