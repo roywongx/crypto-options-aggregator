@@ -21,8 +21,8 @@ A high-performance options trading terminal purpose-built for **Sell Put / Cover
 
 为 Sell Put / Covered Call / Wheel 策略交易者打造的高性能期权交易终端。实时聚合币安和 Deribit 期权链，按风险调整收益率（保证金 APR）评分，提供从规则引擎到 LLM 深度分析的多层决策支持。
 
-- **178 tests passing** · **53 services** · **16 API modules** · **17 analysis panels**
-- **178 个测试通过** · **53 个服务模块** · **16 个 API 模块** · **17 个分析面板**
+- **178 tests passing** · **53 services** · **16 API modules** · **6 routers** · **17 analysis panels**
+- **178 个测试通过** · **53 个服务模块** · **16 个 API 模块** · **6 个路由** · **17 个分析面板**
 
 ---
 
@@ -310,7 +310,7 @@ crypto-options-aggregator/
 │   │   ├── volatility_predictor.py     # DVOL 7d/30d forecasting
 │   │   ├── exchange_abstraction.py     # Multi-exchange unified interface (ABC)
 │   │   └── ...                         # 37 more services
-│   ├── routers/                        # Additional routers (5 modules)
+│   ├── routers/                        # Additional routers (6 modules)
 │   │   ├── maxpain.py                  # Max pain + GEX
 │   │   ├── grid.py                     # Grid strategy
 │   │   ├── charts.py                   # Chart data
@@ -345,8 +345,16 @@ crypto-options-aggregator/
 
 ```bash
 cd dashboard
+
+# 全部测试
 python -m pytest tests/ -v
 # 178 passed
+
+# 单个测试文件
+python -m pytest tests/test_risk_math.py -v
+
+# 加密原生白盒测试（需网络，独立运行）
+python tests/test_crypto_whitebox.py
 ```
 
 ---
