@@ -413,11 +413,18 @@ async def quick_scan(params: QuickScanParams = None):
         if options_snapshot:
             options_age = datahub.get_snapshot_age(options_topic)
             if options_age < 30 and len(options_snapshot) > 0:
-                logger.info("DataHub scan: %d options from WebSocket cache (%.1fs old)", len(options_snapshot), options_age)
+                logger.info("DataHub scan: %d options from cache (%.1fs old)", len(options_snapshot), options_age)
                 summaries = []
+                binance_poll_count = 0
                 for symbol, opt_data in options_snapshot.items():
                     inst_meta = _parse_inst_name(symbol)
                     if not inst_meta:
+                        continue
+                    # Binance REST poll publishes to same topic but lacks greeks/OI fields.
+                    # Skip those entries — they have no OI and would fail the quality filter,
+                    # and they would also block the Deribit REST fallback below.
+                    if "open_interest" not in opt_data and "delta" not in opt_data:
+                        binance_poll_count += 1
                         continue
                     summaries.append({
                         "instrument_name": opt_data.get("symbol", symbol),
@@ -433,6 +440,8 @@ async def quick_scan(params: QuickScanParams = None):
                         "stats": {"volume": opt_data.get("volume") or 0},
                         "underlying_price": spot
                     })
+                if binance_poll_count > 0:
+                    logger.debug("DataHub: skipped %d Binance poll entries (no OI/greeks)", binance_poll_count)
                 binance_contracts = []
             else:
                 logger.info("DataHub options data too old (%.1fs), falling back to REST", options_age)
