@@ -215,8 +215,10 @@ async def get_llm_risk_insight(currency: str = Query(default="BTC")):
   "confidence": 0-100
 }}"""
 
+        import asyncio
         custom_config = LLMAnalystEngine()._get_custom_config()
-        response = ai_chat_with_config(
+        response = await asyncio.to_thread(
+            ai_chat_with_config,
             [{"role": "user", "content": prompt}],
             preset="analysis", temperature=0.3, max_tokens=1500,
             custom_config=custom_config

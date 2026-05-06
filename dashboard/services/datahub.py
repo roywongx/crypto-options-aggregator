@@ -276,76 +276,65 @@ class DeribitWSConnector:
 
 
 # ============================================================
-# Binance WebSocket 连接器
+# Binance REST 轮询连接器（原 WebSocket 已下线，改用 REST API）
 # ============================================================
 class BinanceWSConnector:
-    """Binance 持久 WebSocket 连接
-    
-    实时接收:
-    - mark price / IV (eapi@markPrice)
-    - orderbook 深度
+    """Binance 期权数据轮询器
+
+    Binance Options WebSocket (eapi/nbstream) 已在 2025 年下线，
+    改用 REST API 每 30 秒轮询一次获取 mark price / IV / Greeks。
     """
-    
+
+    _EAPI_MARK = "https://eapi.binance.com/eapi/v1/mark"
+
     def __init__(self, hub: DataHub, currencies: List[str] = None):
         self._hub = hub
         self._currencies = currencies or ["BTC", "ETH"]
-        self._ws = None
-        self._reconnect_delay = 2
-        self._max_reconnect_delay = 60
-    
+        self._poll_interval = 30
+
     async def run(self):
+        import httpx
         while self._hub._running:
             try:
-                await self._connect()
-            except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-                logger.error("Binance WS error: %s, reconnecting in %ds", str(e), self._reconnect_delay)
-                await asyncio.sleep(self._reconnect_delay)
-                self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
-    
-    async def _connect(self):
-        streams = []
-        for currency in self._currencies:
-            lower_currency = currency.lower()
-            streams.append(f"{lower_currency}@markPrice@1s")
-        
-        uri = f"wss://eapi.binance.com/eapi/stream?streams={'/'.join(streams)}"
-        async with websockets.connect(uri, ping_interval=30, ping_timeout=10) as ws:
-            self._ws = ws
-            self._reconnect_delay = 2
-            logger.info("Binance WebSocket connected: %s", uri)
-            
-            await self._listen()
-    
-    async def _listen(self):
-        async for message in self._ws:
-            try:
-                data = json.loads(message)
-                if "data" in data:
-                    await self._handle_message(data["data"])
-            except (json.JSONDecodeError, ValueError, TypeError) as e:
-                logger.debug("Binance message parse error: %s", str(e))
-    
-    async def _handle_message(self, data: Dict):
-        symbol = data.get("s", "")
-        mark_price = float(data.get("p", 0))
-        iv = float(data.get("iv", 0))
-        
-        if mark_price <= 0:
-            return
-        
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(self._EAPI_MARK)
+                    resp.raise_for_status()
+                    marks = resp.json()
+                    if isinstance(marks, list):
+                        count = 0
+                        for m in marks:
+                            if await self._handle_mark(m):
+                                count += 1
+                        logger.debug("Binance poll: %d/%d marks published", count, len(marks))
+            except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
+                logger.warning("Binance REST poll failed: %s", str(e))
+            except Exception as e:
+                logger.error("Binance REST poll unexpected: %s", str(e))
+            await asyncio.sleep(self._poll_interval)
+
+    async def _handle_mark(self, m: Dict) -> bool:
+        symbol = m.get("symbol", "")
+        if not symbol:
+            return False
         currency = "BTC" if symbol.startswith("BTC") else ("ETH" if symbol.startswith("ETH") else "")
         if not currency:
-            return
-        
+            return False
+
+        mark_price = float(m.get("markPrice", 0))
+        iv = float(m.get("markIV", 0))
+        if mark_price <= 0 and iv <= 0:
+            return False
+
         option_data = {
             "symbol": symbol,
             "mark_price": mark_price,
             "iv": iv,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        
+
         topic = TOPIC_BTC_OPTIONS if currency == "BTC" else TOPIC_ETH_OPTIONS
         await self._hub.publish(topic, symbol, option_data)
+        return True
 
 
 # ============================================================

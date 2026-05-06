@@ -143,10 +143,23 @@ class OptionContract:
 
 class BaseExchange(ABC):
     """交易所抽象基类
-    
+
     所有交易所适配器必须继承此类并实现所有抽象方法。
     这样主逻辑可以统一调用，无需关心底层交易所差异。
     """
+
+    # ── Rate limiting ──
+    _last_request_time: float = 0.0
+    _min_interval: float = 0.2  # 200ms between requests
+
+    async def _rate_limit(self):
+        """简单的请求间隔控制"""
+        import time as _time
+        now = _time.time()
+        elapsed = now - self._last_request_time
+        if elapsed < self._min_interval:
+            await asyncio.sleep(self._min_interval - elapsed)
+        self._last_request_time = _time.time()
 
     @abstractmethod
     async def get_options_chain(
@@ -224,6 +237,21 @@ class BaseExchange(ABC):
             Dict[str, float]: 合约符号 -> OI 映射
         """
         pass
+
+    @abstractmethod
+    async def get_historical_klines(
+        self,
+        currency: str = "BTC",
+        interval: str = "1d",
+        limit: int = 365,
+        start_time: Optional[int] = None,
+    ) -> List[Dict]:
+        """获取历史 K 线数据（用于回测）
+
+        Returns:
+            [{"date": "2025-01-01", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...}, ...]
+        """
+        ...
 
     @property
     @abstractmethod
@@ -370,6 +398,35 @@ class BinanceExchange(BaseExchange):
         except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
             logger.error("Binance get_open_interest error: %s", str(e))
             return {}
+
+    async def get_historical_klines(
+        self,
+        currency: str = "BTC",
+        interval: str = "1d",
+        limit: int = 365,
+        start_time: Optional[int] = None,
+    ) -> List[Dict]:
+        await self._rate_limit()
+        try:
+            symbol = f"{currency}USDT"
+            params = {"symbol": symbol, "interval": interval, "limit": min(limit, 500)}
+            if start_time:
+                params["startTime"] = start_time
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get("https://api.binance.com/api/v3/klines", params=params)
+                resp.raise_for_status()
+                klines = []
+                for item in resp.json():
+                    klines.append({
+                        "date": datetime.fromtimestamp(item[0] / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                        "open": float(item[1]), "high": float(item[2]),
+                        "low": float(item[3]), "close": float(item[4]),
+                        "volume": float(item[5]),
+                    })
+                return sorted(klines, key=lambda k: k["date"])
+        except Exception as e:
+            logger.warning("Binance klines fetch failed: %s", e)
+            return []
 
     def _calculate_expiry(self, dte: float) -> str:
         from datetime import timedelta
@@ -536,6 +593,430 @@ class DeribitExchange(BaseExchange):
             logger.error("Deribit get_open_interest error: %s", str(e))
             return {}
 
+    async def get_historical_klines(
+        self,
+        currency: str = "BTC",
+        interval: str = "1d",
+        limit: int = 365,
+        start_time: Optional[int] = None,
+    ) -> List[Dict]:
+        await self._rate_limit()
+        try:
+            # Deribit uses resolution: 1D, start_timestamp (ms), count
+            params = {"resolution": interval.upper(), "limit": min(limit, 1000)}
+            if start_time:
+                params["start_timestamp"] = start_time
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{self._base_url}/public/get_tradingview_chart_data",
+                    params={"instrument_name": f"{currency}-PERPETUAL", **params}
+                )
+                resp.raise_for_status()
+                data = resp.json().get("result", {})
+                ticks = data.get("ticks", [])
+                volume = data.get("volume", [])
+                klines = []
+                for i, t in enumerate(ticks):
+                    dt = datetime.fromtimestamp(t / 1000, tz=timezone.utc)
+                    ohlc = data.get("close", [])
+                    klines.append({
+                        "date": dt.strftime("%Y-%m-%d"),
+                        "open": float(ohlc[i * 4]) if i * 4 < len(ohlc) else 0,
+                        "high": float(ohlc[i * 4 + 1]) if i * 4 + 1 < len(ohlc) else 0,
+                        "low": float(ohlc[i * 4 + 2]) if i * 4 + 2 < len(ohlc) else 0,
+                        "close": float(ohlc[i * 4 + 3]) if i * 4 + 3 < len(ohlc) else 0,
+                        "volume": float(volume[i]) if i < len(volume) else 0,
+                    })
+                return klines
+        except Exception as e:
+            logger.warning("Deribit klines fetch failed: %s", e)
+            return []
+
+
+# ============================================================
+# BYBIT Exchange Adapter
+# ============================================================
+
+class BybitExchange(BaseExchange):
+    """Bybit 交易所适配器 — 期权链 + 现货 + 历史K线"""
+
+    def __init__(self):
+        self._base_url = "https://api.bybit.com"
+        self._min_interval = 0.3  # 300ms rate limit
+
+    @property
+    def exchange_type(self) -> ExchangeType:
+        return ExchangeType.BYBIT
+
+    @property
+    def name(self) -> str:
+        return "Bybit"
+
+    async def get_options_chain(
+        self,
+        currency: str,
+        option_type: OptionType,
+        min_dte: int = 5,
+        max_dte: int = 45,
+        max_delta: float = 0.6,
+        min_volume: float = 0,
+        max_spread_pct: float = 20.0,
+        strike_range: Optional[tuple] = None,
+    ) -> List[OptionContract]:
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{self._base_url}/v5/market/tickers",
+                    params={"category": "option", "baseCoin": currency}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("retCode") != 0:
+                    logger.warning("Bybit options chain error: %s", data.get("retMsg"))
+                    return []
+
+                contracts = []
+                now_dt = datetime.now(timezone.utc)
+                for item in data.get("result", {}).get("list", []):
+                    symbol = item.get("symbol", "")
+                    # Parse Bybit symbol: BTC-27JUN25-90000-P
+                    parts = symbol.split("-")
+                    if len(parts) < 4:
+                        continue
+                    try:
+                        exp_date = datetime.strptime(parts[1], "%d%b%y").replace(tzinfo=timezone.utc)
+                        dte = max(1, (exp_date - now_dt).days)
+                    except ValueError:
+                        continue
+                    if not (min_dte <= dte <= max_dte):
+                        continue
+
+                    opt_type_str = parts[-1]
+                    if option_type == OptionType.PUT and opt_type_str != "P":
+                        continue
+                    if option_type == OptionType.CALL and opt_type_str != "C":
+                        continue
+
+                    strike = float(parts[-2])
+                    mark_price = float(item.get("markPrice", 0))
+                    bid = float(item.get("bid1Price", 0))
+                    ask = float(item.get("ask1Price", 0))
+                    iv = float(item.get("markIv", 0)) * 100  # Bybit returns decimal
+                    delta = abs(float(item.get("delta", 0)))
+                    if delta > max_delta:
+                        continue
+
+                    contracts.append(OptionContract(
+                        symbol=symbol,
+                        exchange=ExchangeType.BYBIT,
+                        currency=currency,
+                        option_type=option_type,
+                        strike=strike,
+                        expiry=exp_date.strftime("%Y-%m-%d"),
+                        mark_price=mark_price,
+                        bid=bid, ask=ask,
+                        volume=float(item.get("volume24h", 0)),
+                        open_interest=float(item.get("openInterest", 0)),
+                        delta=delta,
+                        iv=round(iv, 1),
+                        spread_pct=((ask - bid) / mark_price * 100) if mark_price > 0 and bid > 0 else 0,
+                        raw_data=item,
+                        underlying_price=float(item.get("underlyingPrice", 0)),
+                    ))
+                return contracts
+        except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError, KeyError) as e:
+            logger.warning("Bybit options chain fetch failed: %s", e)
+            return []
+
+    async def get_historical_klines(
+        self,
+        currency: str = "BTC",
+        interval: str = "1d",
+        limit: int = 365,
+        start_time: Optional[int] = None,
+    ) -> List[Dict]:
+        await self._rate_limit()
+        try:
+            symbol = f"{currency}USDT"
+            params = {"category": "spot", "symbol": symbol, "interval": interval, "limit": min(limit, 200)}
+            if start_time:
+                params["start"] = start_time
+
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(f"{self._base_url}/v5/market/kline", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("retCode") != 0:
+                    return []
+
+                klines = []
+                for item in data.get("result", {}).get("list", []):
+                    klines.append({
+                        "date": datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                        "open": float(item[1]), "high": float(item[2]),
+                        "low": float(item[3]), "close": float(item[4]),
+                        "volume": float(item[5]),
+                    })
+                return sorted(klines, key=lambda k: k["date"])
+        except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError) as e:
+            logger.warning("Bybit klines fetch failed: %s", e)
+            return []
+
+    async def get_dvol(self, currency: str = "BTC") -> float:
+        from services.dvol_analyzer import get_dvol_from_deribit
+        try:
+            return await asyncio.to_thread(get_dvol_from_deribit, currency) or 0
+        except Exception:
+            return 0
+
+    async def get_spot_price(self, currency: str = "BTC") -> float:
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{self._base_url}/v5/market/tickers",
+                    params={"category": "spot", "symbol": f"{currency}USDT"}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("result", {}).get("list", [])
+                return float(items[0]["lastPrice"]) if items else 0
+        except Exception as e:
+            logger.warning("Bybit spot price failed: %s", e)
+            return 0
+
+    async def get_funding_rate(self, currency: str = "BTC") -> float:
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{self._base_url}/v5/market/tickers",
+                    params={"category": "linear", "symbol": f"{currency}USDT"}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("result", {}).get("list", [])
+                return float(items[0].get("fundingRate", 0)) if items else 0
+        except Exception as e:
+            logger.warning("Bybit funding rate failed: %s", e)
+            return 0
+
+    async def get_open_interest(self, currency: str = "BTC") -> Dict[str, float]:
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{self._base_url}/v5/market/tickers",
+                    params={"category": "option", "baseCoin": currency}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("retCode") != 0:
+                    return {}
+                return {
+                    item["symbol"]: float(item.get("openInterest", 0))
+                    for item in data.get("result", {}).get("list", [])
+                    if item.get("symbol")
+                }
+        except Exception as e:
+            logger.warning("Bybit OI failed: %s", e)
+            return {}
+
+
+# ============================================================
+# OKX Exchange Adapter
+# ============================================================
+
+class OkxExchange(BaseExchange):
+    """OKX 交易所适配器 — 期权链 + 现货 + 历史K线"""
+
+    def __init__(self):
+        self._base_url = "https://www.okx.com"
+        self._min_interval = 0.3
+
+    @property
+    def exchange_type(self) -> ExchangeType:
+        return ExchangeType.OKX
+
+    @property
+    def name(self) -> str:
+        return "OKX"
+
+    async def get_options_chain(
+        self,
+        currency: str,
+        option_type: OptionType,
+        min_dte: int = 5,
+        max_dte: int = 45,
+        max_delta: float = 0.6,
+        min_volume: float = 0,
+        max_spread_pct: float = 20.0,
+        strike_range: Optional[tuple] = None,
+    ) -> List[OptionContract]:
+        await self._rate_limit()
+        okx_uly = f"{currency}-USD"
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{self._base_url}/api/v5/public/opt-summary",
+                    params={"uly": okx_uly, "expTime": ""}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != "0":
+                    logger.warning("OKX options chain error: %s", data.get("msg"))
+                    return []
+
+                contracts = []
+                now_dt = datetime.now(timezone.utc)
+                for item in data.get("data", []):
+                    inst_id = item.get("instId", "")
+                    # Parse OKX instId: BTC-USD-250627-90000-P
+                    parts = inst_id.split("-")
+                    if len(parts) < 5:
+                        continue
+                    try:
+                        exp_str = parts[2]
+                        exp_date = datetime.strptime(exp_str, "%y%m%d").replace(tzinfo=timezone.utc)
+                        dte = max(1, (exp_date - now_dt).days)
+                    except ValueError:
+                        continue
+                    if not (min_dte <= dte <= max_dte):
+                        continue
+
+                    opt_type_str = parts[-1]
+                    if option_type == OptionType.PUT and opt_type_str != "P":
+                        continue
+                    if option_type == OptionType.CALL and opt_type_str != "C":
+                        continue
+
+                    strike = float(parts[-2])
+                    mark_price = float(item.get("markPrice", 0))
+                    bid = float(item.get("bidPx", 0))
+                    ask = float(item.get("askPx", 0))
+                    iv = float(item.get("markVol", 0)) if item.get("markVol") else 50
+                    delta = abs(float(item.get("delta", 0)))
+                    if delta > max_delta:
+                        continue
+
+                    contracts.append(OptionContract(
+                        symbol=inst_id,
+                        exchange=ExchangeType.OKX,
+                        currency=currency,
+                        option_type=option_type,
+                        strike=strike,
+                        expiry=exp_date.strftime("%Y-%m-%d"),
+                        mark_price=mark_price,
+                        bid=bid, ask=ask,
+                        volume=float(item.get("vol24h", 0)),
+                        open_interest=float(item.get("openInterest", 0)),
+                        delta=delta,
+                        iv=round(iv, 1),
+                        spread_pct=((ask - bid) / mark_price * 100) if mark_price > 0 and bid > 0 else 0,
+                        raw_data=item,
+                        underlying_price=float(item.get("ulyPrice", 0)),
+                    ))
+                return contracts
+        except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError, KeyError) as e:
+            logger.warning("OKX options chain fetch failed: %s", e)
+            return []
+
+    async def get_historical_klines(
+        self,
+        currency: str = "BTC",
+        interval: str = "1d",
+        limit: int = 365,
+        start_time: Optional[int] = None,
+    ) -> List[Dict]:
+        await self._rate_limit()
+        try:
+            inst_id = f"{currency}-USDT"
+            params = {"instId": inst_id, "bar": interval, "limit": min(limit, 300)}
+            if start_time:
+                params["before"] = str(start_time)
+
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(f"{self._base_url}/api/v5/market/candles", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != "0":
+                    return []
+
+                klines = []
+                for item in data.get("data", []):
+                    # OKX format: [ts, open, high, low, close, vol, ...]
+                    klines.append({
+                        "date": datetime.fromtimestamp(int(item[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
+                        "open": float(item[1]), "high": float(item[2]),
+                        "low": float(item[3]), "close": float(item[4]),
+                        "volume": float(item[5]),
+                    })
+                return sorted(klines, key=lambda k: k["date"])
+        except (httpx.HTTPError, httpx.TimeoutException, RuntimeError, ValueError) as e:
+            logger.warning("OKX klines fetch failed: %s", e)
+            return []
+
+    async def get_dvol(self, currency: str = "BTC") -> float:
+        from services.dvol_analyzer import get_dvol_from_deribit
+        try:
+            return await asyncio.to_thread(get_dvol_from_deribit, currency) or 0
+        except Exception:
+            return 0
+
+    async def get_spot_price(self, currency: str = "BTC") -> float:
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{self._base_url}/api/v5/market/ticker",
+                    params={"instId": f"{currency}-USDT"}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("data", [])
+                return float(items[0]["last"]) if items else 0
+        except Exception as e:
+            logger.warning("OKX spot price failed: %s", e)
+            return 0
+
+    async def get_funding_rate(self, currency: str = "BTC") -> float:
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{self._base_url}/api/v5/public/funding-rate",
+                    params={"instId": f"{currency}-USD-SWAP"}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("data", [])
+                return float(items[0].get("fundingRate", 0)) if items else 0
+        except Exception as e:
+            logger.warning("OKX funding rate failed: %s", e)
+            return 0
+
+    async def get_open_interest(self, currency: str = "BTC") -> Dict[str, float]:
+        await self._rate_limit()
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{self._base_url}/api/v5/public/opt-summary",
+                    params={"uly": f"{currency}-USD", "expTime": ""}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != "0":
+                    return {}
+                return {
+                    item["instId"]: float(item.get("openInterest", 0))
+                    for item in data.get("data", [])
+                    if item.get("instId")
+                }
+        except Exception as e:
+            logger.warning("OKX OI failed: %s", e)
+            return {}
+
 
 # ============================================================
 # Exchange Registry - 交易所注册表
@@ -551,6 +1032,8 @@ class ExchangeRegistry:
     def _register_defaults(self):
         self.register(BinanceExchange())
         self.register(DeribitExchange())
+        self.register(BybitExchange())
+        self.register(OkxExchange())
 
     def register(self, exchange: BaseExchange):
         self._exchanges[exchange.exchange_type] = exchange
@@ -577,9 +1060,59 @@ class ExchangeRegistry:
                 )
                 summary[ex_type.value] = [c.to_dict() for c in chain]
             except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
-                logger.error("{ex_type.value} chain error: {str(e)}")
+                logger.error("%s chain error: %s", ex_type.value, str(e))
                 summary[ex_type.value] = []
         return summary
+
+    async def get_multi_exchange_best_bid_ask(
+        self,
+        currency: str,
+        option_type: OptionType,
+    ) -> Dict[str, Any]:
+        """跨交易所获取最佳买卖报价（流动性聚合）"""
+        best_bid = {"price": 0.0, "exchange": ""}
+        best_ask = {"price": float("inf"), "exchange": ""}
+        all_quotes = {}
+
+        for ex_type, exchange in self._exchanges.items():
+            try:
+                chain = await exchange.get_options_chain(currency, option_type)
+                if not chain:
+                    continue
+                # Find the contract with tightest spread
+                for c in chain:
+                    if c.bid > best_bid["price"]:
+                        best_bid = {"price": c.bid, "exchange": ex_type.value, "symbol": c.symbol}
+                    if c.ask < best_ask["price"] and c.ask > 0:
+                        best_ask = {"price": c.ask, "exchange": ex_type.value, "symbol": c.symbol}
+                all_quotes[ex_type.value] = len(chain)
+            except Exception as e:
+                logger.debug("%s bid/ask fetch failed: %s", ex_type.value, e)
+                all_quotes[ex_type.value] = 0
+
+        return {
+            "best_bid": best_bid,
+            "best_ask": best_ask,
+            "spread": round(best_ask["price"] - best_bid["price"], 2) if best_ask["price"] > 0 and best_bid["price"] > 0 else 0,
+            "contracts_found": all_quotes,
+        }
+
+    async def get_historical_klines_all(
+        self,
+        currency: str = "BTC",
+        interval: str = "1d",
+        limit: int = 365,
+    ) -> Dict[str, List[Dict]]:
+        """从所有交易所获取历史 K 线"""
+        results = {}
+        for ex_type, exchange in self._exchanges.items():
+            try:
+                klines = await exchange.get_historical_klines(currency, interval, limit)
+                if klines:
+                    results[ex_type.value] = klines
+            except Exception as e:
+                logger.debug("%s klines failed: %s", ex_type.value, e)
+        return results
 
 
 registry = ExchangeRegistry()

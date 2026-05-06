@@ -17,13 +17,17 @@ async def get_macro(currency: str = "BTC"):
     from db.connection import execute_read
     import json
 
-    result = await run_in_threadpool(get_all_macro_data)
+    try:
+        result = await run_in_threadpool(get_all_macro_data)
+    except Exception as e:
+        logger.warning("Macro get_all_macro_data failed: %s", e)
+        result = {}
 
     # 添加现货价格
     try:
         spot = await run_in_threadpool(get_spot_price, currency)
         result["spot_price"] = spot
-    except (RuntimeError, ValueError) as e:
+    except Exception as e:
         logger.warning("Macro spot price failed: %s", e)
         result["spot_price"] = None
 
@@ -38,7 +42,7 @@ async def get_macro(currency: str = "BTC"):
             result["dvol_trend_label"] = dvol.get("trend_label", "")
             result["dvol_confidence"] = dvol.get("confidence", "")
             result["dvol_interpretation"] = dvol.get("interpretation", "")
-    except (RuntimeError, ConnectionError, TimeoutError) as e:
+    except Exception as e:
         logger.warning("Macro DVOL failed: %s", e)
         result["dvol_current"] = 0
         result["dvol_z_score"] = 0

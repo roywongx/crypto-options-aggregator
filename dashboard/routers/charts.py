@@ -63,14 +63,22 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
             if not valid_trades:
                 continue
 
+            put_count = sum(1 for t in valid_trades if (t.get('option_type') or 'P')[0].upper() == 'P')
+            call_count = sum(1 for t in valid_trades if (t.get('option_type') or 'C')[0].upper() == 'C')
             puts = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'P')[0].upper() == 'P')
             calls = sum(t.get('volume', 0) or 0 for t in valid_trades if (t.get('option_type') or 'C')[0].upper() == 'C')
             if puts == 0 and calls == 0:
                 continue
             pcr_val = puts / calls if calls > 0 else 0
 
-            # 过滤极端异常值（PCR 正常范围 0.1 ~ 10）
-            if pcr_val > 50 or pcr_val < 0.01:
+            # 过滤极端异常值：样本过少或单边主导导致 PCR 无意义
+            # 正常 PCR 范围 0.3 ~ 5.0，但大单堆积时可能到 10
+            # 超过 20 或单边样本少于 2 笔的视为数据不足
+            if pcr_val > 20 or pcr_val < 0.02:
+                continue
+            if put_count < 2 or call_count < 2:
+                continue
+            if calls < 5 or puts < 5:
                 continue
 
             result.append({"time": ts, "pcr": round(pcr_val, 3), "puts": puts, "calls": calls})

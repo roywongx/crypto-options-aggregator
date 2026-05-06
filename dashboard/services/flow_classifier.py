@@ -1,6 +1,9 @@
 # Services - Flow Classifier
 import re
+import logging
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 FLOW_LABEL_MAP = {
     "sell_put_deep_itm": ("保护性对冲", "深度ITM Sell Put，强烈看涨愿意接货"),
@@ -146,6 +149,13 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
     volume = float(trade.get('amount', 0) or 0)
     if not volume:
         volume = float(trade.get('volume', 0) or 0)
+    # 合理性校验：单笔交易合约数不应超过 100,000
+    if volume > 100_000:
+        logger.warning(
+            "Trade volume exceeds reasonable limit: %s | instrument=%s",
+            volume, ins_name
+        )
+        volume = 0
 
     notional_usd = float(trade.get('underlying_notional_usd', 0) or 0)
     if not notional_usd:
@@ -154,6 +164,16 @@ def parse_trade_alert(trade: Dict[str, Any], currency: str, timestamp: str) -> D
         index_price = float(trade.get('index_price', 0) or 0)
         if index_price > 0:
             notional_usd = volume * index_price
+    # 合理性校验：期权名义价值不应超过 10 亿美元
+    MAX_REASONABLE_NOTIONAL = 1_000_000_000
+    if notional_usd > MAX_REASONABLE_NOTIONAL:
+        logger.warning(
+            "Trade notional exceeds reasonable limit: %s | strike=%s | volume=%s | instrument=%s",
+            notional_usd, strike, volume, ins_name
+        )
+        # 尝试用 volume * strike 估算
+        fallback = volume * float(strike or 0) if volume and strike else 0
+        notional_usd = fallback if 0 < fallback <= MAX_REASONABLE_NOTIONAL else 0
 
     premium_usd = float(trade.get('premium_usd', 0) or 0)
     if not premium_usd and volume:

@@ -83,6 +83,13 @@ async def get_wind_analysis(
         ORDER BY strike ASC
     """, (currency, since_str))
 
+    # 现货附近的单笔交易（用于 moneyness 分桶和 freshness 判断）
+    detail_rows = await execute_read_async("""
+        SELECT strike, direction, option_type, notional_usd
+        FROM large_trades_history
+        WHERE currency = ? AND timestamp >= ?
+    """, (currency, since_str))
+
     summary_data = {'buy_put': 0, 'sell_call': 0, 'buy_call': 0, 'sell_put': 0,
                     'total_count': 0, 'put_vol': 0, 'call_vol': 0,
                     'buy_put_notional': 0, 'sell_put_notional': 0,
@@ -175,8 +182,13 @@ async def get_wind_analysis(
             strikes[strike]['put'] += vol
         strikes[strike]['total'] += vol
 
+    # 只保留现价 ±25% 范围内的行权价
+    spot_range_low = spot * 0.75 if spot > 0 else 0
+    spot_range_high = spot * 1.25 if spot > 0 else float('inf')
     distribution = []
     for k in sorted(strikes.keys()):
+        if k < spot_range_low or k > spot_range_high:
+            continue
         v = strikes[k]
         dist_pct = ((k - spot) / spot * 100) if spot > 0 else 0
         distribution.append({
@@ -187,8 +199,11 @@ async def get_wind_analysis(
             "dist_from_spot_pct": round(dist_pct, 2)
         })
 
+    # 现价附近行权价流向（仅 ±25%）
     strike_flows = []
-    for k in sorted(strikes.keys())[:20]:
+    for k in sorted(strikes.keys()):
+        if k < spot_range_low or k > spot_range_high:
+            continue
         v = strikes[k]
         net = v['put'] - v['call']
         dist_pct = ((k - spot) / spot * 100) if spot > 0 else 0
@@ -200,6 +215,42 @@ async def get_wind_analysis(
             "dist_from_spot_pct": round(dist_pct, 2)
         })
 
+    # === Moneyness 分桶 (名义价值) ===
+    moneyness_buckets = [
+        {"key": "deep_otm_put",  "label": "深度虚值Put",  "range": "< -20%",  "notional": 0, "count": 0},
+        {"key": "otm_put",       "label": "虚值Put",       "range": "-20%~-5%", "notional": 0, "count": 0},
+        {"key": "near_atm",      "label": "平值附近",      "range": "±5%",      "notional": 0, "count": 0},
+        {"key": "otm_call",      "label": "虚值Call",      "range": "+5%~+20%", "notional": 0, "count": 0},
+        {"key": "deep_otm_call", "label": "深度虚值Call",  "range": "> +20%",   "notional": 0, "count": 0},
+    ]
+    near_spot_trades = 0
+    for row in detail_rows:
+        strike = float(row[0] or 0)
+        notional = float(row[3] or 0)
+        if spot > 0:
+            pct = (strike - spot) / spot
+            if pct < -0.20:
+                moneyness_buckets[0]["notional"] += notional
+                moneyness_buckets[0]["count"] += 1
+            elif pct < -0.05:
+                moneyness_buckets[1]["notional"] += notional
+                moneyness_buckets[1]["count"] += 1
+            elif pct <= 0.05:
+                moneyness_buckets[2]["notional"] += notional
+                moneyness_buckets[2]["count"] += 1
+                near_spot_trades += 1
+            elif pct <= 0.20:
+                moneyness_buckets[3]["notional"] += notional
+                moneyness_buckets[3]["count"] += 1
+            else:
+                moneyness_buckets[4]["notional"] += notional
+                moneyness_buckets[4]["count"] += 1
+    for b in moneyness_buckets:
+        b["notional"] = round(b["notional"], 0)
+
+    # 数据新鲜度：现价 ±10% 内有交易才认为数据有效
+    data_freshness = "fresh" if near_spot_trades >= 3 else "stale"
+
     # 修正 sentiment_score 计算（使用方向性 bullish_ratio）
     total_count = summary_data['total_count']
     sentiment_score = round((bullish_ratio - 0.5) * 200) if total_count > 10 else 0  # -100 to +100
@@ -210,9 +261,12 @@ async def get_wind_analysis(
 
     return {
         "currency": currency, "spot": spot, "days": days,
-        "distribution": distribution[:20],
-        "strike_flows": strike_flows,
+        "distribution": distribution[:16],
+        "strike_flows": strike_flows[:16],
         "flow_breakdown": flow_breakdown,
+        "moneyness_breakdown": moneyness_buckets,
+        "data_freshness": data_freshness,
+        "near_spot_trades": near_spot_trades,
         "buy_ratio": round(buy_ratio, 3),
         "bullish_ratio": round(bullish_ratio, 3),
         "dominant_flow": dominant,

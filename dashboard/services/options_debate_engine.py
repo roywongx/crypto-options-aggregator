@@ -26,36 +26,102 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _gather_market_data(currency: str) -> Dict[str, Any]:
+    """并行采集市场数据 (ThreadPoolExecutor, 4 workers, 30s total timeout)"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
     data: Dict[str, Any] = {"currency": currency, "errors": []}
 
-    # 1) 现货价格
-    try:
-        from services.spot_price import get_spot_price
-        data["spot"] = get_spot_price(currency)
-    except (RuntimeError, ConnectionError, TimeoutError) as e:
-        logger.warning("debate gather spot failed: %s", e)
+    results = {}
+
+    def _fetch_spot():
+        try:
+            from services.spot_price import get_spot_price
+            return ("spot", get_spot_price(currency))
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            return ("spot_error", str(e))
+
+    def _fetch_dvol():
+        try:
+            from services.dvol_analyzer import get_dvol_from_deribit
+            return ("dvol", get_dvol_from_deribit(currency))
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            return ("dvol_error", str(e))
+
+    def _fetch_large_trades():
+        try:
+            from services.large_trades_fetcher import fetch_large_trades_sync
+            return ("large_trades", fetch_large_trades_sync(currency, days=3, limit=30))
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            return ("large_trades_error", str(e))
+
+    def _fetch_db_contracts():
+        try:
+            from db.connection import execute_read
+            import json
+            rows = execute_read(
+                """SELECT contracts_data, spot_price, dvol_current, dvol_z_score, dvol_signal, timestamp
+                   FROM scan_records WHERE currency=? ORDER BY timestamp DESC LIMIT 1""",
+                (currency,)
+            )
+            if rows and rows[0][0]:
+                contracts_list = json.loads(rows[0][0])
+                scan_ts = rows[0][5] if len(rows[0]) > 5 and rows[0][5] else None
+                return ("db_contracts", {
+                    "strategy_contracts": contracts_list,
+                    "data_timestamp": scan_ts if isinstance(scan_ts, str) else (str(scan_ts) if scan_ts else ""),
+                    "db_spot": float(rows[0][1]) if rows[0][1] else 0,
+                    "db_dvol": float(rows[0][2]) if rows[0][2] else 0,
+                    "db_dvol_z": float(rows[0][3]) if rows[0][3] else 0,
+                    "db_dvol_signal": rows[0][4] or "",
+                })
+            return ("db_contracts", {
+                "strategy_contracts": [], "data_timestamp": "",
+                "db_spot": 0, "db_dvol": 0, "db_dvol_z": 0, "db_dvol_signal": "",
+            })
+        except (RuntimeError, ValueError, TypeError) as e:
+            return ("db_contracts_error", str(e))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_fetch_spot): "spot",
+            executor.submit(_fetch_dvol): "dvol",
+            executor.submit(_fetch_large_trades): "trades",
+            executor.submit(_fetch_db_contracts): "db",
+        }
+        for future in as_completed(futures, timeout=30):
+            try:
+                key, value = future.result(timeout=25)
+                results[key] = value
+            except (FuturesTimeoutError, RuntimeError) as e:
+                task = futures[future]
+                logger.warning("debate gather %s timed out: %s", task, e)
+                data["errors"].append(f"{task}: timeout")
+
+    # Unpack parallel results
+    if "spot" in results:
+        data["spot"] = results["spot"]
+    elif "spot_error" in results:
         data["spot"] = 0
-        data["errors"].append(f"spot: {e}")
+        data["errors"].append(f"spot: {results['spot_error']}")
+    else:
+        data["spot"] = 0
 
-    # 2) DVOL
-    try:
-        from services.dvol_analyzer import get_dvol_from_deribit
-        data["dvol"] = get_dvol_from_deribit(currency)
-    except (RuntimeError, ConnectionError, TimeoutError) as e:
-        logger.warning("debate gather dvol failed: %s", e)
+    if "dvol" in results:
+        data["dvol"] = results["dvol"]
+    elif "dvol_error" in results:
         data["dvol"] = {}
-        data["errors"].append(f"dvol: {e}")
+        data["errors"].append(f"dvol: {results['dvol_error']}")
+    else:
+        data["dvol"] = {}
 
-    # 3) 大宗交易
-    try:
-        from services.large_trades_fetcher import fetch_large_trades_sync
-        data["large_trades"] = fetch_large_trades_sync(currency, days=3, limit=30)
-    except (RuntimeError, ConnectionError, TimeoutError) as e:
-        logger.warning("debate gather trades failed: %s", e)
+    if "large_trades" in results:
+        data["large_trades"] = results["large_trades"]
+    elif "large_trades_error" in results:
         data["large_trades"] = []
-        data["errors"].append(f"large_trades: {e}")
+        data["errors"].append(f"large_trades: {results['large_trades_error']}")
+    else:
+        data["large_trades"] = []
 
-    # 4) 风险框架
+    # Risk framework (depends on spot, run synchronously after)
     try:
         from services.risk_framework import RiskFramework
         spot = data.get("spot", 0)
@@ -67,42 +133,99 @@ def _gather_market_data(currency: str) -> Dict[str, Any]:
         data["risk_label"], data["risk_desc"] = "⚪ 未知", ""
         data["errors"].append(f"risk: {e}")
 
-    # 5) 最近扫描合约
-    try:
-        from db.connection import execute_read
-        import json
-        rows = execute_read(
-            """SELECT contracts_data, spot_price, dvol_current, dvol_z_score, dvol_signal
-               FROM scan_records WHERE currency=? ORDER BY timestamp DESC LIMIT 1""",
-            (currency,)
-        )
-        if rows and rows[0][0]:
-            data["contracts"] = json.loads(rows[0][0])
-            data["db_spot"] = float(rows[0][1]) if rows[0][1] else 0
-            data["db_dvol"] = float(rows[0][2]) if rows[0][2] else 0
-            data["db_dvol_z"] = float(rows[0][3]) if rows[0][3] else 0
-            data["db_dvol_signal"] = rows[0][4] or ""
-        else:
-            data["contracts"] = []
-            data["db_spot"] = 0
-            data["db_dvol"] = 0
-            data["db_dvol_z"] = 0
-            data["db_dvol_signal"] = ""
-    except (RuntimeError, ValueError, TypeError) as e:
-        logger.warning("debate gather contracts failed: %s", e)
-        data["contracts"] = []
-        data["errors"].append(f"contracts: {e}")
+    # Unpack DB contracts
+    if "db_contracts" in results:
+        db = results["db_contracts"]
+        data["strategy_contracts"] = db["strategy_contracts"]
+        data["data_timestamp"] = db["data_timestamp"]
+        data["db_spot"] = db["db_spot"]
+        data["db_dvol"] = db["db_dvol"]
+        data["db_dvol_z"] = db["db_dvol_z"]
+        data["db_dvol_signal"] = db["db_dvol_signal"]
+        if db["strategy_contracts"] and db["data_timestamp"]:
+            for c in db["strategy_contracts"]:
+                if isinstance(c, dict) and not c.get("timestamp"):
+                    c["timestamp"] = db["data_timestamp"]
+    elif "db_contracts_error" in results:
+        data["strategy_contracts"] = []
+        data["errors"].append(f"contracts: {results['db_contracts_error']}")
+    else:
+        data["strategy_contracts"] = []
 
-    # 6) 最大痛点
+    # 5b) 全量分析合约 — 从 Deribit 直取全量数据（OI≥1, DTE≥1, IV>0）
+    # 分析计算用全量数据（合约越多统计越显著），策略过滤仅用于交易面板
     try:
-        from db.connection import execute_read as _er
-        import json as _json
-        mp_rows = _er(
-            """SELECT max_pain_price FROM max_pain_history
-               WHERE currency=? ORDER BY timestamp DESC LIMIT 1""",
-            (currency,)
-        )
-        data["max_pain"] = float(mp_rows[0][0]) if mp_rows and mp_rows[0][0] else 0
+        from services.trades import fetch_deribit_summaries
+        from services.instrument import _parse_inst_name
+        from services.dvol_analyzer import calc_delta_bs
+        spot_for_analysis = data.get("spot", 0)
+        raw_summaries = fetch_deribit_summaries(currency)
+        if raw_summaries:
+            wide_contracts = []
+            for s in raw_summaries:
+                meta = _parse_inst_name(s.get("instrument_name", ""))
+                if not meta or meta.dte < 1:
+                    continue
+                iv = float(s.get("mark_iv") or 0)
+                oi = float(s.get("open_interest") or 0)
+                if iv <= 0 or oi < 1:
+                    continue
+                strike = meta.strike
+                underlying = float(s.get("underlying_price", spot_for_analysis)) or spot_for_analysis
+                raw_delta = s.get("delta")
+                if raw_delta is None or float(raw_delta or 0) == 0:
+                    delta_val = abs(calc_delta_bs(strike, underlying, iv, meta.dte, meta.option_type))
+                else:
+                    delta_val = abs(float(raw_delta))
+                prem = float(s.get("mark_price") or 0)
+                prem_usd = prem * underlying
+                cv = strike * 0.2
+                apr = (prem_usd / cv) * (365 / meta.dte) * 100 if cv > 0 else 0
+                from services.shared_calculations import black_scholes_price
+                bs_greeks = black_scholes_price(meta.option_type, strike, underlying, meta.dte, iv)
+                dist = abs(strike - spot_for_analysis) / spot_for_analysis * 100 if spot_for_analysis > 0 else 0
+                wide_contracts.append({
+                    "symbol": s.get("instrument_name", ""),
+                    "platform": "Deribit",
+                    "expiry": meta.expiry,
+                    "dte": meta.dte,
+                    "option_type": meta.option_type,
+                    "strike": strike,
+                    "apr": round(apr, 1),
+                    "premium_usd": round(prem_usd, 2),
+                    "premium": round(prem, 2),
+                    "delta": round(delta_val, 3),
+                    "theta": round(bs_greeks["theta"], 4),
+                    "gamma": round(bs_greeks["gamma"], 6),
+                    "vega": round(bs_greeks["vega"], 4),
+                    "iv": round(iv, 1),
+                    "open_interest": round(oi, 0),
+                    "oi": round(oi, 0),
+                    "distance_spot_pct": round(dist, 1),
+                })
+            # 注入时间戳
+            if data.get("data_timestamp"):
+                for c in wide_contracts:
+                    if isinstance(c, dict) and not c.get("timestamp"):
+                        c["timestamp"] = data["data_timestamp"]
+            # 全量数据作为主分析路径
+            data["contracts"] = wide_contracts
+            data["wide_contracts"] = wide_contracts
+            logger.debug("全量分析合约: %d 个 (策略合约: %d 个)",
+                        len(wide_contracts), len(data.get("strategy_contracts", [])))
+        else:
+            # 无 Deribit 数据时回退到 DB 策略合约
+            data["contracts"] = data.get("strategy_contracts", [])
+            data["wide_contracts"] = []
+    except (RuntimeError, ValueError, TypeError, ImportError) as e:
+        logger.warning("debate wide contracts failed: %s", e)
+        data["contracts"] = data.get("strategy_contracts", [])
+        data["wide_contracts"] = []
+
+    # 6) 最大痛点 — 使用 Deribit OI 数据的官方算法
+    try:
+        from services.max_pain import get_max_pain
+        data["max_pain"] = get_max_pain(currency, auto_calc=True)
     except (RuntimeError, ValueError, TypeError, ConnectionError, TimeoutError):
         data["max_pain"] = 0
 
@@ -212,17 +335,26 @@ def _bull_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
     elif risk_status == "PANIC":
         points.append("极端行情，不建议新建 Sell Put")
 
-    # 分析合约
+    # 分析合约 — contracts 没有 direction 字段，所有 Put 合约都是潜在 Sell Put 标的
     put_contracts = [c for c in contracts
                      if c.get("option_type", "").upper() in ("PUT", "P")
-                     and c.get("direction", "").lower() == "sell"]
+                     and c.get("premium_usd", 0) > 0
+                     and c.get("dte", 999) >= 3]  # 过滤短期到期合约，避免 APR 夸张失真
     if put_contracts:
+        # v3.0: win_rate 从 delta 计算（contracts 不含此字段）
+        # 对于 Sell Put: 胜率 ≈ 1 - |delta| = 期权到期虚值的概率
+        for c in put_contracts:
+            c["_win_rate"] = 1.0 - abs(c.get("delta", 0.5))
         avg_apr = sum(c.get("apr", 0) for c in put_contracts) / len(put_contracts)
-        avg_win = sum(c.get("win_rate", 0) * 100 for c in put_contracts) / len(put_contracts)
-        best_apr = max(c.get("apr", 0) for c in put_contracts)
+        avg_win = sum(c["_win_rate"] * 100 for c in put_contracts) / len(put_contracts)
+        # 选最优合约：平衡 APR 与胜率，APR 超过 500% 后边际价值递减
+        best = max(put_contracts, key=lambda c: min(c.get("apr", 0), 500) * c.get("_win_rate", 0)**2)
+        best_apr = best.get("apr", 0)
+        best_win = best.get("_win_rate", 0)
         extra["avg_apr"] = round(avg_apr, 1)
         extra["avg_win_rate"] = round(avg_win, 1)
         extra["best_apr"] = round(best_apr, 1)
+        extra["best_win_rate"] = round(best_win * 100, 1)
         extra["contract_count"] = len(put_contracts)
 
         # APR 评分
@@ -247,8 +379,7 @@ def _bull_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
             score -= 10
             points.append(f"平均胜率仅 {avg_win:.0f}%，风险偏高")
 
-        # v2.0: Theta 效率分析
-        best = max(put_contracts, key=lambda c: c.get("apr", 0))
+        # v3.0: Theta 效率分析（best 已从 APR*win_rate 综合选出）
         best_strike = best.get("strike", 0)
         best_premium = best.get("premium", 0)
         best_dte = best.get("dte", 30)
@@ -278,20 +409,20 @@ def _bull_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
                 score -= 5
                 points.append(f"盈亏平衡点 ${breakeven:,.0f} 距现货仅 {breakeven_dist:.1f}%，风险较高")
 
-        # v2.0: Greeks 分析
+        # v3.0: 最佳合约分析（使用合约自带 delta + 动态 Greeks）
         dvol_val = dvol.get("current", 50)
         if best_strike > 0 and best_dte > 0 and dvol_val > 0:
             greeks = _bs_greeks("PUT", best_strike, spot, best_dte, dvol_val)
             extra["best_greeks"] = greeks
-            abs_delta = abs(greeks.get("delta", 0))
+            abs_delta = abs(best.get("delta", greeks.get("delta", 0)))
             if abs_delta < 0.15:
                 score += 5
-                points.append(f"最佳合约 Delta {abs_delta:.2f}，深度 OTM，胜率极高")
+                points.append(f"最佳合约 Delta {abs_delta:.2f}，深度 OTM，Sell Put 胜率 ~{100-abs_delta*100:.0f}%")
             elif abs_delta < 0.30:
-                points.append(f"最佳合约 Delta {abs_delta:.2f}，合理 OTM 区间")
+                points.append(f"最佳合约 Delta {abs_delta:.2f}，合理 OTM 区间，胜率 ~{100-abs_delta*100:.0f}%")
             else:
                 score -= 5
-                points.append(f"最佳合约 Delta {abs_delta:.2f}，接近 ATM，风险偏高")
+                points.append(f"最佳合约 Delta {abs_delta:.2f}，接近 ATM，胜率仅 ~{100-abs_delta*100:.0f}%")
 
         conf += min(20, len(put_contracts) * 2)
     else:
@@ -595,23 +726,54 @@ def _flow_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
                       if t.get("option_type", "").upper() in ("PUT", "P"))
         call_buy = sum(t.get("buy_notional", 0) for t in large_trades
                        if t.get("option_type", "").upper() in ("CALL", "C"))
+        put_sell = sum(t.get("sell_notional", 0) for t in large_trades
+                       if t.get("option_type", "").upper() in ("PUT", "P"))
+        call_sell = sum(t.get("sell_notional", 0) for t in large_trades
+                        if t.get("option_type", "").upper() in ("CALL", "C"))
+
+        extra["buy_put"] = round(put_buy, 0)
+        extra["buy_call"] = round(call_buy, 0)
+        extra["sell_put"] = round(put_sell, 0)
+        extra["sell_call"] = round(call_sell, 0)
+
         if call_buy > 0:
             pcr = put_buy / call_buy
             extra["pcr"] = round(pcr, 2)
             if pcr > 1.5:
                 score -= 20
-                points.append(f"PCR {pcr:.1f} 极高，看跌情绪浓厚")
+                points.append(f"PCR(买Put/买Call) {pcr:.1f} 极高，看跌情绪浓厚")
             elif pcr > 1.0:
                 score -= 10
-                points.append(f"PCR {pcr:.1f} 偏高，看跌力量占优")
+                points.append(f"PCR(买Put/买Call) {pcr:.1f} 偏高，看跌力量占优")
             elif pcr < 0.5:
                 score += 15
-                points.append(f"PCR {pcr:.1f} 极低，看涨情绪浓厚")
+                points.append(f"PCR(买Put/买Call) {pcr:.1f} 极低，看涨情绪浓厚")
             elif pcr < 0.8:
                 score += 5
-                points.append(f"PCR {pcr:.1f} 偏低，看涨力量占优")
+                points.append(f"PCR(买Put/买Call) {pcr:.1f} 偏低，看涨力量占优")
             else:
-                points.append(f"PCR {pcr:.1f} 中性")
+                points.append(f"PCR(买Put/买Call) {pcr:.1f} 中性")
+
+        # v3.0: 卖方 PCR 分析 — 卖Call/卖Put → 主动卖出方向
+        if put_sell > 0:
+            sell_pcr = call_sell / put_sell
+            extra["sell_pcr"] = round(sell_pcr, 2)
+            if call_sell > put_sell * 2:
+                score -= 10
+                points.append(f"主动卖出Call显著(${call_sell:,.0f})，大户不看好上涨空间")
+            elif put_sell > call_sell * 2:
+                score += 10
+                points.append(f"主动卖出Put显著(${put_sell:,.0f})，大户不担忧下跌风险")
+
+        # v3.0: 综合四象限净方向
+        net_bullish = call_buy + put_sell  # 看涨力量: 买Call + 卖Put
+        net_bearish = put_buy + call_sell   # 看跌力量: 买Put + 卖Call
+        if net_bullish + net_bearish > 0:
+            net_ratio = (net_bullish - net_bearish) / (net_bullish + net_bearish)
+            extra["net_sentiment_ratio"] = round(net_ratio, 2)
+            if abs(net_ratio) > 0.3:
+                direction = "偏多" if net_ratio > 0 else "偏空"
+                points.append(f"综合资金流 {direction} (净值比 {net_ratio:+.2f})")
 
         # 机构大单分析
         whale_trades = [t for t in large_trades if t.get("notional_usd", 0) > 1_000_000]
@@ -707,12 +869,21 @@ def _risk_officer(md: Dict[str, Any]) -> Dict[str, Any]:
 
     points.append(f"周度 VaR ${weekly_var:,.0f} (95% 置信度)")
 
-    # 保证金利用率估算
+    # 保证金利用率估算 — 使用 premium_usd > 0 过滤有效合约
     if contracts:
-        sell_contracts = [c for c in contracts if c.get("direction", "").lower() == "sell"]
+        sell_contracts = [c for c in contracts if c.get("premium_usd", 0) > 0]
         if sell_contracts:
-            total_margin = sum(c.get("margin", 0) for c in sell_contracts)
-            total_premium = sum(c.get("premium", 0) for c in sell_contracts)
+            # margin 估算: max(strike*0.2, (strike-premium)*0.2)，没有 margin 字段时自动计算
+            total_margin = 0
+            total_premium = 0
+            for c in sell_contracts:
+                s = c.get("strike", 0)
+                p = c.get("premium_usd", 0) or c.get("premium", 0) or 0
+                total_premium += p
+                m = c.get("margin", 0)
+                if not m and s > 0:
+                    m = max(s * 0.2, (s - p) * 0.2)
+                total_margin += m
             extra["total_margin_est"] = round(total_margin, 0)
             extra["total_premium_est"] = round(total_premium, 0)
 
@@ -850,7 +1021,9 @@ def _generate_entry_suggestions(md: Dict, overall_score: float,
             premium = c.get("premium", 0)
             apr = c.get("apr", 0)
             dte = c.get("dte", 30)
-            win_rate = c.get("win_rate", 0.7)
+            # v3.0: 胜率从 delta 计算（contracts 不含 win_rate 字段）
+            c_delta = abs(c.get("delta", 0.5))
+            win_rate = max(0.05, 1.0 - c_delta)
             dist = (spot - strike) / spot * 100 if spot > 0 else 0
 
             # v2.0: 使用统一保证金公式
@@ -922,7 +1095,8 @@ def run_debate(currency: str = "BTC", quick: bool = False) -> Dict[str, Any]:
 
     dvol = md.get("dvol", {})
     market_summary = {
-        "spot": md.get("spot", 0),
+        "spot": round(md.get("spot", 0), 0),
+        "data_timestamp": md.get("data_timestamp", ""),
         "dvol": dvol.get("current", 0),
         "dvol_signal": dvol.get("signal", ""),
         "dvol_trend": dvol.get("trend", ""),

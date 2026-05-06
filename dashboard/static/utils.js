@@ -42,7 +42,7 @@ export function getApiKey() {
 export async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) {
     const controller = new AbortController();
     const timeout = options.timeout || API_TIMEOUT_MS;
-    const timer = setTimeout(() => controller.abort(), timeout);
+    const timer = setTimeout(() => controller.abort('timeout'), timeout);
     try {
         const apiKey = getApiKey();
         const headers = apiKey ? {'X-API-Key': apiKey} : {};
@@ -69,9 +69,12 @@ export async function safeFetch(url, options = {}, retries = FETCH_MAX_RETRIES) 
         return res;
     } catch (e) {
         clearTimeout(timer);
-        if (retries > 0 && e.name !== 'AbortError') {
+        if (retries > 0) {
             await new Promise(r => setTimeout(r, 1000));
             return safeFetch(url, options, retries - 1);
+        }
+        if (e.name === 'AbortError') {
+            throw new Error('请求超时，请检查网络后重试');
         }
         throw e;
     }

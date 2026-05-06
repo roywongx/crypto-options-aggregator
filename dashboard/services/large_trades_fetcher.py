@@ -48,6 +48,11 @@ def _parse_db_rows(rows, spot: float, classify_fn, parse_inst_fn) -> tuple:
         notional = r[2] or 0
         if notional <= 0 and (r[3] or 0) > 0 and strike > 0:
             notional = float(r[3]) * spot
+        # 合理性校验：超过 10 亿美元视为异常数据
+        if notional > 1_000_000_000:
+            notional = float(r[3]) * strike if (r[3] or 0) > 0 and strike > 0 else notional
+            if notional > 1_000_000_000:
+                notional = 0
         
         if inst not in inst_data:
             inst_data[inst] = {

@@ -257,7 +257,7 @@ class TestLLMConfig:
 
 
 class TestLlmAudit:
-    """Test _llm_audit anomaly detection"""
+    """Test _llm_audit anomaly detection (dual-layer: deterministic + optional LLM)"""
 
     @patch("services.llm_analyst.ai_chat_with_config")
     def test_audit_parses_anomalies(self, mock_ai):
@@ -282,24 +282,334 @@ class TestLlmAudit:
         result = engine._llm_audit(ctx, rule_reports, synthesis)
 
         assert result["success"] is True
-        assert len(result["anomalies"]) == 1
-        assert result["anomalies"][0]["severity"] == "warning"
-        assert result["data_quality_score"] == 85
+        assert len(result["anomalies"]) > 0
+        assert "data_quality_score" in result
+        assert "audit_method" in result
 
     @patch("services.llm_analyst.ai_chat_with_config")
-    def test_audit_handles_llm_failure(self, mock_ai):
+    def test_audit_handles_llm_failure_with_deterministic_fallback(self, mock_ai):
         from services.llm_analyst import LLMAnalystEngine
 
         mock_ai.return_value = None
 
         engine = LLMAnalystEngine()
-        ctx = {"currency": "BTC", "spot": 100000, "dvol": {}, "contracts": [],
-               "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
-               "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
-               "strategy_summary": {}}
+        ctx = {"currency": "BTC", "spot": 100000,
+               "dvol": {"current": 55, "z_score": 0.5, "signal": "neutral"},
+               "contracts": [{"strike": 95000, "dte": 30}],
+               "onchain": {"mvrv": 1.5, "nupl": 0.4, "convergence_score": 60},
+               "derivatives": {"sharpe_7d": 0.5},
+               "macro": {"fear_greed": {"value": 50, "classification": "Neutral"}},
+               "iv_term": {"state": "contango", "slope": 0.02},
+               "large_trades": [], "max_pain": 0, "risk": {},
+               "errors": [], "strategy_summary": {}}
         rule_reports = {"reports": [], "synthesis": {}, "market_summary": {}}
         synthesis = {"success": True}
 
         result = engine._llm_audit(ctx, rule_reports, synthesis)
 
-        assert result["success"] is False
+        assert result["success"] is True  # deterministic fallback always succeeds
+        assert "data_quality_score" in result
+        assert result["audit_method"].startswith("deterministic")  # fallback without LLM
+
+
+class TestDeterministicAudit:
+    """Test _deterministic_audit — programmatic data quality checks"""
+
+    def test_all_data_present_scores_high(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55.0, "z_score": 0.5, "signal": "neutral"},
+            "contracts": [{"strike": 95000, "dte": 30}, {"strike": 100000, "dte": 60}, {"strike": 105000, "dte": 90}, {"strike": 110000, "dte": 120}, {"strike": 90000, "dte": 14}, {"strike": 85000, "dte": 7}],
+            "onchain": {"mvrv": 1.5, "nupl": 0.4, "convergence_score": 60},
+            "derivatives": {"sharpe_7d": 0.5, "vol_ratio": 1.2},
+            "macro": {"fear_greed": {"value": 50, "classification": "Neutral"}, "funding_rate": {"current_rate": 0.01}},
+            "iv_term": {"state": "contango", "slope": 0.02},
+            "large_trades": [{"side": "buy", "notional_usd": 500000}],
+            "max_pain": 98000, "risk": {}, "errors": [],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        assert result["success"] is True
+        assert result["data_quality_score"] >= 80
+        assert result["audit_method"] == "deterministic"
+        assert result["checks_detail"]["completeness"]["spot"] is True
+        assert result["checks_detail"]["completeness"]["contracts"] is True
+
+    def test_missing_spot_detected(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 0,
+            "dvol": {}, "contracts": [],
+            "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        assert result["data_quality_score"] <= 30  # core data missing
+        anomalies_desc = [a["description"] for a in result["anomalies"]]
+        assert any("现货价格缺失" in d for d in anomalies_desc)
+        assert any("期权合约列表为空" in d for d in anomalies_desc)
+
+    def test_missing_data_sources_detected(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {},
+            "contracts": [{"strike": 95000}],
+            "onchain": {},
+            "derivatives": {},
+            "macro": {},
+            "iv_term": {},
+            "large_trades": [],
+            "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        # Should detect missing DVOL, onchain, derivatives, macro, iv_term
+        anomalies_sources = [a["source"] for a in result["anomalies"]]
+        assert "dvol" in anomalies_sources or any("dvol" in str(a).lower() for a in result["anomalies"])
+        assert result["checks_detail"]["completeness"]["dvol"] is False
+        assert result["checks_detail"]["completeness"]["onchain"] is False
+
+    def test_data_errors_reported_as_anomalies(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55}, "contracts": [{"strike": 95000}],
+            "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+            "large_trades": [], "max_pain": 0, "risk": {},
+            "errors": ["API timeout: deribit", "CoinGecko 429 rate limit"],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        error_sources = [a["source"] for a in result["anomalies"]]
+        assert "data_collection" in error_sources
+        assert result["data_quality_score"] < 90  # errors should reduce score
+
+    def test_dvol_iv_consistency_check(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+
+        # Conflicting: DVOL says high, IV says contango (low)
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 80, "z_score": 2.5, "signal": "elevated"},
+            "contracts": [{"strike": 95000}],
+            "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {"state": "contango", "slope": 0.02},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        anomalies_sources = [a["source"] for a in result["anomalies"]]
+        assert "dvol_vs_iv" in anomalies_sources
+
+    def test_btc_spot_range_check(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 50,  # absurdly low
+            "dvol": {}, "contracts": [], "onchain": {}, "derivatives": {},
+            "macro": {}, "iv_term": {}, "large_trades": [], "max_pain": 0,
+            "risk": {}, "errors": [],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        anomalies_desc = [a["description"] for a in result["anomalies"]]
+        assert any("异常" in d for d in anomalies_desc) or any("price" in d.lower() for d in anomalies_desc)
+
+    def test_fear_greed_out_of_range(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55}, "contracts": [{"strike": 95000}],
+            "onchain": {}, "derivatives": {}, "iv_term": {},
+            "macro": {"fear_greed": {"value": 999, "classification": "broken"}},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        anomalies_sources = [a["source"] for a in result["anomalies"]]
+        assert "fear_greed" in anomalies_sources
+
+    def test_few_contracts_flagged(self):
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55},
+            "contracts": [{"strike": 95000}],  # only 1 contract
+            "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._deterministic_audit(ctx)
+
+        issue_components = [i["component"] for i in result["logic_issues"]]
+        assert "contracts" in issue_components
+
+
+class TestAuditSafetyGuarantees:
+    """Verify audit ALWAYS returns valid structure regardless of failures"""
+
+    def test_llm_audit_never_has_error_field(self):
+        """Frontend shows '审计未完成' when audit.error exists — must never happen"""
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 0,
+            "dvol": {}, "contracts": [], "onchain": {}, "derivatives": {},
+            "macro": {}, "iv_term": {}, "large_trades": [], "max_pain": 0,
+            "risk": {}, "errors": [],
+        }
+
+        # No LLM config — should use deterministic only
+        result = engine._llm_audit(ctx, {}, {"success": False})
+
+        assert "error" not in result
+        assert result["success"] is True
+        assert isinstance(result["anomalies"], list)
+        assert isinstance(result["logic_issues"], list)
+        assert isinstance(result["data_quality_score"], (int, float))
+        assert result["data_quality_score"] >= 0
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_llm_audit_recovers_from_crash(self, mock_ai):
+        """Even if LLM throws an exception, audit still succeeds"""
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.side_effect = RuntimeError("Simulated LLM crash")
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55}, "contracts": [{"strike": 95000}],
+            "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._llm_audit(ctx, {}, {"success": False})
+
+        assert "error" not in result
+        assert result["success"] is True
+        assert result["data_quality_score"] > 0  # should have deterministic score
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_llm_audit_recovers_from_malformed_json(self, mock_ai):
+        """Even if LLM returns garbage, audit still succeeds"""
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = "This is not JSON at all, just random text from the model"
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55}, "contracts": [{"strike": 95000}],
+            "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._llm_audit(ctx, {}, {"success": False})
+
+        assert "error" not in result
+        assert result["success"] is True
+        assert result["data_quality_score"] > 0
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_llm_audit_handles_empty_llm_response(self, mock_ai):
+        """Empty LLM response should fall back to deterministic"""
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = ""
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55}, "contracts": [{"strike": 95000}],
+            "onchain": {}, "derivatives": {}, "macro": {}, "iv_term": {},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        result = engine._llm_audit(ctx, {}, {"success": False})
+
+        assert "error" not in result
+        assert result["success"] is True
+
+    def test_deterministic_audit_always_returns_valid_structure(self):
+        """Even with completely empty context, deterministic audit works"""
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+
+        # Empty context — nothing at all
+        result = engine._deterministic_audit({})
+        assert result["success"] is True
+        assert isinstance(result["anomalies"], list)
+        assert isinstance(result["logic_issues"], list)
+        assert isinstance(result["data_quality_score"], (int, float))
+        assert 0 <= result["data_quality_score"] <= 100
+        assert len(result["anomalies"]) > 0  # should detect missing spot + contracts
+
+    def test_deterministic_audit_with_none_values(self):
+        """None values in context shouldn't crash"""
+        from services.llm_analyst import LLMAnalystEngine
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": None,
+            "dvol": None, "contracts": None, "onchain": None,
+            "derivatives": None, "macro": None, "iv_term": None,
+            "large_trades": None, "max_pain": None, "risk": None, "errors": None,
+        }
+
+        result = engine._deterministic_audit(ctx)
+        assert result["success"] is True
+        assert result["data_quality_score"] <= 30  # core missing
+
+    @patch("services.llm_analyst.ai_chat_with_config")
+    def test_full_audit_chain_never_produces_error_field(self, mock_ai):
+        """Simulate the full run_full_analysis audit path"""
+        from services.llm_analyst import LLMAnalystEngine
+
+        mock_ai.return_value = None  # LLM completely unavailable
+
+        engine = LLMAnalystEngine()
+        ctx = {
+            "currency": "BTC", "spot": 100000,
+            "dvol": {"current": 55, "z_score": 0.5, "signal": "neutral"},
+            "contracts": [{"strike": 95000, "dte": 30}],
+            "onchain": {"mvrv": 1.5}, "derivatives": {"sharpe_7d": 0.5},
+            "macro": {"fear_greed": {"value": 50}}, "iv_term": {"state": "contango"},
+            "large_trades": [], "max_pain": 0, "risk": {}, "errors": [],
+        }
+
+        audit = engine._llm_audit(ctx, {}, {"success": False})
+
+        # Frontend-safety checks
+        assert "error" not in audit, f"audit.error found: {audit.get('error')}"
+        assert audit["success"] is True
+        assert isinstance(audit["anomalies"], list)
+        assert isinstance(audit["logic_issues"], list)
+        assert isinstance(audit["data_quality_score"], (int, float))
+        assert 0 <= audit["data_quality_score"] <= 100

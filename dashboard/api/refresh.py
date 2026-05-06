@@ -31,5 +31,11 @@ async def refresh_dvol(currency: str = Query(default="BTC")):
 async def refresh_trades(currency: str = Query(default="BTC"), days: int = 7, limit: int = 50):
     """手动刷新大单交易数据"""
     from services.trades import fetch_large_trades
+    from services.scan_engine import _enrich_trades_with_flow
     trades = fetch_large_trades(currency, days=days, limit=limit)
-    return {"success": True, "count": len(trades), "trades": trades}
+    _enrich_trades_with_flow(trades, currency)
+    return {
+        "success": True,
+        "large_trades_count": len(trades),
+        "large_trades_details": trades,
+    }

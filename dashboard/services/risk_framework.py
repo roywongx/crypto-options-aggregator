@@ -97,6 +97,55 @@ class RiskFramework:
         }
         return labels.get(status, ("⚪ 未知", ""))
 
+    @classmethod
+    def check_circuit_breaker(
+        cls,
+        current_equity: float,
+        peak_equity: float,
+        consecutive_losses: int = 0,
+        open_positions: int = 0,
+        dvol: float = 50.0,
+    ) -> dict:
+        """投资组合级熔断检查 (Freqtrade Protections 风格)
+
+        Returns:
+            dict with tripped (bool), reason (str), suggested_action (str)
+        """
+        from config import config
+        reasons = []
+
+        # 1. Max drawdown check
+        if peak_equity > 0:
+            drawdown = (peak_equity - current_equity) / peak_equity
+            if drawdown >= config.MAX_DRAWDOWN_THRESHOLD:
+                reasons.append(
+                    f"回撤 {drawdown:.1%} 超过熔断线 {config.MAX_DRAWDOWN_THRESHOLD:.0%}，"
+                    f"当前 ${current_equity:,.0f} vs 峰值 ${peak_equity:,.0f}"
+                )
+
+        # 2. Consecutive losses guard
+        if consecutive_losses >= config.MAX_CONSECUTIVE_LOSSES:
+            reasons.append(f"连续亏损 {consecutive_losses} 次，触发熔断")
+
+        # 3. Overtrading guard
+        if open_positions > config.MAX_POSITIONS_OPEN:
+            reasons.append(f"持仓数 {open_positions} 超过上限 {config.MAX_POSITIONS_OPEN}")
+
+        # 4. DVOL panic
+        if dvol >= config.DVOL_PANIC_THRESHOLD:
+            reasons.append(f"DVOL {dvol:.0f} 触发恐慌阈值 {config.DVOL_PANIC_THRESHOLD}")
+
+        if reasons:
+            return {
+                "tripped": True,
+                "reason": "; ".join(reasons),
+                "suggested_action": "暂停新开仓，考虑减仓或对冲",
+                "drawdown": round((peak_equity - current_equity) / peak_equity, 4) if peak_equity > 0 else 0.0,
+                "consecutive_losses": consecutive_losses,
+                "open_positions": open_positions,
+            }
+        return {"tripped": False, "reason": "", "suggested_action": "正常操作"}
+
 class CalculationEngine:
     """v5.6: 统一计算引擎"""
 

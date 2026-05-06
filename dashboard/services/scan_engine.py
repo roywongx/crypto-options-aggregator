@@ -467,7 +467,7 @@ async def quick_scan(params: QuickScanParams = None):
                 )
             if not isinstance(binance_contracts, list):
                 binance_contracts = []
-        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError) as e:
+        except (RuntimeError, ValueError, TypeError, TimeoutError, ConnectionError, ImportError) as e:
             logger.warning("binance_options fetch failed: %s", str(e))
             binance_contracts = []
 

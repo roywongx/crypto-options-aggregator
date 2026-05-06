@@ -2,12 +2,14 @@ import { $, safeHTML, STRATEGY_PRESETS, API_BASE, API_TIMEOUT_MS, FETCH_MAX_RETR
 import { loadTermStructure, showTermStructureError } from './term-structure.js';
 import { loadMaxPain, showMaxPainError } from './maxpain.js';
 import { runSandbox, exportCSV } from './sandbox.js';
+import { initFreqtrade } from './freqtrade.js';
 
 // 向后兼容：将模块函数挂载到 window，供内联 onclick 使用
 window.loadTermStructure = () => loadTermStructure({ safeFetch, safeHTML, API_BASE, showAlert: window.showAlert || (()=>{}) });
 window.loadMaxPain = () => loadMaxPain({ safeFetch, safeHTML, API_BASE });
 window.runSandbox = () => runSandbox({ safeFetch, safeHTML, API_BASE });
 window.exportCSV = () => exportCSV(API_BASE);
+window.initFreqtrade = initFreqtrade;
 window.showTermStructureError = showTermStructureError;
 window.showMaxPainError = showMaxPainError;
 window.safeHTML = safeHTML;
@@ -1054,6 +1056,9 @@ async function loadDashboardInit() {
         } else {
             console.warn('[DashboardInit] Max pain error:', data.max_pain?.error);
         }
+
+        // Initialize Freqtrade v3.0 panels (non-blocking)
+        initFreqtrade();
     } catch (e) {
         console.error('Failed to load dashboard init:', e);
     }
@@ -1089,7 +1094,8 @@ function updateWindUI(data) {
         if (sentimentTextEl) sentimentTextEl.textContent = data.sentiment_text || data.dominant_flow || '';
         
         const buySellRatioEl = document.getElementById('windBuySellRatio');
-        if (buySellRatioEl) buySellRatioEl.textContent = `${(data.buy_ratio * 100 || 0).toFixed(0)}% / ${((1 - data.buy_ratio) * 100 || 0).toFixed(0)}%`;
+        const bullishRatio = data.bullish_ratio ?? data.buy_ratio ?? 0.5;
+        if (buySellRatioEl) buySellRatioEl.textContent = `${(bullishRatio * 100).toFixed(0)}% / ${((1 - bullishRatio) * 100).toFixed(0)}%`;
         
         const totalNotionalEl = document.getElementById('windTotalNotional');
         if (totalNotionalEl) totalNotionalEl.textContent = data.spot ? `$${(data.spot / 1000).toFixed(0)}K` : '-';
@@ -1323,15 +1329,25 @@ function updateMaxPainUI(data) {
 
 function loadPageDataAsync() {
     const currency = document.getElementById('currencySelect')?.value || 'BTC';
+
+    // Wave 1: 核心数据立即加载（合约数据 + 宏观 + 风控）
     loadLatestData(false, true).catch(e => console.error('[loadPageDataAsync] loadLatestData failed:', e));
-    loadMacroData().catch(e => console.error('[loadPageDataAsync] loadMacroData failed:', e));
-    loadWindAnalysis().catch(e => console.error('[loadPageDataAsync] loadWindAnalysis failed:', e));
-    window.loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
-    window.loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
-    loadPcrChart(currency, chartPeriods.pcr || 168).catch(e => console.error('[loadPageDataAsync] loadPcrChart failed:', e));
-    refreshAndLoadDvol(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadDvol failed:', e));
-    refreshAndLoadTrades(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadTrades failed:', e));
     loadRiskDashboard(currency).catch(e => console.error('[loadPageDataAsync] loadRiskDashboard failed:', e));
+
+    // Wave 2: 面板数据延迟 300ms（减少并发竞争）
+    setTimeout(() => {
+        loadWindAnalysis().catch(e => console.error('[loadPageDataAsync] loadWindAnalysis failed:', e));
+        window.loadTermStructure().catch(e => console.error('[loadPageDataAsync] loadTermStructure failed:', e));
+        window.loadMaxPain().catch(e => console.error('[loadPageDataAsync] loadMaxPain failed:', e));
+    }, 300);
+
+    // Wave 3: 图表和补充数据延迟 600ms
+    setTimeout(() => {
+        loadMacroData().catch(e => console.error('[loadPageDataAsync] loadMacroData failed:', e));
+        loadPcrChart(currency, chartPeriods.pcr || 168).catch(e => console.error('[loadPageDataAsync] loadPcrChart failed:', e));
+        refreshAndLoadDvol(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadDvol failed:', e));
+        refreshAndLoadTrades(currency).catch(e => console.error('[loadPageDataAsync] refreshAndLoadTrades failed:', e));
+    }, 600);
 }
 
 async function refreshAndLoadDvol(currency) {
@@ -1351,7 +1367,7 @@ async function refreshAndLoadTrades(currency) {
     try {
         const res = await safeFetch(`${API_BASE}/api/trades/refresh?currency=${currency}`);
         const data = await res.json();
-        if (data.success) {
+        if (data.success && data.large_trades_count > 0) {
             updateLargeTrades(data.large_trades_details || [], data.large_trades_count || 0);
         }
     } catch (e) {
@@ -1616,10 +1632,10 @@ function updateDerivativeMetrics(deriv) {
 
     // 4 metric cards
     const metrics = [
-        { id: 'Sharpe 14d', value: deriv.sharpe_ratio_14d, fmt: v => v != null ? v.toFixed(2) : '--' },
-        { id: 'Sharpe 30d', value: deriv.sharpe_30d, fmt: v => v != null ? v.toFixed(2) : '--' },
-        { id: '资金费率', value: deriv.funding_rate, fmt: v => v != null ? (v * 100).toFixed(4) + '%' : '--' },
-        { id: '期货/现货比', value: deriv.futures_spot_ratio, fmt: v => v != null ? v.toFixed(2) : '--' }
+        { id: 'Sharpe 14d', value: deriv.sharpe_ratio_14d, fmt: v => v != null ? Number(v).toFixed(2) : '--' },
+        { id: 'Sharpe 30d', value: deriv.sharpe_30d, fmt: v => v != null ? Number(v).toFixed(2) : '--' },
+        { id: '资金费率', value: deriv.funding_rate, fmt: v => v != null ? (Number(v) * 100).toFixed(4) + '%' : '--' },
+        { id: '期货/现货比', value: deriv.futures_spot_ratio, fmt: v => v != null ? Number(v).toFixed(2) : '--' }
     ];
 
     grid.innerHTML = metrics.map(m => `<div class="bg-gray-800/50 rounded-lg p-3">
@@ -2431,8 +2447,9 @@ function parseUTC(ts) {
 function updateLastUpdateTime(timestamp) {
     const date = timestamp ? parseUTC(timestamp) : new Date();
     if (isNaN(date.getTime())) { document.getElementById('lastUpdate').textContent = '更新于 --:--:--'; return; }
+    const dateStr = `${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
     const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    document.getElementById('lastUpdate').textContent = `更新于 ${timeStr}`;
+    document.getElementById('lastUpdate').textContent = `更新于 ${dateStr} ${timeStr}`;
 }
 
 async function loadDvolChartData() {
@@ -2799,6 +2816,7 @@ async function loadWindAnalysis() {
 
     const summaryCard = document.getElementById('windSummaryCard');
     const netFlowSection = document.getElementById('windNetFlowSection');
+    const moneynessSection = document.getElementById('moneynessSection');
     const flowBreakdownSection = document.getElementById('windFlowBreakdownSection');
     const emptyState = document.getElementById('windEmptyState');
     const errorState = document.getElementById('windErrorState');
@@ -2807,10 +2825,11 @@ async function loadWindAnalysis() {
 
     // Reset to loading state
     [emptyState, errorState].forEach(el => el?.classList.add('hidden'));
-    [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.remove('hidden'));
+    [summaryCard, netFlowSection, moneynessSection, flowBreakdownSection].forEach(el => el?.classList.remove('hidden'));
     if (statsRow) statsRow.classList.add('hidden');
     if (retryBtn) retryBtn.classList.add('hidden');
     document.getElementById('strikeFlowsChart').innerHTML = '<div class="text-[#686b82] text-center py-4"><i class="fas fa-spinner fa-spin mr-2"></i>加载中...</div>';
+    document.getElementById('moneynessBreakdown').innerHTML = '<div class="text-[#686b82] text-center py-2 text-xs">加载中...</div>';
     document.getElementById('flowBreakdown').innerHTML = '<div class="text-[#686b82] text-center py-2 text-xs">加载中...</div>';
     document.getElementById('windSentimentIcon').innerHTML = '<i class="fas fa-spinner fa-spin text-[#9497a9]"></i>';
     document.getElementById('windSentimentScore').textContent = '加载中...';
@@ -2835,13 +2854,13 @@ async function loadWindAnalysis() {
 
         // === Empty state ===
         if (totalTrades === 0) {
-            [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.add('hidden'));
+            [summaryCard, netFlowSection, moneynessSection, flowBreakdownSection].forEach(el => el?.classList.add('hidden'));
             emptyState?.classList.remove('hidden');
             return;
         }
 
         // === Has data — render ===
-        [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.remove('hidden'));
+        [summaryCard, netFlowSection, moneynessSection, flowBreakdownSection].forEach(el => el?.classList.remove('hidden'));
         emptyState?.classList.add('hidden');
         errorState?.classList.add('hidden');
 
@@ -2894,15 +2913,18 @@ async function loadWindAnalysis() {
             spotEl.classList.add('hidden');
         }
 
-        // === Net Flow Horizontal Bar Chart ===
-        renderNetFlowChart(data);
+        // === Direction Gauge (replaces per-strike bars) ===
+        renderDirectionGauge(data);
+
+        // === Moneyness Breakdown (new) ===
+        renderMoneynessBreakdown(data);
 
         // === Flow Breakdown ===
         renderFlowBreakdown(data, totalTrades);
 
     } catch (error) {
         console.error('加载风向分析失败:', error);
-        [summaryCard, netFlowSection, flowBreakdownSection].forEach(el => el?.classList.add('hidden'));
+        [summaryCard, netFlowSection, moneynessSection, flowBreakdownSection].forEach(el => el?.classList.add('hidden'));
         [emptyState].forEach(el => el?.classList.add('hidden'));
         errorState?.classList.remove('hidden');
         document.getElementById('windErrorMsg').textContent = error.message || '网络错误';
@@ -2910,67 +2932,122 @@ async function loadWindAnalysis() {
     }
 }
 
-function renderNetFlowChart(data) {
+function renderDirectionGauge(data) {
     const chartEl = document.getElementById('strikeFlowsChart');
     if (!chartEl) return;
 
-    const dist = data.distribution || [];
+    const bullishRatio = data.bullish_ratio ?? data.buy_ratio ?? 0.5;
+    const totalNotional = data.total_notional || 0;
     const spot = data.spot || 0;
-    const maxNotional = Math.max(...dist.map(d => Math.abs((d.put || 0) - (d.call || 0))), 1);
+    const totalTrades = (data.summary && data.summary.total_trades) || 0;
+    const dataFreshness = data.data_freshness || 'stale';
+    const nearSpotTrades = data.near_spot_trades || 0;
 
-    // 按距现价最近排序，取最近 20 个行权价（上下各半）
-    const withDist = dist
-        .filter(d => d.strike > 0 && (d.put > 0 || d.call > 0))
-        .map(d => ({...d, _gap: Math.abs((d.strike || 0) - spot)}))
-        .sort((a, b) => a._gap - b._gap);
-    const filteredDist = withDist.slice(0, 20).sort((a, b) => a.strike - b.strike);
+    const bullPct = Math.round(bullishRatio * 100);
+    const bearPct = 100 - bullPct;
 
-    if (filteredDist.length === 0) {
-        chartEl.innerHTML = '<div class="text-gray-500 text-center py-4">暂无行权价分布数据</div>';
+    // ===== 数据陈旧警告 =====
+    const stalenessWarning = (dataFreshness === 'stale' && totalTrades > 0)
+        ? `<div class="mb-3 px-3 py-2 bg-[#f59e0b]/10 border border-[#f59e0b]/30 rounded text-xs text-[#f59e0b] flex items-center gap-2">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>数据陈旧：过去${data.days || '?'}天内<strong>没有现价附近(±10%)成交记录</strong>。以下结论仅反映历史仓位分布，不代表当前市场情绪。</span>
+        </div>`
+        : '';
+
+    // ===== 结论看板 =====
+    let conclusionIcon, conclusionLabel, conclusionColor;
+    if (bullPct >= 65) { conclusionIcon = 'fa-arrow-trend-up'; conclusionLabel = '显著偏多'; conclusionColor = '#149e61'; }
+    else if (bullPct >= 55) { conclusionIcon = 'fa-arrow-up'; conclusionLabel = '温和偏多'; conclusionColor = '#22c55e'; }
+    else if (bullPct >= 45) { conclusionIcon = 'fa-minus'; conclusionLabel = '多空均衡'; conclusionColor = '#9497a9'; }
+    else if (bullPct >= 35) { conclusionIcon = 'fa-arrow-down'; conclusionLabel = '温和偏空'; conclusionColor = '#f59e0b'; }
+    else { conclusionIcon = 'fa-arrow-trend-down'; conclusionLabel = '显著偏空'; conclusionColor = '#ef4444'; }
+
+    const dominantFlow = data.dominant_flow || '中性';
+    const flowInterpretation = _getFlowInterpretation(dominantFlow, bullishRatio, data.pcr || 1);
+
+    chartEl.innerHTML = stalenessWarning + `
+        <!-- 结论卡 -->
+        <div class="mb-4 p-4 rounded-lg border" style="background:${conclusionColor}10;border-color:${conclusionColor}30;">
+            <div class="flex items-center gap-3 mb-2">
+                <i class="fas ${conclusionIcon} text-xl" style="color:${conclusionColor}"></i>
+                <span class="text-base font-bold text-[#e4e4e7]">${conclusionLabel}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full ${bullPct >= 55 ? 'bg-[#149e61]/20 text-[#149e61]' : bullPct <= 45 ? 'bg-[#ef4444]/20 text-[#ef4444]' : 'bg-gray-700 text-gray-300'}">${bullPct}% 看涨</span>
+            </div>
+            <p class="text-xs text-[#9497a9] leading-relaxed">${flowInterpretation}</p>
+        </div>
+
+        <!-- 方向仪表 -->
+        <div class="mb-4">
+            <div class="flex justify-between text-xs text-[#686b82] mb-1.5">
+                <span>🐻 看跌</span>
+                <span class="font-mono text-[#9497a9]">${bearPct}% / ${bullPct}%</span>
+                <span>🐂 看涨</span>
+            </div>
+            <div class="h-5 flex rounded-full overflow-hidden bg-gray-800/80 border border-[rgba(71,73,85,0.3)]">
+                <div class="h-full bg-[#ef4444]/60 transition-all duration-500 flex items-center justify-end pr-1 text-[9px] text-white font-bold" style="width:${bearPct}%">
+                    ${bearPct > 25 ? bearPct + '%' : ''}
+                </div>
+                <div class="h-full bg-[#149e61]/60 transition-all duration-500 flex items-center pl-1 text-[9px] text-white font-bold" style="width:${bullPct}%">
+                    ${bullPct > 25 ? bullPct + '%' : ''}
+                </div>
+            </div>
+        </div>
+
+        <!-- 关键指标行 -->
+        <div class="grid grid-cols-4 gap-3 mb-4 text-center">
+            <div class="bg-gray-800/50 rounded-lg p-2">
+                <div class="text-[10px] text-[#686b82] mb-0.5">总名义价值</div>
+                <div class="text-xs font-mono font-bold text-[#8b5cf6]">${_formatNotional(totalNotional)}</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-lg p-2">
+                <div class="text-[10px] text-[#686b82] mb-0.5">Put/Call 比</div>
+                <div class="text-xs font-mono font-bold ${(data.pcr||1) > 1.2 ? 'text-[#ef4444]' : (data.pcr||1) < 0.8 ? 'text-[#149e61]' : 'text-[#e4e4e7]'}">${(data.pcr||1).toFixed(2)}</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-lg p-2">
+                <div class="text-[10px] text-[#686b82] mb-0.5">交易笔数</div>
+                <div class="text-xs font-mono font-bold text-[#e4e4e7]">${totalTrades}</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-lg p-2">
+                <div class="text-[10px] text-[#686b82] mb-0.5">现价附近</div>
+                <div class="text-xs font-mono font-bold ${nearSpotTrades >= 3 ? 'text-[#149e61]' : 'text-[#f59e0b]'}">${nearSpotTrades} 笔</div>
+            </div>
+        </div>
+    `;
+}
+
+function renderMoneynessBreakdown(data) {
+    const el = document.getElementById('moneynessBreakdown');
+    if (!el) return;
+
+    const buckets = data.moneyness_breakdown || [];
+    if (buckets.length === 0) {
+        el.innerHTML = '';
         return;
     }
 
-    chartEl.innerHTML = filteredDist.map(d => {
-        const putVol = d.put || 0;
-        const callVol = d.call || 0;
-        const net = putVol - callVol;
-        const total = putVol + callVol;
-        const putPct = total > 0 ? (putVol / total * 100) : 50;
-        const callPct = total > 0 ? (callVol / total * 100) : 50;
+    const totalNotional = data.total_notional || 1;
+    const maxPct = Math.max(...buckets.map(b => totalNotional > 0 ? (b.notional / totalNotional * 100) : 0), 1);
 
-        // Bar strength: scale to 0-100% of max for width
-        const barStrength = Math.min(Math.abs(net) / maxNotional * 100, 100);
+    el.innerHTML = buckets.map(b => {
+        const pct = totalNotional > 0 ? (b.notional / totalNotional * 100) : 0;
+        const barW = Math.max(pct / maxPct * 100, 2);
 
-        // Direction and colors
-        const isPutHeavy = net > 0;  // more put volume = selling pressure visible
-        const netColor = isPutHeavy ? 'bg-[#ef4444]' : 'bg-[#149e61]';
-        const netLabel = net > 0 ? `+${_formatNotional(net)}` : net < 0 ? _formatNotional(Math.abs(net)) : '0';
-        const barLabel = isPutHeavy ? `${netLabel} PUT侧重` : `${netLabel} CALL侧重`;
+        const isNear = b.key === 'near_atm';
+        const barColor = isNear ? 'bg-[#8b5cf6]' : b.key.includes('put') ? 'bg-[#ef4444]/60' : 'bg-[#149e61]/60';
+        const textColor = isNear ? 'text-[#8b5cf6]' : 'text-[#c4c4d0]';
 
-        // Is this strike near spot?
-        const distFromSpotPct = d.dist_from_spot_pct || (spot > 0 ? ((d.strike - spot) / spot * 100) : 0);
-        const isNearSpot = Math.abs(distFromSpotPct) < 5;
-        const strikeClass = isNearSpot ? 'text-[#7132f5] font-bold' : 'text-[#e4e4e7]';
-
-        return `<div class="flex items-center gap-2 text-xs group hover:bg-gray-800/50 rounded px-2 py-0.5 transition-colors">
-            <span class="w-14 text-right font-mono ${strikeClass}">${d.strike.toLocaleString()}</span>
-            <span class="w-12 text-right text-[10px] text-[#686b82]">${distFromSpotPct > 0 ? '+' : ''}${distFromSpotPct.toFixed(1)}%</span>
-            <div class="flex-1 h-5 flex rounded overflow-hidden bg-gray-800/50">
-                <div class="h-full bg-[#ef4444]/60 transition-all" style="width:${putPct}%"></div>
-                <div class="h-full bg-[#149e61]/60 transition-all" style="width:${callPct}%"></div>
+        return `<div class="flex items-center gap-2 text-xs py-1">
+            <span class="w-20 text-right text-[10px] text-[#686b82] shrink-0">${b.label}</span>
+            <span class="w-12 text-right text-[10px] text-[#686b82] shrink-0">${b.range}</span>
+            <div class="flex-1 h-3.5 bg-gray-800/60 rounded-sm overflow-hidden">
+                <div class="h-full ${barColor} rounded-sm transition-all duration-500 flex items-center justify-end pr-1 text-[9px] text-white font-bold" style="width:${barW}%">
+                    ${pct > 5 ? pct.toFixed(0) + '%' : ''}
+                </div>
             </div>
-            <span class="w-28 text-left text-[10px] text-[#9497a9]">${barLabel}</span>
-            ${isNearSpot ? '<span class="text-[10px] text-[#7132f5] font-bold">◀ 现价</span>' : ''}
+            <span class="w-16 text-right font-mono text-[10px] ${textColor} shrink-0">${_formatNotional(b.notional)}</span>
+            <span class="w-8 text-right text-[10px] text-[#686b82] shrink-0">${b.count}笔</span>
         </div>`;
     }).join('');
-
-    // Legend
-    const legendHtml = `<div class="flex items-center gap-4 mt-2 text-[10px] text-[#686b82] px-2">
-        <span><span class="inline-block w-3 h-3 bg-[#ef4444]/60 rounded mr-1"></span>Put成交量</span>
-        <span><span class="inline-block w-3 h-3 bg-[#149e61]/60 rounded mr-1"></span>Call成交量</span>
-        <span class="ml-auto">柱宽 = 净流向强度</span>
-    </div>`;
-    chartEl.innerHTML += legendHtml;
 }
 
 function renderFlowBreakdown(data, totalTrades) {
@@ -4120,12 +4197,45 @@ function renderLLMAudit(audit) {
     fillEl.style.width = score + '%';
     fillEl.className = `h-full rounded-full transition-all ${score >= 80 ? 'bg-[#149e61]' : score >= 50 ? 'bg-[#f59e0b]' : 'bg-[#ef4444]'}`;
 
+    // Audit method badge
+    const methodEl = document.getElementById('llmAuditMethod');
+    if (methodEl) {
+        const method = audit.audit_method || '';
+        if (method.includes('llm')) {
+            methodEl.innerHTML = '<span class="text-xs px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 border border-blue-500/20">LLM增强</span>';
+        } else {
+            methodEl.innerHTML = '<span class="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700">规则审计</span>';
+        }
+    }
+
     const content = document.getElementById('llmAuditContent');
     let html = '';
 
+    // Data completeness summary
+    const checksDetail = audit.checks_detail;
+    if (checksDetail && checksDetail.completeness) {
+        const comp = checksDetail.completeness;
+        const sources = [
+            { key: 'spot', label: '现价' },
+            { key: 'dvol', label: 'DVOL' },
+            { key: 'onchain', label: '链上' },
+            { key: 'derivatives', label: '衍生品' },
+            { key: 'macro', label: '宏观' },
+            { key: 'iv_term', label: 'IV期限' },
+            { key: 'contracts', label: '合约' },
+            { key: 'large_trades', label: '大单' },
+        ];
+        html += '<div class="flex flex-wrap gap-1 mb-2">';
+        for (const s of sources) {
+            const ok = comp[s.key];
+            html += `<span class="text-xs px-1.5 py-0.5 rounded ${ok ? 'bg-green-900/20 text-green-400 border border-green-500/20' : 'bg-red-900/20 text-red-400 border border-red-500/20'}">${ok ? '&#10003;' : '&#10007;'} ${s.label}</span>`;
+        }
+        html += '</div>';
+    }
+
     // Show error if audit failed
     if (audit.error) {
-        html = `<div class="text-[#f59e0b] text-sm"><i class="fas fa-exclamation-circle mr-1"></i>审计未完成: ${safeHTML(audit.error)}</div>`;
+        html += `<div class="text-[#f59e0b] text-sm"><i class="fas fa-exclamation-circle mr-1"></i>审计未完成: ${safeHTML(audit.error)}</div>`;
         content.innerHTML = html;
         return;
     }
@@ -4134,7 +4244,7 @@ function renderLLMAudit(audit) {
     const issues = audit.logic_issues || [];
 
     if (anomalies.length === 0 && issues.length === 0) {
-        html = '<div class="text-[#149e61] text-sm"><i class="fas fa-check-circle mr-1"></i>未发现数据异常</div>';
+        html += '<div class="text-[#149e61] text-sm"><i class="fas fa-check-circle mr-1"></i>未发现数据异常 — 所有数据源健康</div>';
     } else {
         for (const a of anomalies) {
             const sevColors = { critical: 'red', warning: 'yellow', info: 'blue' };
@@ -4640,14 +4750,197 @@ function renderGreeksAnalysis(analysis) {
     div.innerHTML = html;
 }
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    loadIVSmile();
-    loadGreeksSummary();
+// ============================================================
+// 投资组合面板
+// ============================================================
 
-    // 统一投资推荐 — 注入信号灯 + 顶部汇总条
+async function loadPortfolio() {
+    const section = document.getElementById('portfolioSection');
+    if (!section) return;
+
+    try {
+        const resp = await safeFetch('/api/portfolio');
+        const data = await resp.json();
+
+        // 缓存命中但 API 未配置 → 仍然展示缓存
+        if (data.error && !data.cache_hit) {
+            section.style.display = 'none';
+            return;
+        }
+
+        if (data.error || !data.configured) {
+            if (!data.cache_hit) {
+                section.style.display = 'none';
+                return;
+            }
+        }
+
+        section.style.display = 'block';
+        const statusEl = document.getElementById('portfolioStatus');
+        let statusText = (data.options?.count || 0) + ' 张持仓 | BTC $' + (data.spot_price_btc || 0)?.toLocaleString();
+        // 缓存标识
+        if (data.cache_hit) {
+            const mins = Math.round((data.cache_age_seconds || 0) / 60);
+            statusText += ' · <span class="text-[#f59e0b] text-xs">缓存 ' + (mins > 0 ? mins + '分钟前' : '刚刚') + '</span>';
+        }
+        statusEl.innerHTML = statusText;
+
+        // Summary cards
+        const s = data.options?.summary || {};
+        const summaryGrid = document.getElementById('portfolioSummary');
+        const spotVal = data.spot?.total_usd || 0;
+        const earnVal = data.earn?.total_usd || 0;
+
+        // Wallet breakdown
+        const fw = data.funding_wallet || {};
+        const walletLines = Object.entries(fw).filter(([k,v]) => v.balance > 0)
+            .map(([k,v]) => `${k}: $${v.balance.toFixed(2)}`).join(' | ') || '(仅期权)';
+
+        summaryGrid.innerHTML = [
+            { label: '总权利金', value: '$' + (s.total_premium_usd || 0).toLocaleString(), color: '#149e61' },
+            { label: '未实现盈亏', value: '+' + (s.total_unrealized_pnl_usd || 0).toLocaleString(), color: (s.total_unrealized_pnl_usd || 0) >= 0 ? '#149e61' : '#ef4444' },
+            { label: '收益率', value: (s.total_pnl_pct || 0) + '%', color: (s.total_pnl_pct || 0) >= 0 ? '#149e61' : '#ef4444' },
+            { label: '最近到期', value: (s.nearest_expiry_dte || '-') + '天', color: s.nearest_expiry_dte < 10 ? '#f59e0b' : '#9497a9' },
+            { label: '资金钱包', value: walletLines, color: '#7132f5' },
+        ].map(c => `<div class="bg-gray-800/40 rounded-lg p-3 text-center">
+            <div class="text-xs text-gray-400">${c.label}</div>
+            <div class="text-sm font-bold font-mono mt-1" style="color:${c.color}">${c.value}</div>
+        </div>`).join('');
+
+        // Positions table
+        const tbody = document.getElementById('portfolioBody');
+        const empty = document.getElementById('portfolioEmpty');
+        const positions = data.options?.positions || [];
+
+        if (positions.length === 0) {
+            tbody.innerHTML = '';
+            empty.style.display = 'block';
+        } else {
+            empty.style.display = 'none';
+            tbody.innerHTML = positions.map(p => {
+                const pnlClass = p.unrealized_pnl >= 0 ? 'text-[#149e61]' : 'text-[#ef4444]';
+                const dteClass = p.dte < 10 ? 'text-[#f59e0b]' : 'text-[#9497a9]';
+                return `<tr class="border-b border-[rgba(71,73,85,0.15)] hover:bg-gray-800/20">
+                    <td class="py-2 font-mono text-xs">${p.symbol}</td>
+                    <td class="py-2 text-right"><span class="px-1.5 py-0.5 rounded text-xs ${p.side === 'SHORT' ? 'bg-[#ef4444]/20 text-[#ef4444]' : 'bg-[#149e61]/20 text-[#149e61]'}">${p.side}</span></td>
+                    <td class="py-2 text-right font-mono">$${p.strike.toLocaleString()}</td>
+                    <td class="py-2 text-right ${dteClass}">${p.expiry} (${p.dte}d)</td>
+                    <td class="py-2 text-right font-mono">$${p.entry_price.toLocaleString()}</td>
+                    <td class="py-2 text-right font-mono">$${p.mark_price.toLocaleString()}</td>
+                    <td class="py-2 text-right font-mono">$${p.mark_value.toLocaleString()}</td>
+                    <td class="py-2 text-right font-mono ${pnlClass}">+$${p.unrealized_pnl.toLocaleString()}</td>
+                    <td class="py-2 text-right font-mono ${pnlClass}">${p.pnl_pct}%</td>
+                </tr>`;
+            }).join('');
+        }
+
+        // LLM button
+        document.getElementById('portfolioLLMBtn').onclick = () => runPortfolioLLM();
+        document.getElementById('portfolioRefreshBtn').onclick = () => loadPortfolio();
+
+    } catch (e) {
+        console.log('Portfolio not available:', e.message);
+        // 网络错误时不隐藏已有内容（保留上次渲染）
+        if (!section.querySelector('#portfolioSummary')?.textContent?.trim()) {
+            section.style.display = 'none';
+        }
+    }
+}
+
+async function runPortfolioLLM() {
+    const resultDiv = document.getElementById('portfolioLLMResult');
+    const contentDiv = document.getElementById('portfolioLLMContent');
+    const btn = document.getElementById('portfolioLLMBtn');
+
+    resultDiv.classList.remove('hidden');
+    contentDiv.innerHTML = '<div class="text-[#686b82] animate-pulse">AI 正在分析你的投资组合...</div>';
+    btn.disabled = true;
+
+    try {
+        // 使用原始 fetch（非 safeFetch），因为 LLM SSE 流可能需要 60-120 秒
+        // safeFetch 的 30 秒超时 + 重试会导致请求中断
+        const apiKey = getApiKey();
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['X-API-Key'] = apiKey;
+        const response = await fetch('/api/portfolio/llm', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ force_refresh: false })
+        });
+
+        if (!response.ok) {
+            let errText = '';
+            try { errText = await response.text(); } catch (_) {}
+            throw new Error(`HTTP ${response.status}: ${errText.slice(0, 200)}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const json = line.slice(6);
+                let msg;
+                try { msg = JSON.parse(json); } catch (e) { continue; }
+
+                if (msg.type === 'content') {
+                    const raw = msg.text || '';
+                    if (typeof marked !== 'undefined' && marked.parse) {
+                        contentDiv.innerHTML = marked.parse(raw);
+                    } else {
+                        contentDiv.innerHTML = raw
+                            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                            .replace(/\n/g, '<br>')
+                            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                            .replace(/### (.+)/g, '<h3 class="text-sm font-bold text-[#7132f5] mt-3 mb-1">$1</h3>')
+                            .replace(/## (.+)/g, '<h2 class="text-base font-bold text-white mt-4 mb-2">$1</h2>')
+                            .replace(/# (.+)/g, '<h1 class="text-lg font-bold text-white mt-4 mb-2">$1</h1>')
+                            .replace(/^- (.+)/gm, '<li class="ml-4 list-disc text-[#e4e4e7]">$1</li>')
+                            .replace(/^\d+\. (.+)/gm, '<li class="ml-4 list-decimal text-[#e4e4e7]">$1</li>');
+                    }
+                } else if (msg.type === 'error') {
+                    contentDiv.innerHTML = `<div class="text-[#ef4444]"><i class="fas fa-exclamation-triangle mr-1"></i>${msg.text}</div>`;
+                }
+            }
+        }
+    } catch (e) {
+        contentDiv.innerHTML = `<div class="text-[#ef4444]"><i class="fas fa-times-circle mr-1"></i>分析失败: ${e.message}</div>`;
+        console.error('runPortfolioLLM failed:', e);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+// 初始化 — 分波加载避免同时发起 18+ API 请求
+document.addEventListener('DOMContentLoaded', () => {
+    // Wave 1: 关键数据立即加载
+    loadPortfolio();
+
+    // 统一投资推荐 — 顶部汇总条（优先展示）
     if (window.Rec) {
-        window.Rec.injectAllSignals().catch(() => {});
         window.Rec.renderSummaryBar().catch(() => {});
     }
+
+    // Wave 2: 图表和分析面板延迟 400ms（服务器资源竞争更少）
+    setTimeout(() => {
+        loadIVSmile();
+        loadGreeksSummary();
+    }, 400);
+
+    // Wave 3: Freqtrade 策略引擎 + 信号灯延迟 800ms
+    setTimeout(() => {
+        initFreqtrade();
+        if (window.Rec) {
+            window.Rec.injectAllSignals().catch(() => {});
+        }
+    }, 800);
 });

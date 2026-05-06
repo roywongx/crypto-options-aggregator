@@ -1,16 +1,17 @@
-"""v6.5: 统一配置管理 - 支持 .env 动态重载
+"""v6.5: 统一配置管理 - 支持 .env.enc (DPAPI) + .env 动态重载
 
 使用方式:
     from config import config
     print(config.APR_MIN_FILTER)  # 读取配置
-    
+
     # 动态重载（部署时无需重启服务）
     config.reload()
 
 环境变量优先级:
     1. 系统环境变量 (os.environ)
-    2. .env 文件 (如果存在)
-    3. 默认值 (代码中定义)
+    2. .env.enc 文件 (DPAPI 加密，如果有)
+    3. .env 文件 (如果存在)
+    4. 默认值 (代码中定义)
 """
 
 import os
@@ -18,19 +19,74 @@ from pathlib import Path
 from typing import Dict, Any
 
 
+def _dpapi_decrypt(encrypted: bytes) -> bytes:
+    """Windows DPAPI 解密 — 绑定当前用户+机器"""
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.POINTER(ctypes.c_char)),
+        ]
+
+    data_in = DATA_BLOB()
+    data_in.cbData = len(encrypted)
+    data_in.pbData = ctypes.cast(
+        ctypes.create_string_buffer(encrypted, len(encrypted)),
+        ctypes.POINTER(ctypes.c_char),
+    )
+    data_out = DATA_BLOB()
+    desc_out = ctypes.c_wchar_p()
+
+    if not ctypes.windll.crypt32.CryptUnprotectData(
+        ctypes.byref(data_in),
+        ctypes.byref(desc_out),
+        None, None, None,
+        0x1,  # CRYPTPROTECT_UI_FORBIDDEN
+        ctypes.byref(data_out),
+    ):
+        return None
+
+    plaintext = ctypes.string_at(data_out.pbData, data_out.cbData)
+    ctypes.windll.kernel32.LocalFree(data_out.pbData)
+    return plaintext
+
+
 def _load_env_file() -> Dict[str, str]:
-    """加载 .env 文件（如果存在）"""
-    env_vars = {}
-    env_path = Path(__file__).parent / ".env"
+    """加载 .env.enc (优先) 或 .env 文件"""
+    base = Path(__file__).parent
+
+    # 1. 尝试 DPAPI 加密文件 .env.enc
+    enc_path = base / ".env.enc"
+    if enc_path.exists():
+        try:
+            import base64
+            encrypted = base64.b64decode(enc_path.read_bytes())
+            plaintext = _dpapi_decrypt(encrypted)
+            if plaintext is not None:
+                return _parse_env_text(plaintext.decode("utf-8"))
+        except Exception:
+            pass  # 解密失败, fallthrough 到 .env
+
+    # 2. 回退到明文 .env
+    env_path = base / ".env"
     if env_path.exists():
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    env_vars[key.strip()] = value.strip().strip('"').strip("'")
+        return _parse_env_text(env_path.read_text(encoding="utf-8"))
+
+    return {}
+
+
+def _parse_env_text(text: str) -> Dict[str, str]:
+    """解析 .env 格式文本"""
+    env_vars = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+            env_vars[key.strip()] = value.strip().strip('"').strip("'")
     return env_vars
 
 
@@ -127,7 +183,7 @@ class Config:
 
         # === DVOL 自适应参数档位 ===
         self.DVOL_PROFILES = {
-            "low":  {"max_delta": 0.35, "min_dte": 21, "max_dte": 45, "min_apr": 10.0, "margin_ratio": 0.18},
+            "low":  {"max_delta": 0.40, "min_dte": 7,  "max_dte": 60, "min_apr": 8.0,  "margin_ratio": 0.18},
             "mid":  {"max_delta": 0.30, "min_dte": 14, "max_dte": 35, "min_apr": 15.0, "margin_ratio": 0.20},
             "high": {"max_delta": 0.20, "min_dte": 7,  "max_dte": 21, "min_apr": 25.0, "margin_ratio": 0.22},
         }
@@ -143,6 +199,17 @@ class Config:
         self.RISK_SCORE_REGULAR = _get_env("RISK_SCORE_REGULAR", 1.1, env)
         self.RISK_SCORE_ABOVE_SPOT = _get_env("RISK_SCORE_ABOVE_SPOT", 0.8, env)
         self.RISK_CACHE_TTL_SECONDS = _get_env("RISK_CACHE_TTL_SECONDS", 14400, env)
+
+        # === 投资组合保护配置 (Freqtrade Protections inspired) ===
+        self.MAX_DRAWDOWN_THRESHOLD = _get_env("MAX_DRAWDOWN_THRESHOLD", 0.20, env)
+        self.STOP_LOSS_DVOL_MULTIPLIER = _get_env("STOP_LOSS_DVOL_MULTIPLIER", 0.70, env)
+        self.MAX_POSITIONS_OPEN = _get_env("MAX_POSITIONS_OPEN", 10, env)
+        self.MAX_CONSECUTIVE_LOSSES = _get_env("MAX_CONSECUTIVE_LOSSES", 3, env)
+        self.VAR_CONFIDENCE_LEVEL = _get_env("VAR_CONFIDENCE_LEVEL", "95", env)
+        self.CVAR_FAT_TAIL_FACTOR = _get_env("CVAR_FAT_TAIL_FACTOR", 1.25, env)
+        self.STRIKE_CONCENTRATION_DANGER = _get_env("STRIKE_CONCENTRATION_DANGER", 0.50, env)
+        self.STRIKE_CONCENTRATION_CAUTION = _get_env("STRIKE_CONCENTRATION_CAUTION", 0.30, env)
+        self.KELLY_FRACTION_MULTIPLIER = _get_env("KELLY_FRACTION_MULTIPLIER", 0.50, env)
 
         # === LLM 分析配置 ===
         self.LLM_ANALYSIS_ENABLED = _get_env("LLM_ANALYSIS_ENABLED", True, env)
@@ -190,6 +257,14 @@ class Config:
         self.DB_PATH_ENV = _get_env("DASHBOARD_DB_PATH", "", env)
         self.API_KEY = _get_env("DASHBOARD_API_KEY", "", env)
         self.ENV = _get_env("DASHBOARD_ENV", "development", env)
+
+        # === Binance API 配置（高度敏感，用于签名请求） ===
+        self.BINANCE_API_KEY = _get_env("BINANCE_API_KEY", "", env)
+        self.BINANCE_SECRET_KEY = _get_env("BINANCE_SECRET_KEY", "", env)
+
+        # === Deribit API 配置（OAuth2 client_credentials） ===
+        self.DERIBIT_CLIENT_ID = _get_env("DERIBIT_CLIENT_ID", "", env)
+        self.DERIBIT_CLIENT_SECRET = _get_env("DERIBIT_CLIENT_SECRET", "", env)
         
         # === 策略预设（不可通过 .env 修改，保持代码一致性） ===
         self.STRATEGY_PRESETS = {

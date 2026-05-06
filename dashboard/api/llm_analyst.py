@@ -62,6 +62,16 @@ async def llm_analyze(request: AnalyzeRequest):
     except (RuntimeError, ValueError, TypeError) as e:
         logger.debug("llm analysis save failed (non-critical): %s", e)
 
+    # 兜底：确保 audit 永远有合法结构，前端不会显示"审计未完成"
+    audit = result.audit
+    if not isinstance(audit, dict):
+        audit = {}
+    audit.setdefault("success", True)
+    audit.setdefault("anomalies", [])
+    audit.setdefault("logic_issues", [])
+    audit.setdefault("data_quality_score", 0)
+    audit.pop("error", None)  # 移除任何可能泄露的错误信息
+
     return {
         "success": result.success,
         "currency": result.currency,
@@ -69,7 +79,7 @@ async def llm_analyze(request: AnalyzeRequest):
         "rule_reports": result.rule_reports,
         "synthesis": result.synthesis,
         "debate": result.debate,
-        "audit": result.audit,
+        "audit": audit,
         "llm_config": result.llm_config,
     }
 

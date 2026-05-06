@@ -12,10 +12,14 @@
 7. Sharpe Ratio: 保留原有逻辑
 8. 综合过热评估: 加密原生评分
 """
+import hashlib
+import hmac
 import math
+import time
 import logging
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
+from urllib.parse import urlencode
 
 from services.api_retry import request_with_retry
 from services.crypto_thresholds import CryptoThresholds
@@ -183,44 +187,124 @@ class DerivativeMetrics:
 
     @classmethod
     def _get_liquidation_heat(cls, symbol: str = "BTCUSDT") -> Dict[str, Any]:
+        """获取清算热力图数据（需要 Binance API Key）
+
+        Binance forceOrders 端点需要签名认证。通过 .env 配置:
+          BINANCE_API_KEY=xxx
+          BINANCE_SECRET_KEY=xxx
+
+        未配置时返回空值。
+        """
+        zero_result = {
+            "total_liquidation_1h_usd": 0,
+            "long_liquidation_usd": 0,
+            "short_liquidation_usd": 0,
+            "direction_bias": 0,
+            "heat_level": "L0",
+            "label": "近期无强平 — 市场稳定",
+        }
+
+        api_key = config.BINANCE_API_KEY
+        secret_key = config.BINANCE_SECRET_KEY
+        if not api_key or not secret_key:
+            return {**zero_result, "label": "需 API Key"}
+
         try:
-            total_long_usd = 0.0
-            total_short_usd = 0.0
+            import requests as req_lib
 
-            for pos_type in ("LONG", "SHORT"):
-                try:
-                    resp = request_with_retry(
-                        "https://fapi.binance.com/fapi/v1/forceOrders",
-                        params={"symbol": symbol, "autoCloseType": "LIQUIDATION",
-                                "startTime": int((datetime.now().timestamp() - 3600) * 1000),
-                                "limit": 100},
-                        timeout=10, verify=False, max_retries=1
-                    )
-                    orders = resp.json()
-                    for order in orders:
-                        vol = float(order.get("executedQty", 0))
-                        if pos_type == "LONG":
-                            total_long_usd += vol
-                        else:
-                            total_short_usd += vol
-                except Exception:
-                    pass
+            base_url = "https://fapi.binance.com"
+            endpoint = "/fapi/v1/forceOrders"
 
-            total_usd = total_long_usd + total_short_usd
-            fixed = CryptoThresholds.get_fixed_threshold("liquidation_heat", total_usd)
-            direction_bias = ((total_long_usd - total_short_usd) / total_usd) if total_usd > 0 else 0
+            # 获取最近 6 小时的清算订单
+            now_ms = int(time.time() * 1000)
+            six_hours_ago_ms = now_ms - 6 * 3600 * 1000
+
+            params = {
+                "symbol": symbol,
+                "startTime": six_hours_ago_ms,
+                "limit": 100,
+                "recvWindow": 60000,
+                "timestamp": now_ms,
+            }
+
+            # Build query string and sign with HMAC-SHA256
+            query_string = urlencode(params)
+            signature = hmac.new(
+                secret_key.encode("utf-8"),
+                query_string.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            query_string += f"&signature={signature}"
+
+            headers = {"X-MBX-APIKEY": api_key}
+            url = f"{base_url}{endpoint}?{query_string}"
+
+            resp = req_lib.get(url, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                logger.warning("Binance forceOrders returned %d: %s", resp.status_code, resp.text[:200])
+                return {
+                    **zero_result,
+                    "label": f"API 错误 {resp.status_code}",
+                }
+
+            orders = resp.json()
+            if not isinstance(orders, list):
+                return zero_result
+
+            total_usd = 0.0
+            long_usd = 0.0
+            short_usd = 0.0
+
+            for order in orders:
+                # avgPrice * executedQty = notional in USDT
+                avg_price = float(order.get("avgPrice", 0) or 0)
+                qty = float(order.get("executedQty", 0) or 0)
+                notional = avg_price * qty
+
+                side = str(order.get("side", "")).upper()
+                if side == "LONG":
+                    long_usd += notional
+                elif side == "SHORT":
+                    short_usd += notional
+                total_usd += notional
+
+            # 方向偏差: + = 多头被清算更多, - = 空头被清算更多
+            direction_bias = round(long_usd - short_usd, 2)
+
+            # 热力等级判定
+            l2 = config.LIQUIDATION_HEAT_L2_THRESHOLD
+            l3 = config.LIQUIDATION_HEAT_L3_THRESHOLD
+            if total_usd >= l3:
+                heat_level = "L3"
+                label = f"🔥 极端清算 ({total_usd/1e6:.0f}M)"
+            elif total_usd >= l2:
+                heat_level = "L2"
+                label = f"高热清算 ({total_usd/1e6:.1f}M)"
+            elif total_usd > 0:
+                heat_level = "L1"
+                label = f"温和清算 ({total_usd/1e3:.0f}K)"
+            else:
+                heat_level = "L0"
+                label = "近期无清算"
+
+            logger.info("Liquidation heat: %s | total=$%s long=$%s short=$%s bias=$%s",
+                        heat_level, round(total_usd), round(long_usd), round(short_usd), direction_bias)
 
             return {
                 "total_liquidation_1h_usd": round(total_usd),
-                "long_liquidation_usd": round(total_long_usd),
-                "short_liquidation_usd": round(total_short_usd),
-                "direction_bias": round(direction_bias, 2),
-                "heat_level": fixed.get("signal", "L0"),
-                "label": fixed.get("label", "正常"),
+                "long_liquidation_usd": round(long_usd),
+                "short_liquidation_usd": round(short_usd),
+                "direction_bias": direction_bias,
+                "heat_level": heat_level,
+                "label": label,
             }
+
         except Exception as e:
-            logger.warning("Liquidation heat fetch failed: %s", e)
-            return {"error": str(e), "heat_level": "L0"}
+            logger.warning("Binance forceOrders failed: %s", e)
+            return {
+                **zero_result,
+                "label": f"获取失败: {str(e)[:30]}",
+            }
 
     # ============================================================
     # 指标 5: 稳定币交易所储备

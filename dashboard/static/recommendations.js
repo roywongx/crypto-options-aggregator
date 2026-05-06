@@ -58,7 +58,7 @@ async function fetchRecommendation(panelId, currency = 'BTC') {
 async function fetchSummary(currency = 'BTC') {
     const key = getApiKey();
     const headers = key ? { 'x-api-key': key } : {};
-    const res = await safeFetch(`${API_BASE}/api/recommendations/summary?currency=${currency}`, { headers });
+    const res = await safeFetch(`${API_BASE}/api/recommendations/summary?currency=${currency}`, { headers, timeout: 60000 });
     return res.json();
 }
 
@@ -438,7 +438,7 @@ export async function renderSummaryBar(currency = 'BTC') {
 
     try {
         const summary = await fetchSummary(currency);
-        if (!summary?.summary) { bar.innerHTML = '<span class="text-xs text-[#ef4444]">汇总加载失败</span>'; return; }
+        if (!summary?.summary) { bar.innerHTML = '<span class="text-xs text-[#ef4444]">汇总无数据</span>'; return; }
 
         bar.innerHTML = '';
         for (const [panelId, info] of Object.entries(summary.summary)) {

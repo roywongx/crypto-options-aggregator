@@ -269,3 +269,313 @@ async def strategy_recommend(params: StrategyRecommendRequest):
 async def calculator_roll(params: StrategyCalcRequest):
     """滚仓计算器"""
     return await strategy_calc(params)
+
+
+# ============================================================
+# 超参数优化 API (Freqtrade Hyperopt inspired)
+# ============================================================
+
+class OptimizeRequest(BaseModel):
+    currency: str = Field(default="BTC")
+    option_type: str = Field(default="PUT")
+    mode: str = Field(default="bayesian")  # bayesian | full | quick
+    objective: str = Field(default="sortino_loss")  # sortino_loss | calmar_loss | sharpe_loss | weighted_score
+    n_calls: int = Field(default=50)  # Bayesian calls (30-100 recommended)
+
+
+@router.post("/strategy/optimize")
+async def optimize_params(body: OptimizeRequest):
+    """网格搜索最优策略参数"""
+    from services.param_optimizer import ParamOptimizer
+    from services.spot_price import get_spot_price
+    from services.trades import fetch_deribit_summaries
+    from services.instrument import _parse_inst_name
+    from services.dvol_analyzer import calc_delta_bs
+    from services.shared_calculations import black_scholes_price
+    from fastapi.concurrency import run_in_threadpool
+
+    try:
+        spot = await run_in_threadpool(get_spot_price, body.currency)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"现货价格获取失败: {e}")
+
+    if spot <= 0:
+        raise HTTPException(status_code=503, detail="无法获取现货价格")
+
+    # 获取全量合约
+    try:
+        raw_summaries = await run_in_threadpool(fetch_deribit_summaries, body.currency)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"合约数据获取失败: {e}")
+
+    if not raw_summaries:
+        raise HTTPException(status_code=503, detail="无合约数据")
+
+    contracts = []
+    for s in raw_summaries:
+        meta = _parse_inst_name(s.get("instrument_name", ""))
+        if not meta or meta.dte < 1:
+            continue
+        iv = float(s.get("mark_iv") or 0)
+        oi = float(s.get("open_interest") or 0)
+        if iv <= 0 or oi < 1:
+            continue
+        strike = meta.strike
+        underlying = float(s.get("underlying_price", spot)) or spot
+        raw_delta = s.get("delta")
+        delta_val = abs(float(raw_delta)) if raw_delta and float(raw_delta or 0) != 0 else abs(calc_delta_bs(strike, underlying, iv, meta.dte, meta.option_type))
+        prem = float(s.get("mark_price") or 0)
+        prem_usd = prem * underlying
+        cv = strike * 0.2
+        apr = (prem_usd / cv) * (365 / meta.dte) * 100 if cv > 0 else 0
+        bs_greeks = black_scholes_price(meta.option_type, strike, underlying, meta.dte, iv)
+        contracts.append({
+            "symbol": s.get("instrument_name", ""), "platform": "Deribit",
+            "expiry": meta.expiry, "dte": meta.dte, "option_type": meta.option_type,
+            "strike": strike, "apr": round(apr, 1), "premium_usd": round(prem_usd, 2),
+            "premium": round(prem, 2), "delta": round(delta_val, 3),
+            "theta": round(bs_greeks["theta"], 4), "gamma": round(bs_greeks["gamma"], 6),
+            "vega": round(bs_greeks["vega"], 4), "iv": round(iv, 1),
+            "open_interest": round(oi, 0),
+        })
+
+    optimizer = ParamOptimizer()
+    if body.mode == "bayesian":
+        result = await run_in_threadpool(
+            optimizer.bayesian_search, contracts, spot, body.option_type,
+            objective=body.objective, n_calls=body.n_calls
+        )
+    elif body.mode == "full":
+        result = await run_in_threadpool(
+            optimizer.grid_search, contracts, spot, body.option_type,
+            objective=body.objective
+        )
+    else:
+        result = await run_in_threadpool(optimizer.quick_search, contracts, spot, body.option_type)
+
+    return {
+        "success": result.success,
+        "method": result.method,
+        "best_params": result.best_params,
+        "best_score": result.best_score,
+        "loss_value": result.loss_value,
+        "sharpe": result.sharpe,
+        "sortino": result.sortino,
+        "calmar": result.calmar,
+        "max_drawdown_pct": result.max_drawdown_pct,
+        "top_n": result.top_n[:10],
+        "total_combos_tested": result.total_combos_tested,
+        "elapsed_seconds": result.elapsed_seconds,
+        "objective": result.objective,
+        "note": result.note,
+    }
+
+
+class BacktestRequest(BaseModel):
+    currency: str = Field(default="BTC")
+    days: int = Field(default=365)
+    initial_capital: float = Field(default=100000.0)
+    exchange: str = Field(default="binance")
+
+
+@router.post("/strategy/backtest")
+async def run_backtest(body: BacktestRequest):
+    """运行策略回测"""
+    from services.backtest_engine import BacktestEngine
+    from services.exchange_abstraction import registry, ExchangeType
+    from fastapi.concurrency import run_in_threadpool
+
+    ex_map = {"binance": ExchangeType.BINANCE, "deribit": ExchangeType.DERIBIT,
+              "bybit": ExchangeType.BYBIT, "okx": ExchangeType.OKX}
+    ex_type = ex_map.get(body.exchange.lower(), ExchangeType.BINANCE)
+
+    try:
+        exchange = registry.get(ex_type)
+        klines = await exchange.get_historical_klines(body.currency, limit=body.days)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"K线数据获取失败: {e}")
+
+    if not klines or len(klines) < 30:
+        raise HTTPException(status_code=503, detail=f"历史数据不足 (仅 {len(klines) if klines else 0} 天)")
+
+    engine = BacktestEngine(initial_capital=body.initial_capital)
+    result = await run_in_threadpool(engine.run, klines)
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail="回测失败，无有效交易")
+
+    return {
+        "success": True,
+        "total_trades": result.total_trades,
+        "winning_trades": result.winning_trades,
+        "losing_trades": result.losing_trades,
+        "win_rate": result.win_rate,
+        "total_pnl_usd": result.total_pnl_usd,
+        "total_return_pct": result.total_return_pct,
+        "avg_return_per_trade": result.avg_return_per_trade,
+        "max_drawdown_pct": result.max_drawdown_pct,
+        "sharpe_ratio": result.sharpe_ratio,
+        "sortino_ratio": result.sortino_ratio,
+        "profit_factor": result.profit_factor,
+        "avg_dte": result.avg_dte,
+        "params": result.params,
+        "start_date": result.start_date,
+        "end_date": result.end_date,
+        "equity_curve": result.equity_curve[-20:],  # last 20 days for chart
+        "trade_summary": [
+            {"date": t.entry_date, "pnl": t.pnl_usd, "assigned": t.assigned, "dte": t.dte}
+            for t in result.trades[-30:]
+        ],
+    }
+
+
+class ProtectionsCheckRequest(BaseModel):
+    currency: str = Field(default="BTC")
+    current_equity: float = Field(default=100000.0)
+    peak_equity: float = Field(default=100000.0)
+
+
+@router.post("/strategy/protections-check")
+async def check_protections(body: ProtectionsCheckRequest):
+    """运行所有保护守卫检查"""
+    from services.protections import ProtectionManager
+    from services.spot_price import get_spot_price
+    from services.dvol_analyzer import get_dvol_from_deribit
+    from services.trades import fetch_deribit_summaries
+    from services.instrument import _parse_inst_name
+    from fastapi.concurrency import run_in_threadpool
+
+    try:
+        spot = await run_in_threadpool(get_spot_price, body.currency)
+        dvol_data = await run_in_threadpool(get_dvol_from_deribit, body.currency)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"数据获取失败: {e}")
+
+    dvol = dvol_data.get("current_dvol", 50) if dvol_data else 50
+    iv = dvol
+
+    # Get positions (simplified from top contracts)
+    positions = []
+    try:
+        summaries = await run_in_threadpool(fetch_deribit_summaries, body.currency)
+        if summaries:
+            for s in summaries[:30]:
+                meta = _parse_inst_name(s.get("instrument_name", ""))
+                if not meta:
+                    continue
+                positions.append({
+                    "strike": meta.strike,
+                    "option_type": meta.option_type,
+                    "premium_usd": float(s.get("mark_price", 0)) * spot,
+                    "delta": abs(float(s.get("delta", 0))),
+                    "oi": float(s.get("open_interest", 0)),
+                    "qty": 1,
+                })
+    except Exception:
+        pass
+
+    manager = ProtectionManager()
+    results = manager.check_all(
+        positions=positions,
+        spot=spot,
+        dvol=dvol,
+        iv=iv,
+        current_equity=body.current_equity,
+        peak_equity=body.peak_equity,
+    )
+
+    summary = ProtectionManager.summarize(results)
+
+    return {
+        "all_clear": summary["all_clear"],
+        "summary": summary,
+        "details": {
+            name: {
+                "tripped": r.tripped,
+                "reason": r.reason,
+                "suggested_action": r.suggested_action,
+                "severity": r.severity,
+            }
+            for name, r in results.items()
+        },
+        "market_snapshot": {
+            "spot": round(spot, 0),
+            "dvol": round(dvol, 1),
+            "positions_tracked": len(positions),
+        },
+    }
+
+
+class PortfolioRiskRequest(BaseModel):
+    currency: str = Field(default="BTC")
+
+
+@router.post("/portfolio-risk")
+async def portfolio_risk(body: PortfolioRiskRequest):
+    """计算投资组合风险: VaR, CVaR, 集中度, 回撤, 动态止损"""
+    from services.portfolio_risk import PortfolioRisk
+    from services.spot_price import get_spot_price
+    from services.dvol_analyzer import get_dvol_from_deribit
+    from services.trades import fetch_deribit_summaries
+    from services.instrument import _parse_inst_name
+    from fastapi.concurrency import run_in_threadpool
+
+    try:
+        spot = await run_in_threadpool(get_spot_price, body.currency)
+        dvol_data = await run_in_threadpool(get_dvol_from_deribit, body.currency)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"数据获取失败: {e}")
+
+    dvol = dvol_data.get("current_dvol", 50) if dvol_data else 50
+    iv = dvol
+
+    positions = []
+    try:
+        summaries = await run_in_threadpool(fetch_deribit_summaries, body.currency)
+        if summaries:
+            for s in summaries[:30]:
+                meta = _parse_inst_name(s.get("instrument_name", ""))
+                if not meta or meta.dte < 1:
+                    continue
+                delta_val = abs(float(s.get("delta", 0)) or 0.3)
+                premium_unit = float(s.get("mark_price", 0)) or 0
+                positions.append({
+                    "strike": meta.strike,
+                    "option_type": meta.option_type,
+                    "premium_usd": round(premium_unit * spot, 2),
+                    "delta": delta_val,
+                    "qty": 1,
+                    "margin_required": meta.strike * 0.2,
+                })
+    except Exception:
+        pass
+
+    risk = PortfolioRisk.calc_var(positions, spot, iv, confidence="95")
+
+    # Estimate equity from total margin (proxy when real portfolio unavailable)
+    estimated_equity = risk.total_margin_used * 2.5 if risk.total_margin_used > 0 else spot * 5
+    peak_multiplier = 1.15  # assume peak was 15% higher
+    peak_est = estimated_equity * peak_multiplier
+    drawdown_tripped, drawdown_val, drawdown_reason = PortfolioRisk.check_drawdown(
+        estimated_equity, peak_est
+    )
+    stop_loss = PortfolioRisk.calc_dynamic_stop_loss(spot, dvol, drawdown_val)
+
+    return {
+        "success": True,
+        "var_95": risk.var_95,
+        "cvar_95": risk.cvar_95,
+        "var_95_pct": risk.var_95_pct,
+        "cvar_95_pct": risk.cvar_95_pct,
+        "concentration_risk": risk.concentration_risk,
+        "max_strike_band_ratio": risk.max_strike_band_ratio,
+        "drawdown_from_peak": round(drawdown_val, 4),
+        "circuit_breaker_tripped": drawdown_tripped,
+        "circuit_breaker_reason": drawdown_reason,
+        "stop_loss_price": stop_loss,
+        "total_margin_used": risk.total_margin_used,
+        "total_premium": risk.total_premium,
+        "position_count": risk.position_count,
+        "risk_level": risk.risk_level,
+        "market_snapshot": {"spot": round(spot, 0), "dvol": round(dvol, 1)},
+    }

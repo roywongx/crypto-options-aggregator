@@ -69,6 +69,7 @@ class StrategyMetrics:
     vega: float = 0.0
     max_profit: float = 0.0
     max_loss: float = 0.0
+    prob_weighted_return: float = 0.0  # premium * win_rate / margin * 365/dte * 100
     margin_required: float = 0.0
     net_credit: float = 0.0
     gross_credit: float = 0.0
@@ -273,6 +274,22 @@ class UnifiedStrategyEngine:
         from services.margin_calculator import calc_margin
         return calc_margin(strike, premium, option_type, margin_ratio)
 
+    @staticmethod
+    def _calc_max_loss(strike: float, premium_per_contract: float, option_type: OptionType, qty: float = 1.0) -> float:
+        """计算最大亏损
+
+        Short PUT: 最大亏损 = max(0, strike - premium) * qty（标的价格归零的最坏情况）
+        Short CALL: 返回 -1 表示无限风险（裸卖看涨）
+        """
+        if option_type == OptionType.CALL:
+            return -1.0
+        return max(0.0, (strike - premium_per_contract) * qty)
+
+    @staticmethod
+    def _calc_prob_weighted_return(annualized_roi: float, win_rate: float) -> float:
+        """概率加权年化收益率 = ROI * win_rate"""
+        return round(annualized_roi * win_rate, 1)
+
     def recommend_roll(
         self,
         contracts: List[Dict],
@@ -347,7 +364,8 @@ class UnifiedStrategyEngine:
                     theta=bs_data.get("theta", 0),
                     vega=bs_data.get("vega", 0),
                     max_profit=round(net_credit, 2),
-                    max_loss=0.0,
+                    max_loss=self._calc_max_loss(strike, prem, params.option_type, new_qty),
+                    prob_weighted_return=self._calc_prob_weighted_return(annualized_roi * 100, win_rate),
                     margin_required=round(margin_req, 2),
                     net_credit=round(net_credit, 2),
                     gross_credit=round(gross_credit, 2),
@@ -421,7 +439,8 @@ class UnifiedStrategyEngine:
                     theta=bs_data.get("theta", 0),
                     vega=bs_data.get("vega", 0),
                     max_profit=round(gross_credit, 2),
-                    max_loss=0.0,
+                    max_loss=self._calc_max_loss(strike, prem, params.option_type),
+                    prob_weighted_return=self._calc_prob_weighted_return(annualized_roi * 100, win_rate),
                     margin_required=round(margin_req, 2),
                     gross_credit=round(gross_credit, 2),
                     capital_efficiency=round(capital_efficiency, 4),
@@ -431,7 +450,8 @@ class UnifiedStrategyEngine:
                     theta_decay=bs_data.get("theta")
                 ),
                 risk_assessment={
-                    "rf_modifier": round(RiskFramework.get_score_modifier(strike, spot), 2)
+                    "rf_modifier": round(RiskFramework.get_score_modifier(strike, spot), 2),
+                    "max_loss_note": "无限风险" if params.option_type == OptionType.CALL else None,
                 },
                 extra={"mode": "new"}
             ))

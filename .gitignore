@@ -35,6 +35,7 @@ test_*.py
 
 # 环境
 .env
+.env.enc
 .venv/
 venv/
 env/
@@ -57,3 +58,4 @@ pytest_output.txt
 # 操作系统
 .DS_Store
 Thumbs.db
+.gstack/

@@ -8,6 +8,7 @@
     <title>加密期权监控面板</title>
     <link rel="stylesheet" href="/static/tailwind-output.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -69,6 +70,13 @@
         .density-compact .num-hero { font-size: 22px; }
         .density-pro .num-hero { font-size: 32px; }
         .density-pro .metric-card { padding: 20px !important; }
+        .ft-tab.active { background: #1a1b23; color: #e2e4f0; border: 1px solid rgba(71,73,85,0.4); border-bottom-color: transparent; }
+        .ft-tab:not(.active) { color: #686b82; }
+        .ft-tab:not(.active):hover { color: #e2e4f0; background: rgba(26,27,35,0.5); }
+        .guard-card { transition: border-color 0.3s; }
+        .guard-card.tripped-critical { border-color: #ef4444; background: rgba(239,68,68,0.05); }
+        .guard-card.tripped-warning { border-color: #f59e0b; background: rgba(245,158,11,0.05); }
+        .guard-card.clear { border-color: #149e61; }
     </style>
 </head>
 <body class="gradient-bg min-h-screen text-white">
@@ -140,6 +148,59 @@
                 <div class="text-xs text-[#9497a9] mb-1">风险评分</div>
                 <div class="num-hero" id="riskScoreCard">--</div>
                 <div class="num-metadata mt-1" id="riskLevelCard">综合风险</div>
+            </div>
+        </section>
+
+        <!-- 我的投资组合 -->
+        <section id="portfolioSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#149e61]" style="display:none">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-xl font-bold text-white">我的投资组合</h2>
+                    <span id="portfolioStatus" class="px-2 py-0.5 rounded text-xs font-medium bg-[#22232e] text-[#e4e4e7]">加载中...</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button id="portfolioRefreshBtn" class="btn-secondary px-3 py-1.5 rounded-lg text-xs font-medium">
+                        <i class="fas fa-sync-alt mr-1"></i>刷新
+                    </button>
+                    <button id="portfolioLLMBtn" class="btn-primary px-3 py-1.5 rounded-lg text-xs font-medium">
+                        <i class="fas fa-brain mr-1"></i>AI 分析
+                    </button>
+                </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4" id="portfolioSummary">
+            </div>
+
+            <!-- Positions Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm table-compact" id="portfolioTable">
+                    <thead>
+                        <tr class="text-[#9497a9] text-xs border-b border-[rgba(71,73,85,0.3)]">
+                            <th class="text-left py-2">合约</th>
+                            <th class="text-right py-2">方向</th>
+                            <th class="text-right py-2">行权价</th>
+                            <th class="text-right py-2">到期</th>
+                            <th class="text-right py-2">入场价</th>
+                            <th class="text-right py-2">标记价</th>
+                            <th class="text-right py-2">市值</th>
+                            <th class="text-right py-2">浮盈</th>
+                            <th class="text-right py-2">盈利率</th>
+                        </tr>
+                    </thead>
+                    <tbody id="portfolioBody"></tbody>
+                </table>
+            </div>
+            <div id="portfolioEmpty" class="text-center text-[#686b82] py-4 text-sm">暂无持仓数据</div>
+
+            <!-- LLM Analysis Result -->
+            <div id="portfolioLLMResult" class="mt-4 hidden">
+                <div class="border-t border-[rgba(71,73,85,0.3)] pt-4">
+                    <h3 class="text-sm font-semibold text-[#7132f5] mb-2">
+                        <i class="fas fa-brain mr-1"></i>AI 分析报告
+                    </h3>
+                    <div id="portfolioLLMContent" class="text-sm text-[#e4e4e7] max-h-[500px] overflow-y-auto custom-scrollbar prose prose-invert prose-sm"></div>
+                </div>
             </div>
         </section>
 
@@ -384,7 +445,192 @@
             </div>
         </section>
 
-        
+        <!-- Freqtrade v3.0 策略引擎 -->
+        <section id="freqtradeSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#149e61]">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-robot text-[#149e61] text-lg"></i>
+                    <h3 class="font-semibold text-lg">Freqtrade 策略引擎</h3>
+                    <span class="text-xs text-[#9497a9] ml-2 hidden sm:inline">组合风险 · 保护守卫 · 参数优化 · 历史回测</span>
+                </div>
+            </div>
+            <div class="flex gap-1 mb-4 border-b border-[rgba(71,73,85,0.3)] flex-wrap" id="ftTabBar">
+                <button onclick="setFreqtradeTab('portfolioRisk')" class="ft-tab active px-3 py-1.5 text-sm rounded-t-lg transition-colors" data-tab="portfolioRisk">
+                    <i class="fas fa-shield-halved mr-1"></i>组合风险
+                </button>
+                <button onclick="setFreqtradeTab('protections')" class="ft-tab px-3 py-1.5 text-sm rounded-t-lg transition-colors text-[#686b82] hover:text-[#e2e4f0]" data-tab="protections">
+                    <i class="fas fa-shield mr-1"></i>保护
+                </button>
+                <button onclick="setFreqtradeTab('optimizer')" class="ft-tab px-3 py-1.5 text-sm rounded-t-lg transition-colors text-[#686b82] hover:text-[#e2e4f0]" data-tab="optimizer">
+                    <i class="fas fa-sliders mr-1"></i>参数优化
+                </button>
+                <button onclick="setFreqtradeTab('backtest')" class="ft-tab px-3 py-1.5 text-sm rounded-t-lg transition-colors text-[#686b82] hover:text-[#e2e4f0]" data-tab="backtest">
+                    <i class="fas fa-chart-line mr-1"></i>回测
+                </button>
+            </div>
+
+            <!-- Tab 1: 组合风险 -->
+            <div id="ftTabPortfolioRisk" class="ft-tab-content">
+                <div id="ftRiskLoading" class="text-center text-[#686b82] py-8">
+                    <i class="fas fa-spinner fa-spin text-2xl mb-2 opacity-50"></i>
+                    <p class="text-sm">加载组合风险指标...</p>
+                </div>
+                <div id="ftRiskError" class="hidden text-center py-4 text-sm" style="color:#ef4444"></div>
+                <div id="ftRiskContent" class="hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <!-- VaR Gauge -->
+                        <div class="flex flex-col items-center">
+                            <div class="relative flex items-center justify-center" style="width:200px;height:120px">
+                                <canvas id="varGaugeCanvas" width="200" height="120"></canvas>
+                            </div>
+                            <span class="text-xs text-[#9497a9] mt-1">每日 VaR (95% 置信)</span>
+                            <span id="ftRiskLevel" class="text-xs px-2 py-0.5 rounded-full mt-1 font-medium"></span>
+                        </div>
+                        <!-- Stats Grid -->
+                        <div class="grid grid-cols-2 gap-2 content-start">
+                            <div class="bg-[#1a1b23] rounded-lg p-2.5 text-center">
+                                <div id="ftPositionCount" class="text-lg font-bold text-[#e2e4f0]">-</div>
+                                <div class="text-[10px] text-[#686b82]">持仓数量</div>
+                            </div>
+                            <div class="bg-[#1a1b23] rounded-lg p-2.5 text-center">
+                                <div id="ftTotalMargin" class="text-lg font-bold text-[#e2e4f0]">-</div>
+                                <div class="text-[10px] text-[#686b82]">总保证金</div>
+                            </div>
+                            <div class="bg-[#1a1b23] rounded-lg p-2.5 text-center">
+                                <div id="ftTotalPremium" class="text-lg font-bold text-[#e2e4f0]">-</div>
+                                <div class="text-[10px] text-[#686b82]">总权利金</div>
+                            </div>
+                            <div class="bg-[#1a1b23] rounded-lg p-2.5 text-center">
+                                <div id="ftCvar" class="text-lg font-bold text-[#e2e4f0]">-</div>
+                                <div class="text-[10px] text-[#686b82]">CVaR (95%)</div>
+                            </div>
+                        </div>
+                        <!-- Risk Details -->
+                        <div class="space-y-2">
+                            <div class="flex justify-between text-xs"><span class="text-[#686b82]">集中度风险</span><span id="ftConcentration" class="font-mono"></span></div>
+                            <div class="flex justify-between text-xs"><span class="text-[#686b82]">最大档位占比</span><span id="ftBandRatio" class="font-mono"></span></div>
+                            <div class="flex justify-between text-xs"><span class="text-[#686b82]">回撤 (从峰值)</span><span id="ftDrawdown" class="font-mono"></span></div>
+                            <div class="flex justify-between text-xs"><span class="text-[#686b82]">动态止损价位</span><span id="ftStopLoss" class="font-mono text-[#ef4444]"></span></div>
+                            <div id="ftCircuitBreaker" class="text-[10px] text-[#ef4444] hidden"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: 保护守卫 -->
+            <div id="ftTabProtections" class="ft-tab-content hidden">
+                <div id="ftProtLoading" class="text-center text-[#686b82] py-8">
+                    <i class="fas fa-spinner fa-spin text-2xl mb-2 opacity-50"></i>
+                    <p class="text-sm">检查保护守卫状态...</p>
+                </div>
+                <div id="ftProtError" class="hidden text-center py-4 text-sm" style="color:#ef4444"></div>
+                <div id="ftProtContent" class="hidden">
+                    <div id="ftProtSummary" class="mb-4"></div>
+                    <div id="ftProtCards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+                </div>
+            </div>
+
+            <!-- Tab 3: 参数优化器 -->
+            <div id="ftTabOptimizer" class="ft-tab-content hidden">
+                <div class="flex flex-wrap gap-2 mb-3 items-end">
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">优化模式</label>
+                        <select id="ftOptMode" class="input-dark rounded-lg px-2 py-1 text-xs">
+                            <option value="bayesian">Bayesian (推荐)</option>
+                            <option value="full">Full Grid</option>
+                            <option value="quick">Quick</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">目标函数</label>
+                        <select id="ftOptObjective" class="input-dark rounded-lg px-2 py-1 text-xs">
+                            <option value="sortino_loss">Sortino (期权卖方推荐)</option>
+                            <option value="calmar_loss">Calmar (保守)</option>
+                            <option value="sharpe_loss">Sharpe (均衡)</option>
+                            <option value="weighted_score">加权得分 (兼容)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">币种</label>
+                        <select id="ftOptCurrency" class="input-dark rounded-lg px-2 py-1 text-xs">
+                            <option value="BTC">BTC</option><option value="ETH">ETH</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">期权类型</label>
+                        <select id="ftOptType" class="input-dark rounded-lg px-2 py-1 text-xs">
+                            <option value="PUT">PUT</option><option value="CALL">CALL</option>
+                        </select>
+                    </div>
+                    <button onclick="runOptimization()" id="ftOptBtn" class="bg-[#149e61] hover:bg-[#0f7d4c] text-white text-xs px-4 py-1.5 rounded-lg transition-colors">
+                        <i class="fas fa-play mr-1"></i>运行优化
+                    </button>
+                </div>
+                <div id="ftOptLoading" class="hidden text-center text-[#686b82] py-4">
+                    <i class="fas fa-spinner fa-spin mr-2"></i><span class="text-sm">优化中，请耐心等待...</span>
+                </div>
+                <div id="ftOptError" class="hidden text-center py-2 text-xs" style="color:#ef4444"></div>
+                <div id="ftOptContent" class="hidden">
+                    <div id="ftOptBestParams" class="bg-[#1a1b23] border border-[#149e61] rounded-lg p-3 mb-3"></div>
+                    <div id="ftOptStats" class="flex flex-wrap gap-2 mb-3 text-xs text-[#9497a9]"></div>
+                    <div class="overflow-x-auto max-h-[400px]">
+                        <table id="ftOptTable" class="w-full text-xs">
+                            <thead class="text-[#686b82] border-b border-[rgba(71,73,85,0.3)] sticky top-0 bg-[#12131a]"></thead>
+                            <tbody id="ftOptTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 4: 回测引擎 -->
+            <div id="ftTabBacktest" class="ft-tab-content hidden">
+                <div class="flex flex-wrap gap-2 mb-3 items-end">
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">币种</label>
+                        <select id="ftBtCurrency" class="input-dark rounded-lg px-2 py-1 text-xs">
+                            <option value="BTC">BTC</option><option value="ETH">ETH</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">回测天数</label>
+                        <select id="ftBtDays" class="input-dark rounded-lg px-2 py-1 text-xs">
+                            <option value="90">90天</option><option value="180">180天</option><option value="365" selected>365天</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">交易所</label>
+                        <select id="ftBtExchange" class="input-dark rounded-lg px-2 py-1 text-xs">
+                            <option value="binance">Binance</option><option value="deribit">Deribit</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-[#686b82] block">初始资金</label>
+                        <input id="ftBtCapital" type="number" value="100000" class="input-dark rounded-lg px-2 py-1 text-xs w-24">
+                    </div>
+                    <button onclick="runBacktest()" id="ftBtBtn" class="bg-[#7132f5] hover:bg-[#5a28c4] text-white text-xs px-4 py-1.5 rounded-lg transition-colors">
+                        <i class="fas fa-play mr-1"></i>运行回测
+                    </button>
+                </div>
+                <div id="ftBtLoading" class="hidden text-center text-[#686b82] py-4">
+                    <i class="fas fa-spinner fa-spin mr-2"></i><span class="text-sm">运行回测中...</span>
+                </div>
+                <div id="ftBtError" class="hidden text-center py-2 text-xs" style="color:#ef4444"></div>
+                <div id="ftBtContent" class="hidden">
+                    <div class="relative" style="height:300px"><canvas id="equityCurveCanvas"></canvas></div>
+                    <div id="ftBtStats" class="grid grid-cols-4 sm:grid-cols-8 gap-2 my-3 text-xs text-center"></div>
+                    <div class="overflow-x-auto max-h-[250px]">
+                        <table id="ftBtTable" class="w-full text-xs">
+                            <thead class="text-[#686b82] border-b border-[rgba(71,73,85,0.3)] sticky top-0 bg-[#12131a]">
+                                <tr><th class="text-left py-1 px-2">日期</th><th class="text-right py-1 px-2">行权价</th><th class="text-right py-1 px-2">权利金</th><th class="text-right py-1 px-2">PnL</th><th class="text-right py-1 px-2">DTE</th><th class="text-left py-1 px-2">退出原因</th></tr>
+                            </thead>
+                            <tbody id="ftBtTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
         <!-- IV 波动率微笑 -->
         <section id="ivSmileSection" class="card-glass rounded-xl p-5 mb-6 border-l-4 border-[#7132f5]">
             <div class="flex items-center justify-between mb-4">
@@ -537,6 +783,7 @@
                         <div class="flex items-center gap-2">
                             <i class="fas fa-shield-alt text-[#7132f5]"></i>
                             <span class="font-semibold text-sm text-[#8b5cf6]">数据审计</span>
+                            <span id="llmAuditMethod"></span>
                         </div>
                         <div class="flex items-center gap-2">
                             <span class="text-xs text-[#9497a9]">质量评分</span>
@@ -855,19 +1102,22 @@
                         </div>
                     </div>
 
-                    <!-- 净流向图 (水平柱状) -->
+                    <!-- 方向结论看板 + 资金分布 -->
                     <div id="windNetFlowSection" class="mb-4">
                         <div class="flex items-center justify-between mb-2 text-xs text-[#9497a9]">
-                            <span>行权价净流向 · 名义价值</span>
+                            <span>大单资金流向结论</span>
                             <span id="windSpotMarker" class="font-mono text-[#7132f5] hidden">● 现价 $--</span>
                         </div>
-                        <div class="flex items-center gap-1 mb-2 text-[10px] text-[#686b82]">
-                            <span class="text-[#ef4444]">← 卖出压力 (Put成交量 > Call)</span>
-                            <span class="flex-1 text-center">|</span>
-                            <span class="text-[#149e61]">买入压力 (Call成交量 > Put) →</span>
-                        </div>
-                        <div id="strikeFlowsChart" class="space-y-1 overflow-y-auto custom-scrollbar pr-1" style="max-height: 40vh;">
+                        <div id="strikeFlowsChart">
                             <div class="text-[#686b82] text-center py-4">加载中...</div>
+                        </div>
+                    </div>
+
+                    <!-- Moneyness 分桶 -->
+                    <div id="moneynessSection" class="mb-4">
+                        <div class="text-xs text-[#9497a9] mb-2">资金分布 · 按现价距离</div>
+                        <div id="moneynessBreakdown" class="space-y-1">
+                            <div class="text-[#686b82] text-center py-2 text-xs">加载中...</div>
                         </div>
                     </div>
 
@@ -1211,6 +1461,7 @@
 
     <script type="module" src="/static/app.js?v=904&t=1777626800"></script>
     <script type="module" src="/static/recommendations.js?v=5&t=1777970000"></script>
+    <script type="module" src="/static/freqtrade.js?v=1&t=1777970000"></script>
     
 <div style="display:none" data-app-version="v903"></div></body>
 </html>

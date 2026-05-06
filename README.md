@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Python-3.13+-blue?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi" alt="FastAPI">
   <img src="https://img.shields.io/badge/Binance+Deribit-orange?logo=bitcoin" alt="Platform">
-  <img src="https://img.shields.io/badge/Tests-163_passing-149e61" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-178_passing-149e61" alt="Tests">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
 </p>
 
@@ -21,8 +21,8 @@ A high-performance options trading terminal purpose-built for **Sell Put / Cover
 
 为 Sell Put / Covered Call / Wheel 策略交易者打造的高性能期权交易终端。实时聚合币安和 Deribit 期权链，按风险调整收益率（保证金 APR）评分，提供从规则引擎到 LLM 深度分析的多层决策支持。
 
-- **163 tests passing** · **47 services** · **14 API modules** · **17 analysis panels**
-- **163 个测试通过** · **47 个服务模块** · **14 个 API 模块** · **17 个分析面板**
+- **178 tests passing** · **53 services** · **16 API modules** · **17 analysis panels**
+- **178 个测试通过** · **53 个服务模块** · **16 个 API 模块** · **17 个分析面板**
 
 ---
 
@@ -85,6 +85,10 @@ Deribit WebSocket  ─┘        │
 | **Strategy Engine** | Roll / New position / Grid modes with automated P&L and breakeven calculation |
 | **Paper Trading** | 50K USDT simulation with real market data, margin freezing, position tracking |
 | **Martingale Sandbox** | Interactive DCA simulation with configurable price path and strategy parameters |
+| **Portfolio AI Analysis** | Real Deribit portfolio SSE-streamed LLM deep analysis (Greeks, tail risk, scenario stress) |
+| **Freqtrade v3.0 Strategy** | Param optimizer (Bayesian + Grid Search), event-driven backtest engine, 6 protection guards |
+| **Multi-Exchange Abstraction** | Unified ABC interface for Binance + Deribit, extensible to Bybit/OKX |
+| **Volatility Predictor** | DVOL 7d/30d forecasting with multi-regime detection |
 
 ### Risk & Analytics / 风控与分析
 
@@ -98,9 +102,11 @@ Deribit WebSocket  ─┘        │
 | **Max Pain** | Max pain price calculation with gamma exposure overlay |
 | **IV Smile** | Skew metrics (25-delta), form classification (smile/skew/flat), curvature analysis |
 | **IV Term Structure** | Hull-White calibration, variance risk premium, contango/backwardation detection |
-| **PCR Chart** | Put/Call ratio tracking with extreme zone detection |
+| **PCR Chart** | Put/Call ratio tracking with extreme zone detection, anomaly filtering |
 | **On-Chain Metrics** | MVRV-Z, NUPL, Mayer Multiple, Puell Multiple, 200WMA, Balanced Price |
 | **Derivative Metrics** | Perp basis, OI-price divergence, funding volatility, liquidation heat, stablecoin reserves, futures/spot ratio, Sharpe |
+| **Portfolio Risk** | Delta-Normal VaR (95%), CVaR (肥尾 ×1.25), Kelly 仓位, 行权价集中度 |
+| **Protection Guards** | 6-guard system — stop-loss, drawdown circuit breaker, consecutive loss cooldown, overtrading, VaR, concentration |
 
 ### AI & Intelligence / AI 与智能
 
@@ -191,7 +197,18 @@ Interactive docs: **http://localhost:8000/docs**
 | `/api/strategy/recommend` | POST | Strategy recommendations |
 | `/api/strategy/roll-plan` | POST | Roll strategy calculation |
 | `/api/strategy/new-plan` | POST | New position calculation |
+| `/api/strategy/optimize` | POST | Bayesian + grid search param optimization |
+| `/api/strategy/backtest` | POST | Event-driven backtest with equity curve |
+| `/api/strategy/protections-check` | GET | 6-guard protection system status |
 | `/api/sandbox/simulate` | POST | Martingale sandbox simulation |
+
+### Portfolio / 投资组合
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/portfolio/positions` | GET | Real-time portfolio positions from Deribit |
+| `/api/portfolio/llm` | POST | Portfolio AI deep analysis (SSE stream) |
+| `/api/portfolio-risk` | POST | VaR/CVaR/Kelly/concentration risk metrics |
 
 ### AI / AI
 
@@ -251,17 +268,18 @@ crypto-options-aggregator/
 │   ├── config.py                       # Runtime configuration
 │   ├── requirements.txt                # Python dependencies
 │   ├── tailwind-input.css              # Tailwind v4 CSS config
-│   ├── api/                            # Route handlers (14 modules)
+│   ├── api/                            # Route handlers (16 modules)
 │   │   ├── recommendations.py          # Unified recommendation + LLM endpoints
 │   │   ├── risk.py                     # Risk command center
 │   │   ├── llm_analyst.py              # LLM analyst endpoints + config
 │   │   ├── scan.py                     # Options scan
-│   │   ├── strategy.py                 # Strategy calculation
+│   │   ├── strategy.py                 # Strategy + optimize + backtest + protections
+│   │   ├── portfolio.py                # Portfolio AI analysis (SSE)
 │   │   ├── sandbox.py                  # Martingale sandbox
 │   │   ├── paper_trading.py            # Paper trading
 │   │   ├── mcp.py                      # MCP server
 │   │   └── ...                         # dashboard, datahub, exchanges, health, macro, refresh
-│   ├── services/                       # Business logic (44 modules)
+│   ├── services/                       # Business logic (53 modules)
 │   │   ├── unified_recommendation_engine.py  # Signal + report + LLM prompt builder
 │   │   ├── panel_analyzers.py          # 16 panel configs + rule functions + LLM templates
 │   │   ├── scan_engine.py              # Two-layer options scan engine
@@ -271,7 +289,14 @@ crypto-options-aggregator/
 │   │   ├── datahub.py                  # Pub/Sub + WebSocket data center
 │   │   ├── iv_smile.py                 # IV smile/skew/curvature analyzer
 │   │   ├── greeks_analyzer.py          # Greeks computation + GEX analysis
-│   │   └── ...                         # 35 more services
+│   │   ├── portfolio_risk.py           # VaR/CVaR/Kelly/concentration risk
+│   │   ├── portfolio_service.py        # Real-time Deribit portfolio aggregation
+│   │   ├── protections.py              # 6-guard protection system
+│   │   ├── param_optimizer.py          # Bayesian + grid search optimization
+│   │   ├── backtest_engine.py          # Event-driven backtest engine
+│   │   ├── volatility_predictor.py     # DVOL 7d/30d forecasting
+│   │   ├── exchange_abstraction.py     # Multi-exchange unified interface (ABC)
+│   │   └── ...                         # 37 more services
 │   ├── routers/                        # Additional routers (5 modules)
 │   │   ├── maxpain.py                  # Max pain + GEX
 │   │   ├── grid.py                     # Grid strategy
@@ -281,15 +306,16 @@ crypto-options-aggregator/
 │   │   ├── index.html                  # Single-page entry
 │   │   ├── app.js                      # Core application logic
 │   │   ├── recommendations.js          # Recommendation engine frontend
+│   │   ├── freqtrade.js                # Freqtrade v3.0 strategy panel
 │   │   ├── utils.js                    # Shared utilities + safeFetch
 │   │   ├── tailwind-output.css         # Compiled Tailwind CSS
 │   │   ├── favicon.svg                 # Vector favicon
-│   │   └── ...                         # maxpain.js, sandbox.js, grid-strategy.js, term-structure.js
+│   │   └── ...                         # maxpain.js, sandbox.js, grid-strategy.js
 │   ├── db/                             # Database layer
 │   │   ├── connection.py               # SQLite connection pool
 │   │   ├── schema.py                   # DDL + migrations
 │   │   └── maintenance.py              # Retention + vacuum
-│   ├── tests/                          # 141 tests
+│   ├── tests/                          # 178 tests
 │   │   ├── test_unified_recommendation.py  # Recommendation engine tests
 │   │   ├── test_risk_math.py           # Risk formula tests
 │   │   ├── test_risk_api.py            # Risk API integration
@@ -307,7 +333,7 @@ crypto-options-aggregator/
 ```bash
 cd dashboard
 python -m pytest tests/ -v
-# 163 passed
+# 178 passed
 ```
 
 ---
