@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "memory-graph": {
+      "command": "npx",
+      "args": ["-y", "@memorygraph/server"],
+      "description": "基于知识图谱的持久化记忆 — SQLite + sqlite-vec 语义搜索"
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "mcp-server-sqlite", "--db", "dashboard/data/monitor.db"],
+      "description": "SQLite 数据库查询 — 直接以自然语言查询 monitor.db (期权扫描、交易记录、合约数据)"
+    },
+    "apidog": {
+      "command": "npx",
+      "args": ["-y", "apidog-mcp-server", "--project-id", "YOUR_APIDOG_PROJECT_ID"],
+      "description": "Apidog API 文档自动化 — 拉取/解析外部 API 文档, 对接 Binance/Deribit 等交易所接口。需要替换 YOUR_APIDOG_PROJECT_ID 为在 apidog.com 创建的项目 ID"
+    }
+  }
+}

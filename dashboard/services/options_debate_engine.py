@@ -15,6 +15,7 @@ v2.0 改进:
 """
 
 import math
+import time
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -22,11 +23,25 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 数据收集层
+# 数据收集层 — 短周期缓存，避免同一次请求中重复拉取 API
 # ---------------------------------------------------------------------------
 
-def _gather_market_data(currency: str) -> Dict[str, Any]:
-    """并行采集市场数据 (ThreadPoolExecutor, 4 workers, 30s total timeout)"""
+_gmd_cache: Dict[str, tuple] = {}  # {currency: (data, timestamp)}
+_GMD_CACHE_TTL = 5  # 秒，覆盖同一个 HTTP 请求的生命周期
+
+
+def _gather_market_data(currency: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """并行采集市场数据 (ThreadPoolExecutor, 4 workers, 30s total timeout)
+
+    内置 5 秒缓存：同一个 currency 在 TTL 内重复调用返回相同数据，
+    避免 LLM analyst 的 _prepare_context 和 run_debate 各自拉取导致不一致。
+    """
+    if not force_refresh:
+        now = time.time()
+        cached = _gmd_cache.get(currency)
+        if cached and (now - cached[1]) < _GMD_CACHE_TTL:
+            return cached[0]
+
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
     data: Dict[str, Any] = {"currency": currency, "errors": []}
 
@@ -229,6 +244,8 @@ def _gather_market_data(currency: str) -> Dict[str, Any]:
     except (RuntimeError, ValueError, TypeError, ConnectionError, TimeoutError):
         data["max_pain"] = 0
 
+    # 写入短周期缓存，同一次 HTTP 请求中的后续调用直接复用
+    _gmd_cache[currency] = (data, time.time())
     return data
 
 
@@ -341,8 +358,9 @@ def _bull_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
                      and c.get("premium_usd", 0) > 0
                      and c.get("dte", 999) >= 3]  # 过滤短期到期合约，避免 APR 夸张失真
     if put_contracts:
-        # v3.0: win_rate 从 delta 计算（contracts 不含此字段）
-        # 对于 Sell Put: 胜率 ≈ 1 - |delta| = 期权到期虚值的概率
+        # win_rate 从 delta 计算（contracts 不含此字段）
+        # 对于期权卖方: 胜率 ≈ 1 - |delta|（|delta| 表示到期实值的近似概率）
+        # 例: |delta|=0.40 → 40%实值概率 → 卖方60%胜率，公式正确
         for c in put_contracts:
             c["_win_rate"] = 1.0 - abs(c.get("delta", 0.5))
         avg_apr = sum(c.get("apr", 0) for c in put_contracts) / len(put_contracts)

@@ -460,10 +460,19 @@ class LLMAnalystEngine:
         # 1. 现货价格 + 时序变化
         # ============================================================
         parts.append(f"现货价格: ${spot:,.0f}")
-        # 数据时间戳
+        # 数据时间戳 + 新鲜度检查
         data_ts = ctx.get("data_timestamp", "")
         if data_ts:
-            parts.append(f"  数据时间: {data_ts} (以下所有分析基于此时间点)")
+            try:
+                from datetime import datetime as _dt
+                ts_dt = _dt.strptime(data_ts[:19], "%Y-%m-%d %H:%M:%S")
+                age_min = (_dt.now() - ts_dt).total_seconds() / 60
+                if age_min > 60:
+                    parts.append(f"  ⚠️ 数据时间: {data_ts} (已过期 {age_min:.0f} 分钟，以下分析基于旧数据，建议刷新)")
+                else:
+                    parts.append(f"  数据时间: {data_ts} (以下所有分析基于此时间点)")
+            except (ValueError, TypeError):
+                parts.append(f"  数据时间: {data_ts} (以下所有分析基于此时间点)")
         # 尝试从链上数据取24h价格变化
         onchain = ctx.get("onchain", {})
         if isinstance(onchain, dict) and onchain.get("current_price"):
@@ -531,13 +540,11 @@ class LLMAnalystEngine:
         if isinstance(macro, dict):
             fg = macro.get("fear_greed", {})
             fr = macro.get("funding_rate", {})
-            risk_free = macro.get("risk_free_rate", {})
             fg_val = fg.get("value", "N/A") if isinstance(fg, dict) else "N/A"
             fg_cls = fg.get("classification", "") if isinstance(fg, dict) else ""
             fr_val = fr.get("current_rate", "N/A") if isinstance(fr, dict) else "N/A"
-            rf_val = risk_free.get("rate", "N/A") if isinstance(risk_free, dict) else "N/A"
             parts.append(
-                f"宏观: 恐惧贪婪={fg_val}({fg_cls}) | 资金费率={fr_val} | 无风险利率={rf_val}%"
+                f"宏观: 恐惧贪婪={fg_val}({fg_cls}) | 资金费率={fr_val}"
             )
 
         # ============================================================

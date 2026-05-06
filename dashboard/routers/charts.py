@@ -39,8 +39,12 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
     current_pcr = ne["put_oi"] / ne["call_oi"] if ne["call_oi"] > 0 else 0
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+    # OI-based PCR (实时，最近到期)：反映市场持仓结构
+    oi_result = {"time": now, "pcr": round(current_pcr, 3), "pcr_type": "oi_based",
+                 "puts": round(ne["put_oi"], 0), "calls": round(ne["call_oi"], 0)}
+
     if hours <= 24:
-        return [{"time": now, "pcr": round(current_pcr, 3), "puts": round(ne["put_oi"], 0), "calls": round(ne["call_oi"], 0)}]
+        return [oi_result]
 
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
     rows = await execute_read_async("""
@@ -81,12 +85,14 @@ async def get_pcr_chart(currency: str = "BTC", hours: int = 168):
             if calls < 5 or puts < 5:
                 continue
 
-            result.append({"time": ts, "pcr": round(pcr_val, 3), "puts": puts, "calls": calls})
+            # Volume-based PCR (历史，大单交易量比)：反映实际交易流向
+            result.append({"time": ts, "pcr": round(pcr_val, 3), "pcr_type": "volume_based",
+                          "puts": puts, "calls": calls})
         except (ValueError, TypeError, ZeroDivisionError) as e:
             logger.debug("PCR calc skip: %s", e)
 
     if not result:
-        result.append({"time": now, "pcr": round(current_pcr, 3), "puts": round(ne["put_oi"], 0), "calls": round(ne["call_oi"], 0)})
+        result.append(oi_result)
 
     return result
 

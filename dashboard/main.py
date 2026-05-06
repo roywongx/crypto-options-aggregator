@@ -8,6 +8,7 @@ v5.0: 渐进式重构 - API 端点已迁移到 api/ 目录模块
 import os
 import re
 import hmac
+import collections
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -25,13 +26,33 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# 配置日志 — 使用 StreamHandler 避免 I/O closed file 错误
+# 配置日志 — 控制台 + 内存环形缓冲区（供 /api/logs 查看）
+import collections
+_LOG_BUFFER: collections.deque = collections.deque(maxlen=500)  # 保留最近 500 行
+
+
+class _BufferHandler(logging.Handler):
+    def emit(self, record):
+        msg = self.format(record)
+        _LOG_BUFFER.append(msg)
+        # 同时输出到 stdout（uvicorn 会捕获）
+        print(msg, flush=True)
+
+
+_buffer_handler = _BufferHandler()
+_buffer_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(_buffer_handler)
+
+# 收编 uvicorn/fastapi 等库的日志到缓冲区
+for _name in ("uvicorn", "uvicorn.error", "uvicorn.access", "fastapi", "httpx", "websockets"):
+    _lib_logger = logging.getLogger(_name)
+    _lib_logger.handlers.clear()
+    _lib_logger.propagate = True
+
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
 
 from models.contracts import ScanParams, RollCalcParams, QuickScanParams, StrategyCalcParams, SandboxParams
 
@@ -292,6 +313,86 @@ app.include_router(portfolio_router, dependencies=protected_dependencies)
 async def root():
     html_path = Path(__file__).parent / "static" / "index.html"
     return HTMLResponse(content=html_path.read_text(encoding='utf-8'))
+
+
+@app.get("/api/logs")
+async def view_logs(tail: int = 100, level: str = ""):
+    """实时日志 JSON API"""
+    lines = list(_LOG_BUFFER)
+    if level:
+        level = level.upper()
+        lines = [l for l in lines if f"[{level}]" in l]
+    tail_lines = lines[-tail:]
+    return JSONResponse({"total": len(lines), "lines": tail_lines, "max_capacity": _LOG_BUFFER.maxlen})
+
+
+@app.get("/logs", response_class=HTMLResponse)
+async def log_viewer():
+    """实时日志查看页面（每3秒自动刷新）"""
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Server Logs</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d1117; color:#c9d1d9; font:13px/1.5 'Cascadia Code','Consolas',monospace; padding:12px 16px; }
+  .bar { display:flex; gap:10px; align-items:center; margin-bottom:10px; position:sticky; top:0; background:#0d1117; padding:8px 0; z-index:1; border-bottom:1px solid #21262d; }
+  .bar button, .bar select { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:4px 12px; cursor:pointer; font-size:12px; }
+  .bar button:hover { background:#30363d; }
+  .bar .info { color:#8b949e; font-size:11px; margin-left:auto; }
+  .log { white-space:pre-wrap; word-break:break-all; }
+  .log .E { color:#f85149; } .log .W { color:#d2991d; } .log .I { color:#7ee787; } .log .D { color:#8b949e; }
+  .log .ts { color:#484f58; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span style="color:#58a6ff;font-weight:600;">📋 Server Logs</span>
+  <select id="level" onchange="fetchLogs()">
+    <option value="">全部级别</option>
+    <option value="ERROR">ERROR</option>
+    <option value="WARNING">WARNING</option>
+    <option value="INFO">INFO</option>
+    <option value="DEBUG">DEBUG</option>
+  </select>
+  <button onclick="fetchLogs()">🔄 刷新</button>
+  <label style="font-size:12px;cursor:pointer"><input type="checkbox" id="auto" checked onchange="toggleAuto()"> 自动刷新</label>
+  <span class="info" id="info"></span>
+</div>
+<div class="log" id="log">加载中...</div>
+<script>
+let timer;
+function hl(line) {
+  let cls='', txt=line;
+  if (line.includes('[ERROR]')) cls='E';
+  else if (line.includes('[WARNING]')) cls='W';
+  else if (line.includes('[INFO]')) cls='I';
+  else if (line.includes('[DEBUG]')) cls='D';
+  // 时间戳变灰
+  txt = txt.replace(/^(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2},\\d{3})/, '<span class="ts">$1</span>');
+  return '<span class="'+cls+'">'+txt+'</span>';
+}
+async function fetchLogs() {
+  try {
+    let lv = document.getElementById('level').value;
+    let url = '/api/logs?tail=200' + (lv ? '&level='+lv : '');
+    let r = await fetch(url); let d = await r.json();
+    document.getElementById('log').innerHTML = d.lines.map(hl).join('\\n');
+    document.getElementById('info').textContent = d.total+' 行 / 最多'+d.max_capacity+' | '+new Date().toLocaleTimeString();
+    window.scrollTo(0, document.body.scrollHeight);
+  } catch(e) { document.getElementById('log').textContent = '获取日志失败: '+e.message; }
+}
+function toggleAuto() {
+  if (document.getElementById('auto').checked) { timer = setInterval(fetchLogs, 3000); }
+  else { clearInterval(timer); }
+}
+fetchLogs();
+timer = setInterval(fetchLogs, 3000);
+</script>
+</body>
+</html>""")
 
 
 @app.get("/favicon.ico")

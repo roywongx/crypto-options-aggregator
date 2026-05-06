@@ -6,9 +6,6 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from db.connection import get_db_connection
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import config
 
 logger = logging.getLogger(__name__)

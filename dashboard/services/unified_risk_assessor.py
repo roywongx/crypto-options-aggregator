@@ -18,11 +18,18 @@ class UnifiedRiskAssessor:
         self.risk_framework = RiskFramework()
 
     def assess_comprehensive_risk(self, spot: float, currency: str = "BTC") -> Dict[str, Any]:
-        # 并行执行独立的评估任务
+        # 预取 DVOL，避免 _assess_volatility_risk 和 _assess_sentiment_risk 各调一次
+        try:
+            from services.dvol_analyzer import get_dvol_from_deribit
+            dvol_data = get_dvol_from_deribit(currency)
+        except (RuntimeError, ConnectionError, TimeoutError) as e:
+            logger.warning("DVOL prefetch failed: %s", e)
+            dvol_data = None
+
         executor = _executor
         future_price = executor.submit(self._assess_price_risk, spot)
-        future_volatility = executor.submit(self._assess_volatility_risk, currency)
-        future_sentiment = executor.submit(self._assess_sentiment_risk, spot, currency)
+        future_volatility = executor.submit(self._assess_volatility_risk, currency, dvol_data)
+        future_sentiment = executor.submit(self._assess_sentiment_risk, spot, currency, dvol_data)
         future_liquidity = executor.submit(self._assess_liquidity_risk, currency)
 
         price_risk = future_price.result(timeout=30)
@@ -74,10 +81,11 @@ class UnifiedRiskAssessor:
             ]
         }
 
-    def _assess_volatility_risk(self, currency: str) -> Dict[str, Any]:
+    def _assess_volatility_risk(self, currency: str, dvol_data: dict = None) -> Dict[str, Any]:
         try:
-            from services.dvol_analyzer import get_dvol_from_deribit
-            dvol_data = get_dvol_from_deribit(currency)
+            if dvol_data is None:
+                from services.dvol_analyzer import get_dvol_from_deribit
+                dvol_data = get_dvol_from_deribit(currency)
             dvol = dvol_data.get("current", 50)
             z_score = dvol_data.get("z_score", 0)
 
@@ -114,7 +122,7 @@ class UnifiedRiskAssessor:
                 "error": str(e)
             }
 
-    def _assess_sentiment_risk(self, spot: float, currency: str) -> Dict[str, Any]:
+    def _assess_sentiment_risk(self, spot: float, currency: str, dvol_data: dict = None) -> Dict[str, Any]:
         factors = []
         score = 40
 
@@ -135,8 +143,9 @@ class UnifiedRiskAssessor:
             factors.append("恐惧贪婪指数: 获取失败")
 
         try:
-            from services.dvol_analyzer import get_dvol_from_deribit
-            dvol_data = get_dvol_from_deribit(currency)
+            if dvol_data is None:
+                from services.dvol_analyzer import get_dvol_from_deribit
+                dvol_data = get_dvol_from_deribit(currency)
             dvol = dvol_data.get("current", 50)
             dvol_z = dvol_data.get("z_score", 0)
             factors.append(f"DVOL恐慌代理: {dvol:.1f}% (Z={dvol_z:.2f})")

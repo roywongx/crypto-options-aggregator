@@ -1,4 +1,6 @@
 import logging
+import os
+import sys
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timezone
@@ -22,12 +24,16 @@ def _set_deribit_monitor(monitor):
     global _deribit_monitor_instance
     _deribit_monitor_instance = monitor
 
+# 引入兄弟项目 deribit-options-monitor
+_DERIBIT_MONITOR_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'deribit-options-monitor')
+if _DERIBIT_MONITOR_PATH not in sys.path:
+    sys.path.insert(0, _DERIBIT_MONITOR_PATH)
+
+
 def _get_deribit_monitor():
     """获取 Deribit monitor 单例"""
     global _deribit_monitor_instance
     if _deribit_monitor_instance is None:
-        import sys, os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'deribit-options-monitor'))
         from deribit_options_monitor import DeribitOptionsMonitor
         _deribit_monitor_instance = DeribitOptionsMonitor()
     return _deribit_monitor_instance

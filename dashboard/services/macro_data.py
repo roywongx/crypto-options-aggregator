@@ -3,7 +3,6 @@
 - Fear & Greed Index (恐慌贪婪指数)
 - yfinance 宏观数据 (QQQ/SPY)
 - 资金费率 (Coinglass/HyperLiquid)
-- FRED 无风险利率
 """
 import logging
 import httpx
@@ -197,51 +196,14 @@ def get_funding_rate(currency: str = "BTC") -> Dict[str, Any]:
         _funding_cache = {"currency": currency, "data": result}
         _funding_cache_time = now
 
-    except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException) as e:
+    except (httpx.HTTPError, httpx.ConnectError, httpx.TimeoutException, ValueError, TypeError) as e:
         logger.warning("资金费率获取失败: %s", e)
-    
+
     return result
 
 
 # ============================================================
-# 4. FRED 无风险利率
-# ============================================================
-
-def get_risk_free_rate() -> Dict[str, Any]:
-    """
-    获取无风险利率 (美国国债收益率)
-    数据源: FRED API (需要 API Key)
-    备选: 使用近似值 (当前约 5.3%)
-    """
-    result = {"rate": 5.3, "source": "default_approx"}
-    
-    try:
-        import os
-        fred_key = os.environ.get("FRED_API_KEY")
-        
-        if fred_key:
-            from fredapi import Fred
-            fred = Fred(api_key=fred_key)
-            
-            # 3 个月国债收益率
-            data = fred.get_series("DTB3")
-            if data is not None and len(data) > 0:
-                latest = data.dropna().iloc[-1]
-                result["rate"] = round(float(latest), 3)
-                result["source"] = "FRED"
-        else:
-            logger.info("FRED_API_KEY 未设置，使用默认近似值 5.3%")
-            
-    except ImportError:
-        logger.warning("fredapi 未安装，使用默认无风险利率")
-    except (ValueError, TypeError, ZeroDivisionError, RuntimeError) as e:
-        logger.warning("FRED 无风险利率获取失败: %s", str(e))
-    
-    return result
-
-
-# ============================================================
-# 5. 聚合接口 - 一键获取所有宏观数据
+# 4. 聚合接口 - 一键获取所有宏观数据
 # ============================================================
 
 def get_all_macro_data() -> Dict[str, Any]:
@@ -252,7 +214,6 @@ def get_all_macro_data() -> Dict[str, Any]:
         "fear_greed": get_fear_greed_index(),
         "macro": get_macro_data(),
         "funding_rate": get_funding_rate(),
-        "risk_free_rate": get_risk_free_rate(),
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     }
     
