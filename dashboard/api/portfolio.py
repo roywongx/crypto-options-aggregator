@@ -63,7 +63,7 @@ def _collect_market_context(spot: float) -> dict:
         from services.dvol_analyzer import get_dvol_from_deribit
         dvol = get_dvol_from_deribit("BTC")
         if dvol:
-            ctx["dvol"] = dvol.get("current_dvol", 0)
+            ctx["dvol"] = dvol.get("current", 0)
             ctx["dvol_z"] = dvol.get("z_score", 0)
             ctx["dvol_signal"] = dvol.get("signal", "normal")
     except Exception:
@@ -161,7 +161,8 @@ async def _llm_stream(messages: list):
             execute_read, "SELECT api_key, base_url, model FROM llm_config WHERE id=1"
         )
         if llm_cfg and llm_cfg[0]:
-            api_key = llm_cfg[0]["api_key"] or ""
+            from services.llm_analyst import _decrypt_key
+            api_key = _decrypt_key(llm_cfg[0]["api_key"] or "")
             base_url = llm_cfg[0]["base_url"] or ""
             model = llm_cfg[0]["model"] or ""
         else:

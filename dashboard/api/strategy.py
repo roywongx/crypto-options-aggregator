@@ -451,7 +451,7 @@ async def check_protections(body: ProtectionsCheckRequest):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"数据获取失败: {e}")
 
-    dvol = dvol_data.get("current_dvol", 50) if dvol_data else 50
+    dvol = dvol_data.get("current", 50) if dvol_data else 50
     iv = dvol
 
     # Get positions (simplified from top contracts)
@@ -526,7 +526,7 @@ async def portfolio_risk(body: PortfolioRiskRequest):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"数据获取失败: {e}")
 
-    dvol = dvol_data.get("current_dvol", 50) if dvol_data else 50
+    dvol = dvol_data.get("current", 50) if dvol_data else 50
     iv = dvol
 
     positions = []

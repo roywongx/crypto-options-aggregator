@@ -25,10 +25,14 @@ def _make_result(name: str = "", score: float = 0, max_score: float = 100.0,
 # 工具函数
 # ============================================================
 
-def _safe_float(v, default: float = 0) -> float:
+def _safe_float(v, default: float = 0, name: str = "") -> float:
+    """安全转 float，转换失败时记录 warning 并返回 default"""
     try:
         return float(v)
     except (TypeError, ValueError):
+        if v is not None and v != "":
+            logger.warning("_safe_float: cannot convert %s=%r to float, using default=%s",
+                           name or "value", v, default)
         return default
 
 
@@ -446,16 +450,16 @@ def wrap_risk_framework(data: dict, cache: dict):
         extreme_floor = floors.get("extreme", 0)
         dist_pct = ((spot - regular_floor) / regular_floor * 100) if regular_floor > 0 and spot > 0 else 0
 
-        if status == "extreme":
+        if status == "PANIC":
             return _make_result(name="风险框架", score=15,
                                 verdict=f"极端风险区(距常规支撑{dist_pct:.1f}%)",
                                 reasoning=[f"现货={spot}", f"常规支撑={regular_floor}",
                                            f"极端支撑={extreme_floor}", "建议暂停操作"])
-        elif status == "high_risk":
+        elif status == "ADVERSE":
             return _make_result(name="风险框架", score=35,
                                 verdict=f"高风险区(距常规支撑{dist_pct:.1f}%)",
                                 reasoning=[f"现货={spot}", f"常规支撑={regular_floor}"])
-        elif status == "normal":
+        elif status == "NORMAL":
             return _make_result(name="风险框架", score=75,
                                 verdict=f"正常区域(距常规支撑{dist_pct:.1f}%)",
                                 reasoning=[f"现货={spot}高于常规支撑{regular_floor}"])
@@ -475,7 +479,7 @@ def wrap_unified_risk(data: dict, cache: dict):
         spot = _safe_float(data.get("spot", 0))
         assessor = UnifiedRiskAssessor()
         result = assessor.assess_comprehensive_risk(spot)
-        risk_score = result.get("overall_risk", 50)
+        risk_score = result.get("composite_score", 50)
 
         if risk_score >= 70:
             return _make_result(name="统一风险评估", score=15,
@@ -507,7 +511,8 @@ def wrap_greeks_analyzer(data: dict, cache: dict):
         if not contracts:
             return _make_result(name="Greeks分析", score=50, verdict="无合约数据")
         greeks_result = GreeksAnalyzer.analyze(contracts, spot)
-        gex = _safe_float(greeks_result.get("total_gex", 0))
+        gex_data = greeks_result.get("gex", {})
+        gex = _safe_float(gex_data.get("total_gex", 0)) if isinstance(gex_data, dict) else _safe_float(greeks_result.get("total_gex", 0))
         if gex > 0:
             return _make_result(name="Greeks分析", score=60,
                                 verdict=f"正GEX({gex:.0f})，市场稳定力量较强",
@@ -549,7 +554,18 @@ def wrap_maxpain(data: dict, cache: dict):
 def wrap_gamma_flip(data: dict, cache: dict):
     """包装 Gamma Flip 风险检测"""
     spot = _safe_float(data.get("spot", 0))
-    flip_level = _safe_float(data.get("gamma_flip", 0))
+    contracts = data.get("contracts", [])
+    # 调用 GreeksAnalyzer 获取 flip_strike
+    flip_level = 0
+    if contracts:
+        try:
+            from services.greeks_analyzer import GreeksAnalyzer
+            greeks_result = GreeksAnalyzer.analyze(contracts, spot)
+            gex_data = greeks_result.get("gex", {})
+            if isinstance(gex_data, dict):
+                flip_level = _safe_float(gex_data.get("flip_strike", 0))
+        except Exception:
+            pass
     if flip_level <= 0:
         return _make_result(name="GammaFlip", score=50, verdict="无GammaFlip数据")
     dist_pct = ((spot - flip_level) / flip_level * 100) if flip_level > 0 else 0

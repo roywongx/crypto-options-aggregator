@@ -108,6 +108,89 @@ def _fetch_full_contracts(currency: str, spot: float) -> list:
         return []
 
 
+def _compute_trend_strength(data: dict, deriv: dict) -> float:
+    """从衍生品信号合成趋势强度 (-1 到 1)
+
+    信号来源:
+    - 资金费率: 正=多头趋势, 负=空头趋势
+    - 永续基差: 正=contango/看涨, 负=backwardation/看跌
+    - OI-价格背离: bull=看涨, bear=看空
+    """
+    signals = []
+    weights = []
+
+    def _sf(v, default=0.0):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    # 信号 1: 资金费率 (权重 0.4)
+    funding_rate = _sf(deriv.get("funding_rate", 0))
+    if abs(funding_rate) > 0.00001:
+        # 归一化: 0.001 funding rate → ~0.5 signal, 饱和在 ±1
+        fr_signal = max(-1.0, min(1.0, funding_rate / 0.002))
+        signals.append(fr_signal)
+        weights.append(0.4)
+
+    # 信号 2: 永续基差年化率 (权重 0.35)
+    perp_basis = data.get("perp_basis", {})
+    if isinstance(perp_basis, dict):
+        basis = _sf(perp_basis.get("basis_annualized", 0))
+        if abs(basis) > 0.01:
+            # 归一化: 10% 年化基差 → ~0.5 signal, 饱和在 ±1
+            basis_signal = max(-1.0, min(1.0, basis / 20.0))
+            signals.append(basis_signal)
+            weights.append(0.35)
+
+    # 信号 3: OI-价格背离 (权重 0.25)
+    oi_div = data.get("oi_price_divergence", {})
+    if isinstance(oi_div, dict):
+        divergence = oi_div.get("divergence", "")
+        if divergence == "bullish":
+            signals.append(0.6)
+            weights.append(0.25)
+        elif divergence == "bearish":
+            signals.append(-0.6)
+            weights.append(0.25)
+        elif divergence == "long_capitulation":
+            signals.append(-0.8)
+            weights.append(0.25)
+
+    if not signals:
+        return 0.0
+
+    # 加权平均
+    total_weight = sum(weights)
+    if total_weight > 0:
+        return round(sum(s * w for s, w in zip(signals, weights)) / total_weight, 2)
+    return 0.0
+
+
+def _build_term_data(contracts: list, spot: float) -> list:
+    """从合约列表构建 IV 期限结构数据 [{dte, avg_iv}, ...]
+
+    按到期日分组，每个到期日取最接近现货价的 ATM IV。
+    """
+    from collections import defaultdict
+    by_dte = defaultdict(list)
+    for c in contracts:
+        dte = c.get("dte", 0)
+        if dte > 0:
+            by_dte[dte].append(c)
+
+    term_data = []
+    for dte in sorted(by_dte):
+        group = by_dte[dte]
+        # 找 ATM 合约（strike 最接近 spot）
+        atm = min(group, key=lambda c: abs(float(c.get("strike", 0)) - spot))
+        iv = float(atm.get("iv", 0))
+        if iv > 0:
+            term_data.append({"dte": dte, "avg_iv": round(iv, 2)})
+
+    return term_data
+
+
 # ============================================================
 # 数据获取辅助函数
 # ============================================================
@@ -117,6 +200,10 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
 
     带 10 秒短期缓存：页面加载时 summary + batch 端点同时调用，
     第二次调用直接从缓存返回，避免重复的 Deribit API 请求。
+
+    返回的 dict 包含 _data_quality 字段，标记每个数据源的状态：
+      "ok" = 成功获取, "error" = 获取失败(显示为默认值),
+      "stale" = 缓存过期, "empty" = 成功请求但无数据
     """
     # 短期缓存命中 → 直接返回
     now = time.time()
@@ -127,15 +214,19 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
 
     from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
     data: dict = {"spot": 0, "dvol": 0, "dvol_z": 0, "currency": currency}
+    _data_quality: dict[str, str] = {}
 
     results = {}
 
     def _fetch_spot():
         try:
             from services.spot_price import get_spot_price
-            return ("spot", get_spot_price(currency))
+            price = get_spot_price(currency)
+            _data_quality["spot"] = "ok"
+            return ("spot", price)
         except Exception as e:
             logger.warning("spot fetch failed: %s", e)
+            _data_quality["spot"] = "error"
             return ("spot", 0)
 
     def _fetch_dvol():
@@ -143,14 +234,17 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
             from services.dvol_analyzer import get_dvol_from_deribit
             dvol = get_dvol_from_deribit(currency)
             if dvol:
+                _data_quality["dvol"] = "ok"
                 return ("dvol_data", {
-                    "dvol": dvol.get("current_dvol", 0) or 0,
+                    "dvol": dvol.get("current", 0) or 0,
                     "dvol_z": dvol.get("z_score", 0) or 0,
                     "dvol_signal": dvol.get("signal", "normal"),
                 })
+            _data_quality["dvol"] = "empty"
             return ("dvol_data", {"dvol": 0, "dvol_z": 0, "dvol_signal": "normal"})
         except Exception as e:
             logger.warning("dvol fetch failed: %s", e)
+            _data_quality["dvol"] = "error"
             return ("dvol_data", {"dvol": 0, "dvol_z": 0, "dvol_signal": "normal"})
 
     def _fetch_fear_greed():
@@ -158,19 +252,27 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
             from services.macro_data import get_fear_greed_index
             fg_result = get_fear_greed_index()
             if fg_result:
+                _data_quality["fear_greed"] = "ok"
                 return ("fear_greed", fg_result.get("value", 50) or 50)
+            _data_quality["fear_greed"] = "empty"
             return ("fear_greed", 50)
         except Exception as e:
             logger.warning("fear_greed fetch failed: %s", e)
+            _data_quality["fear_greed"] = "error"
             return ("fear_greed", 50)
 
     def _fetch_max_pain():
         try:
             from services.max_pain import get_max_pain
             mp = get_max_pain(currency, auto_calc=True)
+            if mp > 0:
+                _data_quality["max_pain"] = "ok"
+            else:
+                _data_quality["max_pain"] = "empty"
             return ("max_pain", mp if mp > 0 else 0)
         except Exception as e:
             logger.warning("max_pain fetch failed: %s", e)
+            _data_quality["max_pain"] = "error"
             return ("max_pain", 0)
 
     def _fetch_large_trades():
@@ -185,20 +287,40 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
                 put_count = sum(1 for t in trades if str(t.get("option_type", "")).upper() in ("PUT", "P"))
                 call_count = sum(1 for t in trades if str(t.get("option_type", "")).upper() in ("CALL", "C"))
                 pcr = round(put_count / call_count, 2) if call_count > 0 else 1.0
+                _data_quality["large_trades"] = "ok"
                 return ("trades_data", {"large_trades": trades, "pcr": pcr})
+            _data_quality["large_trades"] = "empty"
             return ("trades_data", {"large_trades": [], "pcr": 1.0})
         except Exception as e:
             logger.warning("large_trades fetch failed: %s", e)
+            _data_quality["large_trades"] = "error"
             return ("trades_data", {"large_trades": [], "pcr": 1.0})
 
     def _fetch_derivatives():
         try:
             from services.derivative_metrics import DerivativeMetrics
             deriv = DerivativeMetrics.get_all_metrics(currency)
+            _data_quality["derivatives"] = "ok"
             return ("derivatives", deriv)
         except Exception as e:
             logger.warning("Derivative metrics fetch failed: %s", e)
+            _data_quality["derivatives"] = "error"
             return ("derivatives", {})
+
+    def _fetch_btc_dominance():
+        try:
+            import urllib.request, json
+            url = "https://api.coingecko.com/api/v3/global"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp_data = json.loads(resp.read().decode())
+                btc_dom = resp_data.get("data", {}).get("market_cap_percentage", {}).get("btc", 0)
+                _data_quality["btc_dominance"] = "ok"
+                return ("btc_dominance", round(float(btc_dom), 1))
+        except Exception as e:
+            logger.warning("BTC dominance fetch failed: %s", e)
+            _data_quality["btc_dominance"] = "error"
+            return ("btc_dominance", 0)
 
     # Phase 1 — parallel independent fetches
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -209,6 +331,7 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
             executor.submit(_fetch_max_pain): "max_pain",
             executor.submit(_fetch_large_trades): "trades",
             executor.submit(_fetch_derivatives): "derivatives",
+            executor.submit(_fetch_btc_dominance): "btc_dominance",
         }
         for future in as_completed(futures, timeout=30):
             try:
@@ -216,6 +339,7 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
                 results[key] = value
             except (FuturesTimeoutError, RuntimeError) as e:
                 logger.warning("Panel data %s timed out: %s", futures[future], e)
+                _data_quality[futures[future]] = "error"
 
     # Unpack phase 1 results
     data["spot"] = results.get("spot", 0)
@@ -225,6 +349,7 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
         data["dvol_signal"] = results["dvol_data"]["dvol_signal"]
     data["fear_greed"] = results.get("fear_greed", 50)
     data["max_pain"] = results.get("max_pain", 0)
+    data["btc_dominance"] = results.get("btc_dominance", 0)
     if "trades_data" in results:
         data["large_trades"] = results["trades_data"]["large_trades"]
         data["pcr"] = results["trades_data"]["pcr"]
@@ -234,6 +359,7 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
     full_contracts = _fetch_full_contracts(currency, spot_val)
     if full_contracts:
         data["contracts"] = full_contracts
+        _data_quality["contracts"] = "ok"
     else:
         try:
             contract_rows = execute_read(
@@ -245,14 +371,18 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
                 row = dict(contract_rows[0])
                 contracts_json = row["contracts_data"] or "[]"
                 data["contracts"] = json.loads(contracts_json) if isinstance(contracts_json, str) else (contracts_json or [])
+                _data_quality["contracts"] = "stale"
             else:
                 data["contracts"] = []
+                _data_quality["contracts"] = "empty"
         except Exception as e:
             logger.warning("contracts fetch failed: %s", e)
             data["contracts"] = []
+            _data_quality["contracts"] = "error"
 
-    # Phase 3 — IV Smile (depends on contracts + spot)
+    # Phase 3 — IV Smile + IV Term Structure (depend on contracts + spot)
     if data.get("contracts") and data.get("spot"):
+        # 3a: IV Smile
         try:
             from services.iv_smile import IVSmileAnalyzer
             smile_result = IVSmileAnalyzer.analyze(data["contracts"], data["spot"], currency)
@@ -265,8 +395,34 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
                 data["atm_iv"] = round(metrics.get("atm_iv", 0), 2)
                 data["smile_form"] = smile_result["analysis"].get("form", "unknown")
                 data["smile_sentiment"] = smile_result["analysis"].get("sentiment", {}).get("label", "")
+                _data_quality["iv_smile"] = "ok"
+            else:
+                _data_quality["iv_smile"] = "empty"
         except Exception as e:
-            logger.debug("IV Smile analysis failed: %s", e)
+            logger.warning("IV Smile analysis failed: %s", e)
+            _data_quality["iv_smile"] = "error"
+
+        # 3b: IV Term Structure
+        try:
+            from services.iv_term_structure import IVTermStructureAnalyzer
+            term_data = _build_term_data(data["contracts"], data["spot"])
+            if len(term_data) >= 2:
+                ts_result = IVTermStructureAnalyzer.analyze_term_structure(term_data, data["spot"])
+                if ts_result and "error" not in ts_result:
+                    tp = ts_result.get("term_premium", {})
+                    if isinstance(tp, dict):
+                        data["term_premium"] = tp.get("total_premium", 0)
+                    slope = ts_result.get("slope", {})
+                    if isinstance(slope, dict):
+                        data["iv_steepness"] = slope.get("percent", 0)
+                    _data_quality["iv_term_structure"] = "ok"
+                else:
+                    _data_quality["iv_term_structure"] = "empty"
+            else:
+                _data_quality["iv_term_structure"] = "empty"
+        except Exception as e:
+            logger.warning("IV Term Structure analysis failed: %s", e)
+            _data_quality["iv_term_structure"] = "error"
 
     # Phase 4 — Unpack derivatives
     deriv = results.get("derivatives", {})
@@ -291,6 +447,30 @@ def _collect_panel_data(currency: str = "BTC") -> dict:
         data["futures_spot_ratio_val"] = data["futures_spot_ratio"].get("ratio", 0)
     if isinstance(data.get("stablecoin_reserve"), dict):
         data["stablecoin_flow"] = data["stablecoin_reserve"].get("label", "未知")
+
+    # Compute trend_strength from available derivative signals
+    data["trend_strength"] = _compute_trend_strength(data, deriv)
+
+    # Compute money flow direction/strength from large trades
+    trades_for_flow = data.get("large_trades", [])
+    if trades_for_flow:
+        buy_volume = sum(t.get("volume", 0) or 0 for t in trades_for_flow
+                         if str(t.get("direction", "")).lower() == "buy")
+        sell_volume = sum(t.get("volume", 0) or 0 for t in trades_for_flow
+                          if str(t.get("direction", "")).lower() == "sell")
+        total_vol = buy_volume + sell_volume
+        if total_vol > 0:
+            net_ratio = (buy_volume - sell_volume) / total_vol
+            data["flow_strength"] = round(abs(net_ratio), 2)
+            if net_ratio > 0.1:
+                data["flow_direction"] = "inflow"
+            elif net_ratio < -0.1:
+                data["flow_direction"] = "outflow"
+            else:
+                data["flow_direction"] = "neutral"
+
+    # Attach data quality report
+    data["_data_quality"] = _data_quality
 
     # 写入短期缓存（覆盖同一页面加载的多次调用）
     _panel_data_cache[currency] = (time.time(), data)
@@ -350,7 +530,8 @@ async def trigger_llm_analysis(panel_id: str, body: LLMAnalysisRequest):
             "SELECT api_key, base_url, model FROM llm_config WHERE id=1"
         )
         if llm_cfg_rows and llm_cfg_rows[0]:
-            llm_api_key = llm_cfg_rows[0]["api_key"] or ""
+            from services.llm_analyst import _decrypt_key
+            llm_api_key = _decrypt_key(llm_cfg_rows[0]["api_key"] or "")
             llm_base_url = llm_cfg_rows[0]["base_url"] or ""
             llm_model = llm_cfg_rows[0]["model"] or ""
         else:

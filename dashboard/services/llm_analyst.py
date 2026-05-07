@@ -465,8 +465,8 @@ class LLMAnalystEngine:
         if data_ts:
             try:
                 from datetime import datetime as _dt
-                ts_dt = _dt.strptime(data_ts[:19], "%Y-%m-%d %H:%M:%S")
-                age_min = (_dt.now() - ts_dt).total_seconds() / 60
+                ts_dt = _dt.strptime(data_ts[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                age_min = (_dt.now(timezone.utc) - ts_dt).total_seconds() / 60
                 if age_min > 60:
                     parts.append(f"  ⚠️ 数据时间: {data_ts} (已过期 {age_min:.0f} 分钟，以下分析基于旧数据，建议刷新)")
                 else:
@@ -1280,6 +1280,8 @@ class LLMAnalystEngine:
                         try:
                             if isinstance(ts, str):
                                 ts_parsed = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                                if ts_parsed.tzinfo is None:
+                                    ts_parsed = ts_parsed.replace(tzinfo=timezone.utc)
                                 ts_unix = ts_parsed.timestamp()
                             else:
                                 ts_unix = float(ts)
