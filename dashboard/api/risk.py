@@ -214,16 +214,19 @@ async def get_llm_risk_insight(currency: str = Query(default="BTC")):
 
         risk_data = await run_in_threadpool(get_risk_overview_sync, currency.upper())
 
-        prompt = f"""你是加密货币风险分析师。基于以下风险数据，给出分析。
+        prompt = f"""你是加密货币风险分析师。基于以下全量风险数据，给出中文分析报告。
+
+⚠️ 所有文本输出必须使用简体中文。专业术语（DVOL、PCR、Delta、Sharpe等）保留英文，但解释和描述必须是中文。
+不要输出思考过程，直接给出最终 JSON 结果。
 
 数据：
 {_json.dumps(risk_data, ensure_ascii=False, indent=2)}
 
-输出 JSON：
+严格返回以下 JSON 格式（所有字符串值必须为中文）：
 {{
-  "narrative": "200字以内的风险总评",
-  "anomalies": ["异常1", "异常2"],
-  "recommendations": ["建议1", "建议2"],
+  "narrative": "200字以内的风险总评（中文）",
+  "anomalies": ["异常描述（中文）", ...],
+  "recommendations": ["操作建议（中文）", ...],
   "confidence": 0-100
 }}"""
 
@@ -232,7 +235,7 @@ async def get_llm_risk_insight(currency: str = Query(default="BTC")):
         response = await asyncio.to_thread(
             ai_chat_with_config,
             [{"role": "user", "content": prompt}],
-            preset="analysis", temperature=0.3, max_tokens=1500,
+            preset="fast", temperature=0.3, max_tokens=1500,
             custom_config=custom_config
         )
 

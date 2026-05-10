@@ -249,6 +249,18 @@ def ai_chat_with_config(
         thinking = True
         reasoning_effort = "high"
 
+    # 全局中文输出约束 — 注入到所有请求的最前面，确保最高优先级
+    _ZH_GUARD = (
+        "CRITICAL OUTPUT RULE: All text fields MUST be in Chinese (简体中文). "
+        "Only keep English for: tickers (BTC, ETH), technical terms (DVOL, PCR, Delta, Gamma, "
+        "Theta, Vega, IV, APR, Sharpe, Sortino, MVRV, OI, DTE, ATM, OTM, ITM, VaR, CVaR, GEX), "
+        "and JSON keys. All descriptions, assessments, recommendations, warnings, narratives, "
+        "reasoning text, and any explanatory content MUST be in Chinese. "
+        "Do NOT output your thinking process — only output the final result."
+    )
+    if not any(m.get("role") == "system" and "OUTPUT RULE" in m.get("content", "") for m in messages):
+        messages = [{"role": "system", "content": _ZH_GUARD}] + messages
+
     if custom_config:
         api_key = custom_config.get("api_key", "")
         base_url = custom_config.get("base_url", "")
@@ -295,17 +307,19 @@ def ai_chat(
 
 def analyze_large_trades(trade_summary: str, currency: str = "BTC") -> Optional[str]:
     """分析大宗交易，给出市场解读"""
-    prompt = f"""作为专业期权交易分析师，请分析以下{currency}大宗交易数据并给出市场解读:
+    prompt = f"""作为专业期权交易分析师，分析以下{currency}大宗交易数据并给出市场解读。
+
+⚠️ 所有输出必须使用简体中文。不要输出思考过程，直接给出分析结论。
 
 {trade_summary}
 
-请从以下维度分析:
+请从以下维度分析（中文输出）:
 1. 主要资金流向 (看多/看空/中性)
 2. 机构行为意图 (对冲/投机/套利)
 3. 当前市场情绪
 4. 对期权策略的建议
 
-请用简洁的中文回答，不超过200字。"""
+用中文回答，不超过200字。"""
 
     return ai_chat(
         [{"role": "user", "content": prompt}],
@@ -327,19 +341,21 @@ def suggest_roll_strategy(
     if funding_rate:
         macro_context += f"- 资金费率: {funding_rate}\n"
 
-    prompt = f"""作为专业期权滚仓策略师，请根据以下信息给出滚仓建议:
+    prompt = f"""作为专业期权滚仓策略师，根据以下信息给出滚仓建议。
+
+⚠️ 所有输出必须使用简体中文。不要输出思考过程，直接给出结论。
 
 当前持仓: {current_position}
 市场条件: {market_conditions}
 {macro_context}
 
-请提供:
+请提供（中文输出）:
 1. 是否应该滚仓 (是/否/观望)
 2. 推荐的目标行权价范围
 3. 推荐的到期时间范围
 4. 风险提示
 
-请用简洁的中文回答，不超过150字。"""
+用中文回答，不超过150字。"""
 
     return ai_chat(
         [{"role": "user", "content": prompt}],
