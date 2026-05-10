@@ -8,6 +8,9 @@ v5.0: 渐进式重构 - API 端点已迁移到 api/ 目录模块
 import os
 import re
 import hmac
+
+from dotenv import load_dotenv
+load_dotenv()
 import collections
 import asyncio
 import logging
@@ -183,13 +186,26 @@ ENV = os.getenv("DASHBOARD_ENV", "development")
 _LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
 
 def _is_local_request(request: Request) -> bool:
-    """检查请求是否来自本地（仅信任直接连接的客户端 IP）"""
+    """检查请求是否来自本地或 LAN（开发模式信任私有网络）"""
     client_host = request.client.host if request.client else ""
     if client_host in _LOCAL_HOSTS:
         return True
-    # 生产模式下空 host 视为不可信（反向代理未设 X-Forwarded-For 时可能出现）
-    if ENV == "development" and (not client_host or client_host == "testclient"):
-        return True
+    # 开发模式：信任私有网络地址（192.168.x.x, 10.x.x.x, 172.16-31.x.x）
+    if ENV == "development":
+        if not client_host or client_host == "testclient":
+            return True
+        if client_host.startswith(("192.168.", "10.", "172.")):
+            # 验证确实是私有 B 类范围 172.16.0.0/12
+            if client_host.startswith("172."):
+                try:
+                    octets = client_host.split(".")
+                    second = int(octets[1])
+                    if 16 <= second <= 31:
+                        return True
+                except (ValueError, IndexError):
+                    pass
+            else:
+                return True
     return False
 
 def verify_api_key(request: Request, api_key: str = Depends(API_KEY_HEADER)):

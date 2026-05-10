@@ -5,6 +5,8 @@ import time
 import logging
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()
 from typing import Optional, Any, Callable, TypeVar
 
 logger = logging.getLogger(__name__)
