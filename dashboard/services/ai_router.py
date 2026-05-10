@@ -206,6 +206,48 @@ def _deepseek_chat_via_httpx(
 # 兼容旧接口 — 保留 ai_chat_with_config 但内部走 DeepSeek
 # ============================================================
 
+def _strip_thinking_content(text: str) -> str:
+    """移除 Qwen 模型可能泄露的英文思考过程文本
+
+    Qwen3.5 系列模型即使在 thinking=False 模式下，偶尔仍会在 content 中
+    输出 "Thinking Process:" 开头的英文推理链。此函数检测并移除这些内容，
+    保留最终的 JSON 或中文回答。
+    """
+    if not text or "Thinking Process:" not in text:
+        return text
+
+    # 策略1: 提取 "Thinking Process:" 之后的 JSON 块
+    import re as _re
+    # 查找最后一个完整的 JSON 对象
+    json_match = _re.findall(r'\{[^{}]*\}', text)
+    if json_match:
+        # 取最后一个（应该是最终输出，不是思考中的示例）
+        return json_match[-1]
+
+    # 策略2: 查找 JSON 数组
+    arr_match = _re.findall(r'\[[^\[\]]*\]', text)
+    if arr_match:
+        return arr_match[-1]
+
+    # 策略3: 移除 "Thinking Process:" 及之后的所有英文推理文本
+    # 保留 "Thinking Process:" 出现之前的内容 + 之后的中文/JSON 内容
+    parts = text.split("Thinking Process:")
+    before = parts[0].strip()
+    after = parts[-1]  # 最后一段可能包含实际输出
+
+    # 尝试从 after 中提取有意义的非英文内容
+    # 查找第一个中文或 JSON 起始位置
+    cn_start = _re.search(r'[一-鿿\{]', after)
+    if cn_start:
+        after = after[cn_start.start():]
+    else:
+        after = ""
+
+    if before and after:
+        return before + "\n" + after
+    return before or after or text
+
+
 def ai_chat_with_config(
     messages: List[Dict[str, str]],
     preset: str = "analysis",
@@ -283,7 +325,7 @@ def ai_chat_with_config(
             # 对 JSON 结构化输出请求禁用 thinking，确保返回纯 JSON
             thinking = False
 
-    return deepseek_chat(
+    raw = deepseek_chat(
         messages=messages,
         model=model,
         max_tokens=max_tokens,
@@ -293,6 +335,11 @@ def ai_chat_with_config(
         api_key=api_key,
         base_url=base_url,
     )
+
+    # 后处理：Qwen 模型可能忽略 thinking=False，仍在 content 中输出思考过程
+    if raw:
+        raw = _strip_thinking_content(raw)
+    return raw
 
 
 def ai_chat(
