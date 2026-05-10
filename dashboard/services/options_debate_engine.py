@@ -856,6 +856,27 @@ def _flow_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
 # Agent 5: RiskOfficer — 风险官 (v2.0: 修正 VaR + 加入保证金效率)
 # ---------------------------------------------------------------------------
 
+def get_portfolio_position_pct(risk_status: str, dvol: float = 50) -> dict:
+    """组合级仓位建议 — 系统中唯一的仓位权威来源
+
+    所有需要仓位建议的模块（Risk API、LLM、前端）都应从此函数获取，
+    避免多处硬编码导致建议冲突。
+
+    Returns:
+        {"recommended_pct": int, "range": str, "rationale": str}
+    """
+    if risk_status == "NORMAL" and dvol < 50:
+        return {"recommended_pct": 70, "range": "60-80%", "rationale": "低波动 + 正常风险环境，可积极配置"}
+    elif risk_status == "NORMAL":
+        return {"recommended_pct": 50, "range": "40-60%", "rationale": "正常风险但波动率偏高，适度配置"}
+    elif risk_status == "NEAR_FLOOR":
+        return {"recommended_pct": 35, "range": "20-50%", "rationale": "接近支撑位，需保留现金应对破位风险"}
+    elif risk_status == "ADVERSE":
+        return {"recommended_pct": 20, "range": "10-30%", "rationale": "市场逆境，优先减仓防守"}
+    else:
+        return {"recommended_pct": 10, "range": "0-20%", "rationale": "极端行情，强烈建议清仓观望"}
+
+
 def _risk_officer(md: Dict[str, Any]) -> Dict[str, Any]:
     score = 0.0
     conf = 50.0
@@ -938,22 +959,10 @@ def _risk_officer(md: Dict[str, Any]) -> Dict[str, Any]:
                 score -= 5
                 points.append(f"卖出合约 {len(sell_contracts)} 个，注意分散风险")
 
-    # 仓位建议
-    if risk_status == "NORMAL" and dvol_val < 50:
-        position_pct = 70
-        points.append("建议仓位: 可用资金的 60-80%")
-    elif risk_status == "NORMAL":
-        position_pct = 50
-        points.append("建议仓位: 可用资金的 40-60%")
-    elif risk_status == "NEAR_FLOOR":
-        position_pct = 35
-        points.append("建议仓位: 可用资金的 20-50%")
-    elif risk_status == "ADVERSE":
-        position_pct = 20
-        points.append("建议仓位: 可用资金的 10-30%，优先减仓")
-    else:
-        position_pct = 10
-        points.append("建议仓位: 可用资金的 0-20%，强烈建议清仓观望")
+    # 仓位建议 — 使用统一的 get_portfolio_position_pct（系统中唯一权威来源）
+    pos = get_portfolio_position_pct(risk_status, dvol_val)
+    position_pct = pos["recommended_pct"]
+    points.append(f"建议仓位: 可用资金的 {pos['range']}")
     extra["recommended_position_pct"] = position_pct
 
     # 最坏情景

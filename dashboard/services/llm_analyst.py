@@ -416,7 +416,10 @@ class LLMAnalystEngine:
 
 核心约束：
 1. 你的策略建议必须与规则引擎的综合研判方向一致。规则引擎判定为"观望"时，不得建议高风险的主动策略（如 Short Strangle/裸卖空）。
-2. 仓位建议与风险状态挂钩：NORMAL → 可用资金的 50-70%；NEAR_FLOOR → 30-50%；ADVERSE → 15-30%；PANIC → 0-15%。参考 Risk Officer 的 recommended_position_pct 值。
+2. 仓位建议分为两个层级：
+   - 组合总仓位：直接使用 Risk Officer 的 recommended_position_pct 值（NORMAL→50-70%, NEAR_FLOOR→30-50%, ADVERSE→15-30%, PANIC→0-15%）
+   - 单笔交易上限：不超过组合总仓位的 1/3，单笔最大不超过资金量的 20%（参考 UnifiedStrategyEngine 的 per_trade_allocation）
+   在你的 strategy_recommendation 中必须同时给出"建议总仓位"和"单笔上限"两个数字。
 3. 策略引擎同时提供了 Sell Put 和 Buy Call 推荐，你应综合考虑两边的数据，而非只偏向卖方。如果 Put 端推荐远多于 Call 端（如 >10:1），在 market_assessment 中说明原因（这可能只是数据的自然分布，不一定是异常）。
 4. 最大痛点（Max Pain）是关键参考位 — 行权价设在痛点下方=跌破支撑时亏损；行权价设在痛点上方=更安全但权利金更低。需明确解释你的行权价选择理由。
 5. 如果 PCR < 0.5（看涨主导）但大单卖出占主导，需要解释这一矛盾并说明你的判断依据。

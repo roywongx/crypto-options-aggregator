@@ -522,7 +522,7 @@ class UnifiedStrategyEngine:
                 extra={
                     "mode": "grid",
                     "direction": direction,
-                    "suggested_position_pct": self._calc_suggested_position(rec_level)
+                    "suggested_position_pct": self._calc_per_trade_allocation(rec_level)
                 }
             )
 
@@ -546,8 +546,12 @@ class UnifiedStrategyEngine:
         }
 
     @staticmethod
-    def _calc_suggested_position(recommendation_level: str) -> int:
-        """根据推荐等级计算建议仓位百分比"""
+    def _calc_per_trade_allocation(recommendation_level: str) -> int:
+        """单笔交易资金分配上限（每笔交易占可用资金的最大百分比）
+
+        注意：这是单笔交易级别，不是组合总仓位。
+        组合总仓位应参考 options_debate_engine.get_portfolio_position_pct()
+        """
         position_map = {
             "BEST": 20,
             "GOOD": 15,

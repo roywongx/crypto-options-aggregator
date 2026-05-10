@@ -101,13 +101,33 @@ def get_risk_overview_sync(currency: str = "BTC"):
         advice.append("核心指令：止损并保留本金。不要在此区域接货。")
         actions.append("平掉所有 Put 仓位，保持现金")
 
-    position_guidance = {
-        "NORMAL": {"max_position_pct": 30, "suggested_delta_range": "0.15-0.25", "suggested_dte": "14-35"},
-        "NEAR_FLOOR": {"max_position_pct": 40, "suggested_delta_range": "0.20-0.35", "suggested_dte": "7-28"},
-        "ADVERSE": {"max_position_pct": 15, "suggested_delta_range": "0.10-0.20", "suggested_dte": "14-45"},
-        "PANIC": {"max_position_pct": 0, "suggested_delta_range": "N/A", "suggested_dte": "N/A"}
+    # 获取 DVOL 数据用于压力测试和仓位建议
+    dvol_data = {}
+    try:
+        from services.dvol_analyzer import get_dvol_from_deribit
+        dvol_data = get_dvol_from_deribit(currency)
+    except (RuntimeError, ConnectionError, TimeoutError) as e:
+        logger.warning("获取 DVOL 数据失败: %s", e)
+
+    # 组合仓位建议 — 使用系统中唯一的权威来源 get_portfolio_position_pct
+    from services.options_debate_engine import get_portfolio_position_pct
+    dvol_current = dvol_data.get("current", 50) if isinstance(dvol_data, dict) else 50
+    pos = get_portfolio_position_pct(status, dvol_current)
+    # 交易参数建议（与仓位独立，按风险状态调整）
+    delta_dte_map = {
+        "NORMAL": {"suggested_delta_range": "0.15-0.25", "suggested_dte": "14-35"},
+        "NEAR_FLOOR": {"suggested_delta_range": "0.20-0.35", "suggested_dte": "7-28"},
+        "ADVERSE": {"suggested_delta_range": "0.10-0.20", "suggested_dte": "14-45"},
+        "PANIC": {"suggested_delta_range": "N/A", "suggested_dte": "N/A"}
     }
-    pos_guide = position_guidance.get(status, position_guidance["NORMAL"])
+    trade_params = delta_dte_map.get(status, delta_dte_map["NORMAL"])
+    pos_guide = {
+        "max_position_pct": pos["recommended_pct"],
+        "position_range": pos["range"],
+        "rationale": pos["rationale"],
+        "suggested_delta_range": trade_params["suggested_delta_range"],
+        "suggested_dte": trade_params["suggested_dte"],
+    }
 
     # 获取链上指标数据
     try:
@@ -122,14 +142,6 @@ def get_risk_overview_sync(currency: str = "BTC"):
     except (RuntimeError, ConnectionError, TimeoutError) as e:
         logger.warning("Derivative metrics failed: %s", e)
         derivative_data = {"error": "获取衍生品数据失败"}
-
-    # 获取 DVOL 数据用于压力测试
-    dvol_data = {}
-    try:
-        from services.dvol_analyzer import get_dvol_from_deribit
-        dvol_data = get_dvol_from_deribit(currency)
-    except (RuntimeError, ConnectionError, TimeoutError) as e:
-        logger.warning("获取 DVOL 数据失败: %s", e)
 
     # 获取压力测试数据
     try:
