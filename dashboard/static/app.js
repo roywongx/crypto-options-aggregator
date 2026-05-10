@@ -4116,15 +4116,16 @@ function renderLLMSynthesis(synthesis) {
     confSpan.textContent = `信心度 ${conf}%`;
     confSpan.className = `text-xs px-2 py-0.5 rounded-full ${conf >= 70 ? 'bg-[#149e61]/20 text-[#149e61]' : conf >= 40 ? 'bg-[#f59e0b]/20 text-[#f59e0b]' : 'bg-[#ef4444]/20 text-[#ef4444]'} ml-auto`;
 
+    const toText = (v) => typeof v === 'object' && v !== null ? JSON.stringify(v, null, 2) : String(v || '');
     let html = '';
     if (synthesis.market_assessment) {
-        html += `<div><span class="text-[#7132f5] font-medium">市场评估：</span><span>${safeHTML(synthesis.market_assessment)}</span></div>`;
+        html += `<div><span class="text-[#7132f5] font-medium">市场评估：</span><pre class="text-gray-300 whitespace-pre-wrap font-sans">${safeHTML(toText(synthesis.market_assessment))}</pre></div>`;
     }
     if (synthesis.strategy_recommendation) {
-        html += `<div><span class="text-[#7132f5] font-medium">策略建议：</span><span>${safeHTML(synthesis.strategy_recommendation)}</span></div>`;
+        html += `<div class="mt-1"><span class="text-[#7132f5] font-medium">策略建议：</span><pre class="text-gray-300 whitespace-pre-wrap font-sans">${safeHTML(toText(synthesis.strategy_recommendation))}</pre></div>`;
     }
     if (synthesis.risk_warning) {
-        html += `<div><span class="text-[#ef4444] font-medium">风险提示：</span><span>${safeHTML(synthesis.risk_warning)}</span></div>`;
+        html += `<div class="mt-1"><span class="text-[#ef4444] font-medium">风险提示：</span><pre class="text-gray-300 whitespace-pre-wrap font-sans">${safeHTML(toText(synthesis.risk_warning))}</pre></div>`;
     }
     content.innerHTML = html;
 }

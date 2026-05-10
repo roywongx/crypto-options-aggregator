@@ -109,14 +109,22 @@ async def llm_history(
 
         history = []
         for row in rows:
-            result = json.loads(row[2]) if row[2] else {}
+            raw = row[2]
+            result = {}
+            if raw:
+                try:
+                    result = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    result = {}
+            if isinstance(result, str):
+                result = {}
             history.append({
                 "currency": row[0],
                 "mode": row[1],
                 "success": bool(row[3]),
                 "timestamp": row[4],
-                "synthesis": result.get("synthesis", {}),
-                "audit": result.get("audit", {}),
+                "synthesis": result.get("synthesis", {}) if isinstance(result, dict) else {},
+                "audit": result.get("audit", {}) if isinstance(result, dict) else {},
             })
         return {"currency": currency.upper(), "history": history, "count": len(history)}
 

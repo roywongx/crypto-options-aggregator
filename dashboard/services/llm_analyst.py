@@ -444,6 +444,10 @@ class LLMAnalystEngine:
             parsed.setdefault("risk_warning", "")
             parsed.setdefault("confidence", 0)
             parsed.setdefault("rule_engine_alignment", "未提供")
+            # 规范化：LLM 可能返回嵌套对象而非纯文本，转为 JSON 字符串防止前端 [object Object]
+            for _key in ("market_assessment", "strategy_recommendation", "risk_warning"):
+                if isinstance(parsed.get(_key), dict):
+                    parsed[_key] = json.dumps(parsed[_key], ensure_ascii=False, indent=2)
             parsed["success"] = True
             return parsed
 
