@@ -44,21 +44,25 @@ async def llm_analyze(request: AnalyzeRequest):
         logger.error("llm analyze failed for %s: %s", request.currency, e)
         raise HTTPException(status_code=500, detail=f"分析失败: {e}")
 
-    # 保存结果
+    # 保存结果（线程池执行，避免 execute_write 的 threading.Lock 阻塞事件循环）
     try:
         from db.connection import execute_write
-        execute_write(
-            """INSERT INTO llm_analysis_results (currency, mode, result_json, llm_config_json, success, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                request.currency.upper(),
-                request.mode,
-                json.dumps(result, default=str, ensure_ascii=False),
-                json.dumps(result.llm_config, ensure_ascii=False),
-                1 if result.success else 0,
-                datetime.now(timezone.utc).isoformat(),
+
+        def _save():
+            execute_write(
+                """INSERT INTO llm_analysis_results (currency, mode, result_json, llm_config_json, success, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    request.currency.upper(),
+                    request.mode,
+                    json.dumps(result, default=str, ensure_ascii=False),
+                    json.dumps(result.llm_config, ensure_ascii=False),
+                    1 if result.success else 0,
+                    datetime.now(timezone.utc).isoformat(),
+                )
             )
-        )
+
+        await run_in_threadpool(_save)
     except (RuntimeError, ValueError, TypeError) as e:
         logger.debug("llm analysis save failed (non-critical): %s", e)
 

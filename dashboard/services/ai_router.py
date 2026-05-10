@@ -7,6 +7,8 @@ import json
 import logging
 from typing import Dict, Any, Optional, List
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 # ============================================================
@@ -61,7 +63,12 @@ def deepseek_chat(
     url = base_url or DEEPSEEK_BASE_URL
 
     try:
-        client = OpenAI(api_key=key, base_url=url)
+        client = OpenAI(
+            api_key=key,
+            base_url=url,
+            max_retries=2,
+            timeout=httpx.Timeout(120.0, connect=10.0),
+        )
 
         kwargs: Dict[str, Any] = {
             "model": model,
