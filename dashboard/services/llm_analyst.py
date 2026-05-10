@@ -895,6 +895,8 @@ class LLMAnalystEngine:
                     parsed.setdefault("key_drivers", [])
                     parsed.setdefault("target_scenarios", [])
                     parsed.setdefault("confidence", 0)
+                    if isinstance(parsed.get("bullish_case"), dict):
+                        parsed["bullish_case"] = json.dumps(parsed["bullish_case"], ensure_ascii=False)
                     parsed["success"] = True
                     bull_result = parsed
         except Exception as e:
@@ -913,6 +915,8 @@ class LLMAnalystEngine:
                     parsed.setdefault("key_risks", [])
                     parsed.setdefault("downside_scenarios", [])
                     parsed.setdefault("confidence", 0)
+                    if isinstance(parsed.get("bearish_case"), dict):
+                        parsed["bearish_case"] = json.dumps(parsed["bearish_case"], ensure_ascii=False)
                     parsed["success"] = True
                     bear_result = parsed
         except Exception as e:
@@ -949,6 +953,9 @@ class LLMAnalystEngine:
                     parsed.setdefault("bull_confidence", 50)
                     parsed.setdefault("bear_confidence", 50)
                     parsed.setdefault("reasoning", "")
+                    for _key in ("judge_verdict", "reasoning"):
+                        if isinstance(parsed.get(_key), dict):
+                            parsed[_key] = json.dumps(parsed[_key], ensure_ascii=False)
                     parsed["success"] = True
                     judge_result = parsed
         except Exception as e:

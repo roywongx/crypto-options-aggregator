@@ -4144,14 +4144,16 @@ function renderLLMDebate(debate) {
     }
     card.classList.remove('hidden');
 
+    const toText = (v) => typeof v === 'object' && v !== null ? JSON.stringify(v, null, 2) : String(v || '');
+
     // Bull
     const bull = debate.bull || {};
     document.getElementById('llmBullConf').textContent = bull.success ? `${bull.confidence || 0}%` : '失败';
     let bullHtml = '';
-    if (bull.bullish_case) bullHtml += `<p>${safeHTML(bull.bullish_case)}</p>`;
+    if (bull.bullish_case) bullHtml += `<pre class="whitespace-pre-wrap font-sans">${safeHTML(toText(bull.bullish_case))}</pre>`;
     if (bull.key_drivers && bull.key_drivers.length) {
         bullHtml += '<ul class="list-disc list-inside mt-1">';
-        for (const d of bull.key_drivers) bullHtml += `<li>${safeHTML(d)}</li>`;
+        for (const d of bull.key_drivers) bullHtml += `<li>${safeHTML(toText(d))}</li>`;
         bullHtml += '</ul>';
     }
     document.getElementById('llmBullContent').innerHTML = bullHtml || '<p class="text-gray-500">分析失败</p>';
@@ -4160,10 +4162,10 @@ function renderLLMDebate(debate) {
     const bear = debate.bear || {};
     document.getElementById('llmBearConf').textContent = bear.success ? `${bear.confidence || 0}%` : '失败';
     let bearHtml = '';
-    if (bear.bearish_case) bearHtml += `<p>${safeHTML(bear.bearish_case)}</p>`;
+    if (bear.bearish_case) bearHtml += `<pre class="whitespace-pre-wrap font-sans">${safeHTML(toText(bear.bearish_case))}</pre>`;
     if (bear.key_risks && bear.key_risks.length) {
         bearHtml += '<ul class="list-disc list-inside mt-1">';
-        for (const r of bear.key_risks) bearHtml += `<li>${safeHTML(r)}</li>`;
+        for (const r of bear.key_risks) bearHtml += `<li>${safeHTML(toText(r))}</li>`;
         bearHtml += '</ul>';
     }
     document.getElementById('llmBearContent').innerHTML = bearHtml || '<p class="text-gray-500">分析失败</p>';
@@ -4171,13 +4173,13 @@ function renderLLMDebate(debate) {
     // Judge
     const judge = debate.judge || {};
     let judgeHtml = '';
-    if (judge.judge_verdict) judgeHtml += `<p class="font-medium">${safeHTML(judge.judge_verdict)}</p>`;
+    if (judge.judge_verdict) judgeHtml += `<p class="font-medium">${safeHTML(toText(judge.judge_verdict))}</p>`;
     if (judge.winner) {
         const winnerColors = { bull: 'text-[#149e61]', bear: 'text-[#ef4444]', draw: 'text-[#f59e0b]' };
         const winnerLabels = { bull: '多头胜', bear: '空头胜', draw: '平局' };
         judgeHtml += `<p class="${winnerColors[judge.winner] || 'text-gray-300'} font-bold mt-2">${winnerLabels[judge.winner] || judge.winner}</p>`;
     }
-    if (judge.reasoning) judgeHtml += `<p class="mt-1 text-gray-400">${safeHTML(judge.reasoning)}</p>`;
+    if (judge.reasoning) judgeHtml += `<pre class="mt-1 text-gray-400 whitespace-pre-wrap font-sans">${safeHTML(toText(judge.reasoning))}</pre>`;
     document.getElementById('llmJudgeContent').innerHTML = judgeHtml || '<p class="text-gray-500">裁决生成中</p>';
 }
 
