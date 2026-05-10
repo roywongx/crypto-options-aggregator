@@ -223,6 +223,7 @@ def _format_scan_report(currency: str, dvol_res: Any, trades_res: Any, der_res: 
         "dvol_z_score": dvol_z_score,
         "dvol_signal": dvol_signal,
         "dvol_raw": dvol_res if isinstance(dvol_res, dict) else {},
+        "data_errors": [],
     }
 
 
@@ -299,31 +300,68 @@ def run_options_scan(params: ScanParams) -> Dict[str, Any]:
         return {"success": False, "error": "参数适配失败，请检查输入参数"}
 
 
-def _apply_quality_filter(contracts: list, spot: float) -> list:
-    """质量过滤：OI>=10, IV>0 — 不做 DTE/Delta 限制，保留全量数据供下游分析"""
+def _apply_quality_filter(contracts: list, spot: float) -> tuple:
+    """质量过滤：OI>=10, IV>0 — 不做 DTE/Delta 限制，保留全量数据供下游分析
+
+    Returns:
+        (filtered_contracts, data_errors) — data_errors 记录数据质量异常
+    """
     filtered = []
+    errors = []
     for s in contracts:
         meta = _parse_inst_name(s.get("instrument_name", ""))
         if not meta or meta.dte < 1:
+            if meta and meta.dte == 0:
+                errors.append(f"DTE=0 合约跳过: {s.get('instrument_name', '')}")
             continue
         iv = float(s.get("mark_iv") or 0)
         oi = float(s.get("open_interest") or 0)
         if iv <= 0 or oi < 10:
+            if iv > 200:
+                errors.append(f"IV 异常 ({iv:.0f}%): {s.get('instrument_name', '')}")
             continue
+        # IV 合理性校验
+        if iv > 250:
+            errors.append(f"IV 过高 ({iv:.0f}%): {s.get('instrument_name', '')}")
+        elif iv < 3:
+            errors.append(f"IV 过低 ({iv:.0f}%): {s.get('instrument_name', '')}")
         strike = meta.strike
+        if strike <= 0:
+            errors.append(f"行权价为0: {s.get('instrument_name', '')}")
+            continue
         underlying = float(s.get("underlying_price", spot)) or spot
         raw_delta = s.get("delta")
         if raw_delta is None or float(raw_delta or 0) == 0:
             delta_val = abs(calc_delta_bs(strike, underlying, iv, meta.dte, meta.option_type))
         else:
             delta_val = abs(float(raw_delta))
+        # Delta 范围校验
+        if delta_val > 1.0:
+            errors.append(f"Delta 越界 ({delta_val:.2f}): {s.get('instrument_name', '')}")
+            delta_val = min(delta_val, 1.0)
         prem = float(s.get("mark_price") or 0)
+        if prem < 0:
+            errors.append(f"Premium 为负 ({prem:.4f}): {s.get('instrument_name', '')}")
         prem_usd = prem * underlying
         dist = abs(strike - spot) / spot * 100
+        # 盈亏平衡点计算（使用 risk_framework.calc_breakeven_pct 的公式）
+        if meta.option_type.upper() in ("CALL", "C"):
+            breakeven = strike + prem_usd
+        else:
+            breakeven = strike - prem_usd
+        breakeven_pct = ((breakeven / spot) - 1) * 100 if spot > 0 else 0
         margin_ratio = config.DEFAULT_MARGIN_RATIO
         cv = strike * margin_ratio
         apr = (prem_usd / cv) * (365 / meta.dte) * 100 if cv > 0 else 0
+        # APR 异常检测
+        if apr > 1000:
+            errors.append(f"APR 异常高 ({apr:.0f}%): {s.get('instrument_name', '')} DTE={meta.dte}")
         bs_greeks = black_scholes_price(meta.option_type, strike, underlying, meta.dte, iv)
+        # Greeks 合理性校验
+        if bs_greeks["gamma"] < 0:
+            errors.append(f"Gamma 为负: {s.get('instrument_name', '')}")
+        if bs_greeks["vega"] < 0:
+            errors.append(f"Vega 为负: {s.get('instrument_name', '')}")
         filtered.append({
             "symbol": s.get("instrument_name", ""),
             "platform": "Deribit",
@@ -339,9 +377,11 @@ def _apply_quality_filter(contracts: list, spot: float) -> list:
             "vega": round(bs_greeks["vega"], 4),
             "iv": round(iv, 1),
             "open_interest": round(oi, 0),
+            "breakeven": round(breakeven, 1),
+            "breakeven_pct": round(breakeven_pct, 2),
             "distance_spot_pct": round(dist, 1),
         })
-    return filtered
+    return filtered, errors
 
 
 def _apply_strategy_filter(contracts: list, dvol_current: float, spot: float) -> list:
@@ -360,7 +400,7 @@ def _apply_strategy_filter(contracts: list, dvol_current: float, spot: float) ->
         c["_score"] = CalculationEngine.weighted_score(
             apr=c.get("apr", 0),
             pop=calc_pop(c["delta"], c["option_type"], spot, c["strike"], c["iv"], c["dte"]),
-            breakeven_pct=c.get("distance_spot_pct", 0),
+            breakeven_pct=c.get("breakeven_pct", 0),
             liquidity_score=min(100, int((c.get("open_interest", 0) / 500) * 100)),
             iv_rank=50,
             strike=c["strike"],
@@ -529,7 +569,10 @@ async def quick_scan(params: QuickScanParams = None):
     dvol_z = dvol_data.get('z_score', 0) or 0
     dvol_signal = dvol_data.get('signal', '正常区间')
 
-    quality_contracts = _apply_quality_filter(summaries, spot) if summaries else []
+    if summaries:
+        quality_contracts, data_errors = _apply_quality_filter(summaries, spot)
+    else:
+        quality_contracts, data_errors = [], []
 
     if isinstance(binance_contracts, list):
         for s in binance_contracts:
@@ -543,13 +586,24 @@ async def quick_scan(params: QuickScanParams = None):
             oi = s.get('oi', 0)
             if iv <= 0:
                 continue
+            if iv > 250:
+                data_errors.append(f"Binance IV 过高 ({iv:.0f}%): {s.get('symbol', '')}")
             if oi > 0 and oi < 10:
+                continue
+            if oi < 0:
+                data_errors.append(f"Binance OI 为负 ({oi}): {s.get('symbol', '')}")
                 continue
             spread_pct = s.get('spread_pct', 0)
             opt_type = 'P' if 'P' in s.get('symbol', '').upper() else 'C'
             apr = s.get('apr', 0)
             dist = abs(strike - spot) / spot * 100
             bs_greeks_binance = black_scholes_price(opt_type, strike, spot, int(dte), iv) if iv > 0 and dte > 0 else {"gamma": 0, "theta": 0, "vega": 0}
+            # 盈亏平衡点
+            if opt_type in ("C", "CALL"):
+                be_b = strike + prem_usd
+            else:
+                be_b = strike - prem_usd
+            be_pct_b = ((be_b / spot) - 1) * 100 if spot > 0 else 0
             quality_contracts.append({
                 "symbol": s['symbol'],
                 "platform": "Binance",
@@ -565,6 +619,8 @@ async def quick_scan(params: QuickScanParams = None):
                 "vega": round(bs_greeks_binance.get("vega", 0), 4),
                 "iv": round(iv, 1),
                 "open_interest": round(oi, 0),
+                "breakeven": round(be_b, 1),
+                "breakeven_pct": round(be_pct_b, 2),
                 "distance_spot_pct": round(dist, 1),
             })
 
@@ -625,7 +681,8 @@ async def quick_scan(params: QuickScanParams = None):
         "dvol_interpretation": dvol_data.get("interpretation", ""),
         "dvol_percentile_7d": dvol_data.get("percentile_7d", None),
         "large_trades_count": large_trades_count,
-        "large_trades_details": large_trades[:20]
+        "large_trades_details": large_trades[:20],
+        "data_errors": data_errors
     }
 
 

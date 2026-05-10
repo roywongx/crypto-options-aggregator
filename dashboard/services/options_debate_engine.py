@@ -359,20 +359,30 @@ def _bull_analyst(md: Dict[str, Any]) -> Dict[str, Any]:
         points.append("极端行情，不建议新建 Sell Put")
 
     # 分析合约 — contracts 没有 direction 字段，所有 Put 合约都是潜在 Sell Put 标的
+    dvol_current = dvol.get("current", 50)
     put_contracts = [c for c in contracts
                      if c.get("option_type", "").upper() in ("PUT", "P")
                      and c.get("premium_usd", 0) > 0
-                     and c.get("dte", 999) >= 3]  # 过滤短期到期合约，避免 APR 夸张失真
+                     and c.get("dte", 999) >= 14]  # DTE≥14 过滤短期到期合约，避免 365/DTE 乘数膨胀
     if put_contracts:
         # win_rate 从 delta 计算（contracts 不含此字段）
-        # 对于期权卖方: 胜率 ≈ 1 - |delta|（|delta| 表示到期实值的近似概率）
-        # 例: |delta|=0.40 → 40%实值概率 → 卖方60%胜率，公式正确
         for c in put_contracts:
             c["_win_rate"] = 1.0 - abs(c.get("delta", 0.5))
-        avg_apr = sum(c.get("apr", 0) for c in put_contracts) / len(put_contracts)
+            # APR 上限 = DVOL × 3，防止极端短期合约 APR 拉高中位数
+            cap = dvol_current * 3
+            if c.get("apr", 0) > cap:
+                c["apr"] = cap
+        # 用中位数替代均值，消除极端短期合约对平均值的拉偏
+        aprs = sorted(c.get("apr", 0) for c in put_contracts)
+        n = len(aprs)
+        if n % 2 == 1:
+            avg_apr = aprs[n // 2]
+        else:
+            avg_apr = (aprs[n // 2 - 1] + aprs[n // 2]) / 2
         avg_win = sum(c["_win_rate"] * 100 for c in put_contracts) / len(put_contracts)
-        # 选最优合约：平衡 APR 与胜率，APR 超过 500% 后边际价值递减
-        best = max(put_contracts, key=lambda c: min(c.get("apr", 0), 500) * c.get("_win_rate", 0)**2)
+        # 选最优合约：平衡 APR 与胜率，APR 超过 DVOL×3 后边际价值递减
+        cap = dvol_current * 3
+        best = max(put_contracts, key=lambda c: min(c.get("apr", 0), cap) * c.get("_win_rate", 0)**2)
         best_apr = best.get("apr", 0)
         best_win = best.get("_win_rate", 0)
         extra["avg_apr"] = round(avg_apr, 1)

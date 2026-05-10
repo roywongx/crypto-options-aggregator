@@ -195,6 +195,7 @@ class LLMAnalystEngine:
             ctx["errors"].append(f"iv_term: {e}")
 
         # 策略引擎结果 — 使用 UnifiedStrategyEngine（与推荐面板一致）
+        # 同时扫描 PUT 和 CALL，避免 LLM 只看到单边推荐导致"99%卖出"偏差
         try:
             from services.unified_strategy_engine import (
                 UnifiedStrategyEngine, StrategyParams, StrategyMode, OptionType
@@ -203,31 +204,52 @@ class LLMAnalystEngine:
             dvol_val = dvol.get("current", 50)
             # DVOL 自适应参数调整
             if dvol_val > 70:
-                params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.PUT,
+                put_params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.PUT,
                     reserve_capital=100000, target_max_delta=0.20, min_dte=7, max_dte=21,
-                    margin_ratio=0.22, min_apr=25.0, put_count=5)
+                    margin_ratio=0.22, min_apr=25.0, put_count=3)
+                call_params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.CALL,
+                    reserve_capital=50000, target_max_delta=0.20, min_dte=7, max_dte=30,
+                    margin_ratio=0.22, min_apr=15.0, put_count=2)
             elif dvol_val > 50:
-                params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.PUT,
+                put_params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.PUT,
                     reserve_capital=100000, target_max_delta=0.30, min_dte=14, max_dte=35,
-                    margin_ratio=0.20, min_apr=15.0, put_count=5)
+                    margin_ratio=0.20, min_apr=15.0, put_count=3)
+                call_params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.CALL,
+                    reserve_capital=50000, target_max_delta=0.30, min_dte=14, max_dte=45,
+                    margin_ratio=0.20, min_apr=10.0, put_count=2)
             else:
-                params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.PUT,
+                put_params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.PUT,
                     reserve_capital=100000, target_max_delta=0.40, min_dte=7, max_dte=60,
-                    margin_ratio=0.18, min_apr=8.0, put_count=5)
+                    margin_ratio=0.18, min_apr=8.0, put_count=3)
+                call_params = StrategyParams(currency=currency, mode=StrategyMode.NEW, option_type=OptionType.CALL,
+                    reserve_capital=50000, target_max_delta=0.40, min_dte=7, max_dte=60,
+                    margin_ratio=0.18, min_apr=5.0, put_count=2)
             ue = UnifiedStrategyEngine()
-            rec = ue.execute(ctx["contracts"], params, ctx["spot"])
-            recs = rec.get("plans", [])
+            # PUT 扫描（Sell Put 卖方推荐）
+            put_rec = ue.execute(ctx["contracts"], put_params, ctx["spot"])
+            put_recs = put_rec.get("plans", [])
+            # CALL 扫描（Buy Call 买方推荐）
+            call_rec = ue.execute(ctx["contracts"], call_params, ctx["spot"])
+            call_recs = call_rec.get("plans", [])
             ctx["strategy_summary"] = {
                 "engine": "UnifiedStrategyEngine",
-                "mode": rec.get("mode", "new"),
-                "params": rec.get("params", {}),
-                "total_scanned": rec.get("meta", {}).get("total_contracts_scanned", 0),
-                "plans_found": rec.get("meta", {}).get("plans_found", 0),
-                "top_recommendations": [
+                "mode": "new",
+                "total_scanned": put_rec.get("meta", {}).get("total_contracts_scanned", 0) + call_rec.get("meta", {}).get("total_contracts_scanned", 0),
+                "put_scanned": put_rec.get("meta", {}).get("total_contracts_scanned", 0),
+                "call_scanned": call_rec.get("meta", {}).get("total_contracts_scanned", 0),
+                "put_plans_found": put_rec.get("meta", {}).get("plans_found", 0),
+                "call_plans_found": call_rec.get("meta", {}).get("plans_found", 0),
+                "put_recommendations": [
                     {"strike": r["strike"], "premium": r["premium_usd"], "apr": r["metrics"]["apr"],
                      "score": r["score"], "win_rate": r["metrics"]["win_rate"],
                      "max_loss": r["metrics"]["max_loss"]}
-                    for r in recs[:3]
+                    for r in put_recs[:3]
+                ],
+                "call_recommendations": [
+                    {"strike": r["strike"], "premium": r["premium_usd"], "apr": r["metrics"]["apr"],
+                     "score": r["score"], "win_rate": r["metrics"]["win_rate"],
+                     "max_loss": r["metrics"]["max_loss"]}
+                    for r in call_recs[:3]
                 ],
             }
         except (RuntimeError, ValueError, TypeError, Exception) as e:
@@ -394,9 +416,10 @@ class LLMAnalystEngine:
 
 核心约束：
 1. 你的策略建议必须与规则引擎的综合研判方向一致。规则引擎判定为"观望"时，不得建议高风险的主动策略（如 Short Strangle/裸卖空）。
-2. 如果规则引擎判定为"观望或小仓位操作"，你的建议只能是小仓位 Sell Put 或 Buy Call，风险暴露不超过保证金的 20%。
-3. 最大痛点（Max Pain）是关键参考位 — 行权价设在痛点下方=跌破支撑时亏损；行权价设在痛点上方=更安全但权利金更低。需明确解释你的行权价选择理由。
-4. 如果 PCR < 0.5（看涨主导）但大单卖出占主导，需要解释这一矛盾并说明你的判断依据。
+2. 仓位建议与风险状态挂钩：NORMAL → 可用资金的 50-70%；NEAR_FLOOR → 30-50%；ADVERSE → 15-30%；PANIC → 0-15%。参考 Risk Officer 的 recommended_position_pct 值。
+3. 策略引擎同时提供了 Sell Put 和 Buy Call 推荐，你应综合考虑两边的数据，而非只偏向卖方。如果 Put 端推荐远多于 Call 端（如 >10:1），在 market_assessment 中说明原因（这可能只是数据的自然分布，不一定是异常）。
+4. 最大痛点（Max Pain）是关键参考位 — 行权价设在痛点下方=跌破支撑时亏损；行权价设在痛点上方=更安全但权利金更低。需明确解释你的行权价选择理由。
+5. 如果 PCR < 0.5（看涨主导）但大单卖出占主导，需要解释这一矛盾并说明你的判断依据。
 
 输出要求（必须使用中文）：
 1. market_assessment: 市场整体评估（多空力量对比、关键技术位、波动率体制、趋势判断）
@@ -599,13 +622,25 @@ class LLMAnalystEngine:
         # ============================================================
         strategy = ctx.get("strategy_summary", {})
         if isinstance(strategy, dict):
-            recs = strategy.get("top_recommendations", [])
-            if recs:
-                parts.append("策略引擎推荐 TOP3:")
-                for r in recs:
+            put_recs = strategy.get("put_recommendations", [])
+            call_recs = strategy.get("call_recommendations", [])
+            parts.append(
+                f"策略引擎扫描: PUT={strategy.get('put_scanned', 0)}个 推荐{len(put_recs)}个, "
+                f"CALL={strategy.get('call_scanned', 0)}个 推荐{len(call_recs)}个"
+            )
+            if put_recs:
+                parts.append("Sell Put 推荐 TOP3:")
+                for r in put_recs:
                     parts.append(
                         f"  Strike=${r.get('strike', 0):,.0f} Premium=${r.get('premium', 0):,.0f} "
-                        f"APR={r.get('apr', 0):.1f}% Score={r.get('score', 0):.3f} → {r.get('rec', '')}"
+                        f"APR={r.get('apr', 0):.1f}% Score={r.get('score', 0):.3f}"
+                    )
+            if call_recs:
+                parts.append("Buy Call 推荐 TOP3:")
+                for r in call_recs:
+                    parts.append(
+                        f"  Strike=${r.get('strike', 0):,.0f} Premium=${r.get('premium', 0):,.0f} "
+                        f"APR={r.get('apr', 0):.1f}% Score={r.get('score', 0):.3f}"
                     )
 
         return "\n".join(parts)

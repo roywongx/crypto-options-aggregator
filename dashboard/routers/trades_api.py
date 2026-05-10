@@ -153,7 +153,10 @@ async def get_wind_analysis(
     buy_ratio = total_buy_notional / total_notional if total_notional > 0 else 0.5
     dominant = "看跌保护" if bp_ratio > 0.3 else ("Covered Call偏好" if sc_ratio > 0.3 else "中性")
 
-    # PCR = Put成交量 / Call成交量
+    # PCR = Put总名义价值 / Call总名义价值 (notional-based，含买卖双向)
+    # 注意：PCR 衡量看跌/看涨期权交易量之比，与 buy/sell 净流向是正交指标
+    # PCR>1 = 看跌期权交易更活跃（不代表净卖出），buy>sell = 净买入方向
+    # 两者可以同时出现：PCR 高 + 净买入 = 机构通过买入 Put 对冲多头
     put_vol = summary_data['buy_put_notional'] + summary_data['sell_put_notional']
     call_vol = summary_data['buy_call_notional'] + summary_data['sell_call_notional']
     pcr = put_vol / call_vol if call_vol > 0 else 1.0

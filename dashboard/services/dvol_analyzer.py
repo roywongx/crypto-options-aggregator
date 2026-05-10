@@ -20,9 +20,9 @@ _dvol_cache_ttl = 300  # 5分钟缓存
 from services.shared_calculations import norm_cdf as _norm_cdf_approx
 
 
-def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type: str = 'P') -> float:
+def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type: str = 'P', risk_free_rate: float = 0.05) -> float:
     """使用 Black-Scholes 计算期权 Delta
-    
+
     优先使用 scipy.stats.norm.cdf，回退到 Abramowitz & Stegun 近似（精度 7.5e-8）
     """
     if spot is None or strike is None or dte is None or iv is None:
@@ -33,7 +33,7 @@ def calc_delta_bs(strike: float, spot: float, iv: float, dte: float, option_type
     if t <= 0.01:
         t = 0.01
     iv_decimal = iv / 100.0
-    d1 = (math.log(spot / strike) + (iv_decimal ** 2 / 2) * t) / (iv_decimal * math.sqrt(t))
+    d1 = (math.log(spot / strike) + (risk_free_rate + iv_decimal ** 2 / 2) * t) / (iv_decimal * math.sqrt(t))
     try:
         from scipy.stats import norm
         nd1 = norm.cdf(d1)
