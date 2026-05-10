@@ -398,14 +398,14 @@ class LLMAnalystEngine:
 3. 最大痛点（Max Pain）是关键参考位 — 行权价设在痛点下方=跌破支撑时亏损；行权价设在痛点上方=更安全但权利金更低。需明确解释你的行权价选择理由。
 4. 如果 PCR < 0.5（看涨主导）但大单卖出占主导，需要解释这一矛盾并说明你的判断依据。
 
-输出要求：
+输出要求（必须使用中文）：
 1. market_assessment: 市场整体评估（多空力量对比、关键技术位、波动率体制、趋势判断）
 2. strategy_recommendation: 策略建议（具体操作类型、行权价选择理由、建议DTE、与规则引擎方向的一致性说明）
 3. risk_warning: 风险提示（需要关注的风险因素、最大亏损情景）
 4. confidence: 信心度（0-100，基于数据完整性和信号一致性）
 5. rule_engine_alignment: 与规则引擎的一致性说明（"完全一致"/"方向一致但更激进"/"方向一致但更保守"/"存在分歧，理由:..."）
 
-请严格返回 JSON 格式，不要添加其他文字。"""
+请严格返回 JSON 格式，所有文本字段必须使用中文，不要添加其他文字。"""
 
         data_summary = self._build_data_summary(context)
         rule_summary = self._build_rule_summary(rule_reports)
@@ -866,16 +866,16 @@ class LLMAnalystEngine:
         # Bull Agent
         bull_prompt = [
             {"role": "system", "content": """你是一位看多分析师。基于全量市场数据和综合分析报告，构建最强的看多论点。
-返回 JSON:
-{"bullish_case": "看多核心论点", "key_drivers": ["驱动因素1", ...], "target_scenarios": ["目标价位1", ...], "confidence": 0-100}"""},
+返回 JSON（所有文本字段必须使用中文）:
+{"bullish_case": "看多核心论点（中文）", "key_drivers": ["驱动因素1（中文）", ...], "target_scenarios": ["目标价位1（中文）", ...], "confidence": 0-100}"""},
             {"role": "user", "content": base_context},
         ]
 
         # Bear Agent
         bear_prompt = [
             {"role": "system", "content": """你是一位看空分析师。基于全量市场数据和综合分析报告，构建最强的看空论点。
-返回 JSON:
-{"bearish_case": "看空核心论点", "key_risks": ["风险因素1", ...], "downside_scenarios": ["下行目标1", ...], "confidence": 0-100}"""},
+返回 JSON（所有文本字段必须使用中文）:
+{"bearish_case": "看空核心论点（中文）", "key_risks": ["风险因素1（中文）", ...], "downside_scenarios": ["下行目标1（中文）", ...], "confidence": 0-100}"""},
             {"role": "user", "content": base_context},
         ]
 
@@ -934,8 +934,8 @@ class LLMAnalystEngine:
 
         judge_prompt = [
             {"role": "system", "content": """你是辩论裁判。评估多空双方论点，给出裁决。
-返回 JSON:
-{"judge_verdict": "裁决摘要", "winner": "bull|bear|draw", "bull_confidence": 0-100, "bear_confidence": 0-100, "reasoning": "裁判理由"}"""},
+返回 JSON（所有文本字段必须使用中文）:
+{"judge_verdict": "裁决摘要（中文）", "winner": "bull|bear|draw", "bull_confidence": 0-100, "bear_confidence": 0-100, "reasoning": "裁判理由（中文）"}"""},
             {"role": "user", "content": judge_context},
         ]
 
@@ -1345,7 +1345,7 @@ class LLMAnalystEngine:
         det_result = self._deterministic_audit(context, rule_reports)
 
         # === Layer 2: LLM 深度分析（可选，失败时静默回退）===
-        system_prompt = """你是数据质量审计师。审查以下加密货币期权分析数据，找出异常。
+        system_prompt = """你是数据质量审计师。审查以下加密货币期权分析数据，找出异常。所有输出必须使用中文。
 
 检查维度：
 1. 数据源间一致性：DVOL vs IV、链上信号 vs 衍生品信号、价格 vs 成交量
@@ -1353,10 +1353,10 @@ class LLMAnalystEngine:
 3. 数据完整性：是否有缺失字段、数据是否过期
 4. 前端展示一致性：策略引擎输出 vs 原始数据是否匹配
 
-输出纯 JSON（不要包含任何其他文字）：
+输出纯 JSON（所有文本字段必须使用中文，不要包含任何其他文字）：
 {
-  "anomalies": [...],
-  "logic_issues": [...],
+  "anomalies": [{"source": "来源（中文）", "description": "异常描述（中文）", "severity": "critical|warning|info", "suggestion": "建议（中文）"}],
+  "logic_issues": [{"component": "组件名（中文）", "description": "问题描述（中文）", "severity": "critical|warning|info", "suggestion": "建议（中文）"}],
   "data_quality_score": 0-100
 }"""
 
@@ -1447,6 +1447,13 @@ class LLMAnalystEngine:
                         parsed["logic_issues"] = []
                     if not isinstance(parsed.get("data_quality_score"), (int, float)):
                         parsed["data_quality_score"] = 0
+                    # 规范化 text 字段：防止 LLM 返回嵌套对象
+                    for _list_key in ("anomalies", "logic_issues"):
+                        for _item in parsed.get(_list_key, []):
+                            if isinstance(_item, dict):
+                                for _tk in ("description", "suggestion", "source", "component"):
+                                    if isinstance(_item.get(_tk), dict):
+                                        _item[_tk] = json.dumps(_item[_tk], ensure_ascii=False)
                     parsed["success"] = True
                     llm_result = parsed
                 else:

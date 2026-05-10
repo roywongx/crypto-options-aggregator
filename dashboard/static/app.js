@@ -4249,6 +4249,7 @@ function renderLLMAudit(audit) {
     if (anomalies.length === 0 && issues.length === 0) {
         html += '<div class="text-[#149e61] text-sm"><i class="fas fa-check-circle mr-1"></i>未发现数据异常 — 所有数据源健康</div>';
     } else {
+        const toText = (v) => typeof v === 'object' && v !== null ? JSON.stringify(v, null, 2) : String(v || '');
         for (const a of anomalies) {
             const sevColors = { critical: 'red', warning: 'yellow', info: 'blue' };
             const sevIcons = { critical: 'exclamation-triangle', warning: 'exclamation-circle', info: 'info-circle' };
@@ -4256,8 +4257,8 @@ function renderLLMAudit(audit) {
             const icon = sevIcons[a.severity] || 'info-circle';
             html += `<div class="flex items-start gap-2 p-2 rounded bg-${color}-900/20 border border-${color}-500/20 text-sm">`;
             html += `<i class="fas fa-${icon} text-${color}-400 mt-0.5"></i>`;
-            html += `<div><span class="text-${color}-300 font-medium">[${safeHTML(a.source || '')}]</span> ${safeHTML(a.description || '')}`;
-            if (a.suggestion) html += `<div class="text-xs text-gray-400 mt-1">建议: ${safeHTML(a.suggestion)}</div>`;
+            html += `<div><span class="text-${color}-300 font-medium">[${safeHTML(toText(a.source || ''))}]</span> ${safeHTML(toText(a.description || ''))}`;
+            if (a.suggestion) html += `<div class="text-xs text-gray-400 mt-1">建议: ${safeHTML(toText(a.suggestion))}</div>`;
             html += `</div></div>`;
         }
         for (const i of issues) {
@@ -4265,8 +4266,8 @@ function renderLLMAudit(audit) {
             const color = sevColors[i.severity] || 'gray';
             html += `<div class="flex items-start gap-2 p-2 rounded bg-${color}-900/20 border border-${color}-500/20 text-sm">`;
             html += `<i class="fas fa-cog text-${color}-400 mt-0.5"></i>`;
-            html += `<div><span class="text-${color}-300 font-medium">[${safeHTML(i.component || '')}]</span> ${safeHTML(i.description || '')}`;
-            if (i.suggestion) html += `<div class="text-xs text-gray-400 mt-1">建议: ${safeHTML(i.suggestion)}</div>`;
+            html += `<div><span class="text-${color}-300 font-medium">[${safeHTML(toText(i.component || ''))}]</span> ${safeHTML(toText(i.description || ''))}`;
+            if (i.suggestion) html += `<div class="text-xs text-gray-400 mt-1">建议: ${safeHTML(toText(i.suggestion))}</div>`;
             html += `</div></div>`;
         }
     }
@@ -4290,6 +4291,7 @@ function renderLLMRuleAgents(ruleReports) {
         '\u{1f6e1}️ 风险官': { bg: 'yellow', icon: '\u{1f6e1}️' },
     };
 
+    const toText = (v) => typeof v === 'object' && v !== null ? JSON.stringify(v, null, 2) : String(v || '');
     for (const r of reports) {
         const colors = agentColors[r.name] || { bg: 'gray', icon: '\u{1f916}' };
         const score = r.score || 0;
@@ -4297,13 +4299,13 @@ function renderLLMRuleAgents(ruleReports) {
 
         html += `<div class="card-glass rounded-lg p-3 border-l-4 border-${colors.bg}-500/60">`;
         html += `<div class="flex items-center justify-between mb-2">`;
-        html += `<div class="flex items-center gap-1.5"><span>${colors.icon}</span><span class="text-xs font-semibold">${safeHTML(r.name)}</span></div>`;
+        html += `<div class="flex items-center gap-1.5"><span>${colors.icon}</span><span class="text-xs font-semibold">${safeHTML(toText(r.name))}</span></div>`;
         html += `<span class="text-sm font-bold ${scoreColor}">${score > 0 ? '+' : ''}${score}</span>`;
         html += `</div>`;
-        html += `<div class="text-[10px] text-gray-400 mb-1">${safeHTML(r.verdict || '')} · 置信度 ${r.confidence || 0}%</div>`;
+        html += `<div class="text-[10px] text-gray-400 mb-1">${safeHTML(toText(r.verdict || ''))} · 置信度 ${r.confidence || 0}%</div>`;
         html += `<ul class="text-[10px] text-gray-300 space-y-0.5">`;
         for (const pt of (r.key_points || []).slice(0, 3)) {
-            html += `<li>• ${safeHTML(pt)}</li>`;
+            html += `<li>• ${safeHTML(toText(pt))}</li>`;
         }
         html += `</ul></div>`;
     }
